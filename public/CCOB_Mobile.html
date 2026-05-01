@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>CC Ops Mobile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --navy:   #0e1520;
+  --navy2:  #131e30;
+  --navy3:  #1a2744;
+  --teal:   #00c9b1;
+  --green:  #22c55e;
+  --red:    #ef4444;
+  --amber:  #f59e0b;
+  --white:  #f0f4ff;
+  --muted:  #4a5a7a;
+  --border: rgba(255,255,255,0.07);
+  --card:   rgba(255,255,255,0.03);
+  --nav-h:  62px;
+  --hdr-h:  58px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%; overflow: hidden;
+  background: var(--navy);
+  font-family: 'Barlow Condensed', sans-serif;
+  color: var(--white);
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ── HEADER ── */
+#hdr {
+  position: fixed; top: 0; left: 0; right: 0; height: var(--hdr-h);
+  background: var(--navy); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 16px; z-index: 100;
+}
+.hdr-left { display: flex; align-items: center; gap: 10px; }
+.hdr-logo { width: 42px; height: 42px; border-radius: 50%; border: 2px solid var(--teal); object-fit: cover; box-shadow: 0 0 10px rgba(0,201,177,0.25); }
+.hdr-brand { font-family: 'Bebas Neue'; font-size: 22px; letter-spacing: 0.1em; line-height: 1; }
+.hdr-sub   { font-family: 'IBM Plex Mono'; font-size: 9px; color: var(--teal); letter-spacing: 0.2em; text-transform: uppercase; }
+#hdr-clock { font-family: 'IBM Plex Mono'; font-size: 14px; font-weight: 600; text-align: right; }
+#hdr-date  { font-family: 'IBM Plex Mono'; font-size: 9px; color: var(--muted); text-align: right; }
+
+/* ── BOTTOM NAV ── */
+#bnav {
+  position: fixed; bottom: 0; left: 0; right: 0; height: var(--nav-h);
+  background: var(--navy2); border-top: 1px solid var(--border);
+  display: flex; z-index: 100;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.btab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; padding: 6px 4px; cursor: pointer; color: var(--muted);
+  -webkit-tap-highlight-color: transparent; transition: color 0.15s; user-select: none;
+}
+.btab.active { color: var(--teal); }
+.btab-icon  { font-size: 21px; line-height: 1; }
+.btab-label { font-family: 'IBM Plex Mono'; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
+
+/* ── MAIN SCROLL AREA ── */
+#main {
+  position: fixed; top: var(--hdr-h); bottom: var(--nav-h); left: 0; right: 0;
+  overflow: hidden;
+}
+.panel {
+  position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden;
+  padding: 14px 14px 0; display: none; -webkit-overflow-scrolling: touch;
+}
+.panel.active { display: block; }
+
+/* ── CARD ── */
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 16px; margin-bottom: 12px;
+}
+.card-label {
+  font-family: 'IBM Plex Mono'; font-size: 9px; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 10px;
+}
+
+/* ── DID ROW ── */
+.did-row {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 16px; margin-bottom: 12px;
+}
+.did-label { font-family: 'IBM Plex Mono'; font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); }
+.did-val   { font-family: 'Bebas Neue'; font-size: 22px; letter-spacing: 0.1em; transition: color 0.3s; }
+.did-val.up   { color: var(--teal); }
+.did-val.down { color: var(--amber); }
+
+/* ── CC CARD ── */
+.cc-card { padding-left: 0 !important; position: relative; overflow: hidden; }
+.cc-card.up   { border-color: rgba(0,201,177,0.3); }
+.cc-card.down { border-color: rgba(239,68,68,0.35); }
+.cc-accent { position: absolute; top: 0; left: 0; bottom: 0; width: 4px; }
+.cc-card.up   .cc-accent { background: linear-gradient(180deg, var(--teal), var(--green)); }
+.cc-card.down .cc-accent { background: linear-gradient(180deg, var(--amber), var(--red)); }
+.cc-inner { padding-left: 12px; }
+.cc-head  { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.cc-name  { font-family: 'Bebas Neue'; font-size: 24px; letter-spacing: 0.08em; line-height: 1; }
+.cc-loc   { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-top: 1px; }
+
+/* ── IOS TOGGLE ── */
+.tog-wrap { display: flex; align-items: center; gap: 9px; }
+.tog-lbl  { font-family: 'IBM Plex Mono'; font-size: 12px; font-weight: 600; }
+.tog-lbl.up   { color: var(--green); }
+.tog-lbl.down { color: var(--red); }
+.ios-tog  { position: relative; width: 52px; height: 30px; flex-shrink: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.ios-tog input { opacity: 0; width: 0; height: 0; position: absolute; }
+.ios-track {
+  position: absolute; inset: 0; border-radius: 15px;
+  background: rgba(239,68,68,0.25); border: 1.5px solid rgba(239,68,68,0.5);
+  transition: all 0.25s;
+}
+.ios-track::before {
+  content: ''; position: absolute; width: 22px; height: 22px; left: 3px; top: 3px;
+  border-radius: 50%; background: var(--white); transition: transform 0.25s;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+.ios-tog input:checked + .ios-track { background: rgba(0,201,177,0.2); border-color: var(--teal); }
+.ios-tog input:checked + .ios-track::before { transform: translateX(22px); }
+
+/* ── CANNED / MSG INPUTS ── */
+.cc-select, .cc-textarea {
+  width: 100%; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--white); font-family: 'Barlow Condensed'; font-size: 15px;
+  padding: 8px 10px; margin-top: 7px;
+}
+.cc-select { height: 36px; }
+.cc-textarea { resize: none; }
+.cc-select:focus, .cc-textarea:focus { outline: none; border-color: rgba(0,201,177,0.35); }
+
+/* ── DID COUNT ── */
+.did-count-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 7px; margin-top: 2px;
+}
+.did-count-label {
+  font-family: 'IBM Plex Mono'; font-size: 9px; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--muted);
+}
+.did-count-val {
+  font-family: 'Bebas Neue'; font-size: 18px; letter-spacing: 0.08em; color: var(--teal);
+}
+
+/* ── SYS ROWS ── */
+.sys-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 0; }
+.sys-row + .sys-row { border-top: 1px solid var(--border); }
+.sys-name { font-size: 16px; font-weight: 600; }
+.sys-sub  { font-size: 11px; color: var(--muted); }
+
+/* ── ORB ── */
+.orb { width: 9px; height: 9px; border-radius: 50%; }
+.orb.up   { background: var(--green); box-shadow: 0 0 8px rgba(34,197,94,0.8); animation: breathe-g 3s ease-in-out infinite; }
+.orb.down { background: var(--red);   box-shadow: 0 0 8px rgba(239,68,68,0.8);  animation: pulse-r 1s ease-in-out infinite; }
+@keyframes breathe-g { 0%,100%{box-shadow:0 0 5px rgba(34,197,94,0.5)} 50%{box-shadow:0 0 16px rgba(34,197,94,1)} }
+@keyframes pulse-r   { 0%,100%{box-shadow:0 0 5px rgba(239,68,68,0.6)} 50%{box-shadow:0 0 16px rgba(239,68,68,1)} }
+
+/* ── SYSTEMS MSG ── */
+.sys-msg-ta {
+  width: 100%; min-height: 68px; background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border); border-radius: 8px;
+  color: var(--white); font-family: 'Barlow Condensed'; font-size: 16px;
+  padding: 10px 12px; resize: none; margin-top: 10px;
+}
+.sys-msg-ta:focus { outline: none; border-color: rgba(245,158,11,0.4); }
+
+/* ── SMS ── */
+.chip {
+  padding: 7px 13px; border-radius: 20px; font-size: 13px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--border); background: rgba(255,255,255,0.04);
+  -webkit-tap-highlight-color: transparent; transition: all 0.12s; user-select: none;
+  white-space: nowrap;
+}
+.chip.sel     { background: rgba(0,201,177,0.15); border-color: var(--teal); color: var(--teal); }
+.chip.sel-alt { background: rgba(245,158,11,0.15); border-color: var(--amber); color: var(--amber); }
+.chip-wrap { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.sms-ta {
+  width: 100%; min-height: 88px; background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border); border-radius: 8px;
+  color: var(--white); font-family: 'Barlow Condensed'; font-size: 16px;
+  padding: 10px 12px; resize: none;
+}
+.sms-ta:focus { outline: none; border-color: rgba(0,201,177,0.4); }
+.char-ct { font-family: 'IBM Plex Mono'; font-size: 10px; color: var(--muted); text-align: right; margin-top: 4px; }
+.char-ct.warn { color: var(--amber); }
+
+.num-input {
+  width: 100%; background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--white); font-family: 'Barlow Condensed'; font-size: 16px;
+  padding: 10px 12px;
+}
+.num-input:focus { outline: none; border-color: rgba(0,201,177,0.35); }
+
+/* ── BUTTONS ── */
+.btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; padding: 14px; border-radius: 8px; border: none;
+  font-family: 'Bebas Neue'; font-size: 18px; letter-spacing: 0.1em;
+  cursor: pointer; -webkit-tap-highlight-color: transparent; transition: opacity 0.12s;
+}
+.btn:active { opacity: 0.75; }
+.btn:disabled { opacity: 0.4; pointer-events: none; }
+.btn-primary   { background: var(--teal); color: var(--navy); }
+.btn-danger    { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.4); color: var(--red); }
+.btn-secondary { background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--white); }
+.btn-sm { padding: 7px 14px; font-size: 14px; width: auto; border-radius: 6px; }
+
+/* ── AGENTS ── */
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 9px; margin-bottom: 12px; }
+.stat-box { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 8px; text-align: center; }
+.stat-num  { font-family: 'Bebas Neue'; font-size: 38px; line-height: 1; }
+.stat-num.t { color: var(--teal); }
+.stat-num.a { color: var(--amber); }
+.stat-lbl  { font-family: 'IBM Plex Mono'; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
+
+.atabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.atab {
+  flex: 1; padding: 8px; text-align: center; border-radius: 6px; cursor: pointer;
+  font-size: 14px; font-weight: 600; letter-spacing: 0.04em;
+  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  transition: all 0.15s; -webkit-tap-highlight-color: transparent;
+}
+.atab.active { background: rgba(0,201,177,0.1); border-color: var(--teal); color: var(--teal); }
+
+.agent-list { display: flex; flex-direction: column; gap: 8px; }
+.agent-item {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 14px;
+}
+.agent-item.sel { background: rgba(0,201,177,0.05); border-color: rgba(0,201,177,0.3); }
+.agent-cb   { width: 20px; height: 20px; accent-color: var(--teal); flex-shrink: 0; cursor: pointer; }
+.agent-name { font-size: 16px; font-weight: 600; }
+.agent-cc   { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.agent-time { font-family: 'IBM Plex Mono'; font-size: 9px; color: var(--muted); white-space: nowrap; }
+
+.bulk-bar {
+  position: sticky; bottom: 0; margin: 8px -14px 0;
+  background: var(--navy2); border-top: 1px solid var(--border);
+  padding: 10px 14px; display: none; gap: 8px; align-items: center;
+}
+.bulk-bar.vis { display: flex; }
+.bulk-ct { flex: 1; font-size: 13px; color: var(--muted); }
+
+/* ── LOG ── */
+.log-entry { padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: flex-start; }
+.log-dot   { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+.log-dot.ok    { background: var(--green); }
+.log-dot.warn  { background: var(--amber); }
+.log-dot.error { background: var(--red); }
+.log-dot.info  { background: var(--teal); }
+.log-msg  { flex: 1; font-size: 14px; line-height: 1.4; }
+.log-time { font-family: 'IBM Plex Mono'; font-size: 9px; color: var(--muted); flex-shrink: 0; }
+
+/* ── SECTION HEADER ── */
+.sec-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.sec-title { font-family: 'Bebas Neue'; font-size: 22px; letter-spacing: 0.1em; }
+.sec-sub   { font-family: 'IBM Plex Mono'; font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+
+/* ── TOAST ── */
+#toast {
+  position: fixed; bottom: calc(var(--nav-h) + 12px); left: 12px; right: 12px;
+  background: var(--navy3); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 16px; font-size: 14px; font-weight: 600; z-index: 300;
+  display: none; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+#toast.show { display: block; animation: slidein 0.18s ease; }
+#toast.ok    { border-color: rgba(34,197,94,0.4);  color: var(--green); }
+#toast.warn  { border-color: rgba(245,158,11,0.4); color: var(--amber); }
+#toast.error { border-color: rgba(239,68,68,0.4);  color: var(--red); }
+@keyframes slidein { from{transform:translateY(8px);opacity:0} to{transform:translateY(0);opacity:1} }
+
+/* ── SEND MODAL (bottom sheet) ── */
+#send-modal {
+  position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(4px); display: none; align-items: flex-end;
+}
+#send-modal.open { display: flex; }
+.send-sheet {
+  width: 100%; background: var(--navy2); border: 1px solid var(--border);
+  border-radius: 16px 16px 0 0; padding: 22px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+  animation: sheetup 0.22s ease;
+}
+@keyframes sheetup { from{transform:translateY(100%)} to{transform:translateY(0)} }
+.sheet-title   { font-family: 'Bebas Neue'; font-size: 22px; letter-spacing: 0.1em; margin-bottom: 12px; }
+.sheet-preview {
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px; font-size: 15px; line-height: 1.5;
+  color: rgba(240,244,255,0.8); margin-bottom: 8px;
+}
+.sheet-meta  { font-size: 12px; color: var(--muted); margin-bottom: 16px; }
+.sheet-btns  { display: flex; gap: 10px; }
+.sheet-btns .btn { flex: 1; }
+
+/* ── SPINNER ── */
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.2); border-top-color: var(--teal); border-radius: 50%; animation: sp 0.7s linear infinite; }
+@keyframes sp { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div id="hdr">
+  <div class="hdr-left">
+    <img class="hdr-logo" src="/al-logo.png" alt="AL">
+    <div>
+      <div class="hdr-brand">CC Ops</div>
+      <div class="hdr-sub">Operations</div>
+    </div>
+  </div>
+  <div>
+    <div id="hdr-clock">—</div>
+    <div id="hdr-date">—</div>
+  </div>
+</div>
+
+<!-- MAIN PANELS -->
+<div id="main">
+
+  <!-- ══ STATUS ══ -->
+  <div class="panel active" id="panel-status">
+    <!-- DID Global Toggle -->
+    <div class="did-row">
+      <div>
+        <div class="did-label">DID Status</div>
+        <div class="did-val up" id="did-val">DIDs Available</div>
+      </div>
+      <label class="ios-tog">
+        <input type="checkbox" id="did-chk" checked onchange="handleDID()">
+        <span class="ios-track"></span>
+      </label>
+    </div>
+
+    <!-- Manual Slack Fire Buttons -->
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="btn btn-danger" style="flex:1;padding:10px;font-size:14px" onclick="fireSlackWorkflow('unavail')">🔴 DIDs Unavailable</button>
+      <button class="btn btn-primary" style="flex:1;padding:10px;font-size:14px" onclick="fireSlackWorkflow('avail')">🟢 DIDs Available</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="btn btn-primary" style="flex:1;padding:10px;font-size:14px" onclick="fireSlackWorkflow('savvy')">🟢 Savvy Phone Active</button>
+      <button class="btn btn-danger"  style="flex:1;padding:10px;font-size:14px" onclick="fireSlackWorkflow('savvyInactive')">🔴 Savvy Phone Inactive</button>
+    </div>
+
+    <!-- Savvy Phone -->
+    <div class="card cc-card up" id="cc-card-savvy">
+      <div class="cc-accent"></div>
+      <div class="cc-inner">
+        <div class="cc-head">
+          <div>
+            <div class="cc-name">Savvy Phone</div>
+            <div class="cc-loc">Stafford · Bandwidth</div>
+          </div>
+          <div class="tog-wrap">
+            <span class="tog-lbl up" id="cc-lbl-savvy">UP</span>
+            <label class="ios-tog">
+              <input type="checkbox" id="cc-chk-savvy" checked onchange="handleCC('savvy')">
+              <span class="ios-track"></span>
+            </label>
+          </div>
+        </div>
+        <div class="did-count-row">
+          <span class="did-count-label">DIDs</span>
+          <span class="did-count-val" id="did-count-savvy">—</span>
+        </div>
+        <select class="cc-select" id="canned-savvy" onchange="fillCanned('savvy',this.value)">
+          <option value="">— Canned response —</option>
+        </select>
+        <textarea class="cc-textarea" id="msg-savvy" rows="2" placeholder="Status message…" oninput="handleMsg('savvy',this.value)"></textarea>
+      </div>
+    </div>
+
+    <!-- Mitel Classic -->
+    <div class="card cc-card up" id="cc-card-mitel">
+      <div class="cc-accent"></div>
+      <div class="cc-inner">
+        <div class="cc-head">
+          <div>
+            <div class="cc-name">Mitel Classic</div>
+            <div class="cc-loc">Mitel Location · Bandwidth</div>
+          </div>
+          <div class="tog-wrap">
+            <span class="tog-lbl up" id="cc-lbl-mitel">UP</span>
+            <label class="ios-tog">
+              <input type="checkbox" id="cc-chk-mitel" checked onchange="handleCC('mitel')">
+              <span class="ios-track"></span>
+            </label>
+          </div>
+        </div>
+        <div class="did-count-row">
+          <span class="did-count-label">DIDs</span>
+          <span class="did-count-val" id="did-count-mitel">—</span>
+        </div>
+        <select class="cc-select" id="canned-mitel" onchange="fillCanned('mitel',this.value)">
+          <option value="">— Canned response —</option>
+        </select>
+        <textarea class="cc-textarea" id="msg-mitel" rows="2" placeholder="Status message…" oninput="handleMsg('mitel',this.value)"></textarea>
+      </div>
+    </div>
+
+    <!-- Systems -->
+    <div class="card">
+      <div class="card-label">Systems</div>
+      <div class="sys-row">
+        <div>
+          <div class="sys-name">Mobile App</div>
+          <div class="sys-sub">iOS · Android</div>
+        </div>
+        <div class="tog-wrap">
+          <div class="orb up" id="orb-mobile"></div>
+          <span class="tog-lbl up" id="cc-lbl-mobile" style="font-size:11px">UP</span>
+          <label class="ios-tog">
+            <input type="checkbox" id="cc-chk-mobile" checked onchange="handleCC('mobile')">
+            <span class="ios-track"></span>
+          </label>
+        </div>
+      </div>
+      <div class="sys-row">
+        <div>
+          <div class="sys-name">Integrations</div>
+          <div class="sys-sub">API · Third-Party</div>
+        </div>
+        <div class="tog-wrap">
+          <div class="orb up" id="orb-integrations"></div>
+          <span class="tog-lbl up" id="cc-lbl-integrations" style="font-size:11px">UP</span>
+          <label class="ios-tog">
+            <input type="checkbox" id="cc-chk-integrations" checked onchange="handleCC('integrations')">
+            <span class="ios-track"></span>
+          </label>
+        </div>
+      </div>
+      <div>
+        <div class="card-label" style="margin-top:12px;margin-bottom:4px">Systems Notice</div>
+        <textarea class="sys-msg-ta" id="sys-msg" placeholder="Notice displayed on Pulse board…" oninput="handleSysMsg(this.value)"></textarea>
+      </div>
+    </div>
+    <div style="height:14px"></div>
+  </div>
+
+  <!-- ══ SMS ══ -->
+  <div class="panel" id="panel-sms">
+    <div class="sec-hdr">
+      <div>
+        <div class="sec-title">Send SMS</div>
+        <div class="sec-sub" id="sms-sub">Select recipients and compose</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" id="btn-rgrp" onclick="fetchGroups()" style="font-family:'Barlow Condensed';font-size:14px;letter-spacing:0.01em">↻ Groups</button>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Alert Type</div>
+      <div class="chip-wrap" id="alert-chips"><span style="color:var(--muted);font-size:12px">No templates saved</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">EZTexting Groups</div>
+      <div class="chip-wrap" id="group-chips"><span style="color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px"><span class="spin"></span> Loading…</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Team B — SMS.to</div>
+      <div class="chip-wrap">
+        <div class="chip" id="belize-chip" onclick="toggleBelize(this)">Belize Agents</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Individual Number</div>
+      <input type="tel" class="num-input" id="ind-num" placeholder="+1 (555) 000-0000">
+    </div>
+
+    <div class="card">
+      <div class="card-label">Message</div>
+      <textarea class="sms-ta" id="sms-msg" placeholder="Type your message…" oninput="updateCC()"></textarea>
+      <div class="char-ct" id="char-ct">0 / 160</div>
+    </div>
+
+    <button class="btn btn-primary" id="btn-send" onclick="openSendModal()" style="margin-bottom:14px">Send Message</button>
+    <div style="height:14px"></div>
+  </div>
+
+  <!-- ══ AGENTS ══ -->
+  <div class="panel" id="panel-agents">
+    <div class="sec-hdr">
+      <div>
+        <div class="sec-title">Agents</div>
+        <div class="sec-sub" id="agent-sub">—</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="fetchAgents()" style="font-family:'Barlow Condensed';font-size:14px;letter-spacing:0.01em">↻ Refresh</button>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-box"><div class="stat-num t" id="cnt-savvy">—</div><div class="stat-lbl">Savvy</div></div>
+      <div class="stat-box"><div class="stat-num t" id="cnt-mitel">—</div><div class="stat-lbl">Mitel</div></div>
+      <div class="stat-box"><div class="stat-num a" id="cnt-stby">—</div><div class="stat-lbl">Standby</div></div>
+    </div>
+
+    <div class="atabs">
+      <div class="atab active" id="atab-here" onclick="switchAgentTab('here')">Here</div>
+      <div class="atab" id="atab-standby" onclick="switchAgentTab('standby')">Standby</div>
+    </div>
+
+    <div class="agent-list" id="agent-list">
+      <div style="color:var(--muted);font-size:13px;text-align:center;padding:24px">Loading agents…</div>
+    </div>
+
+    <div class="bulk-bar" id="bulk-bar">
+      <span class="bulk-ct" id="bulk-ct">0 selected</span>
+      <button class="btn btn-danger btn-sm" onclick="bulkStandby()" style="font-family:'Barlow Condensed';letter-spacing:0.04em">→ Standby</button>
+      <button class="btn btn-secondary btn-sm" onclick="clearSel()" style="font-family:'Barlow Condensed';letter-spacing:0.04em">Clear</button>
+    </div>
+
+    <div style="height:14px"></div>
+  </div>
+
+  <!-- ══ LOG ══ -->
+  <div class="panel" id="panel-log">
+    <div class="sec-hdr">
+      <div class="sec-title">Activity Log</div>
+      <button class="btn btn-secondary btn-sm" onclick="clearLog()" style="font-family:'Barlow Condensed';font-size:14px;letter-spacing:0.01em">Clear</button>
+    </div>
+    <div id="act-log">
+      <div style="color:var(--muted);font-size:13px;text-align:center;padding:32px">No activity yet</div>
+    </div>
+    <div style="height:14px"></div>
+  </div>
+
+</div>
+
+<!-- BOTTOM NAV -->
+<div id="bnav">
+  <div class="btab active" id="btab-status" onclick="switchTab('status')">
+    <div class="btab-icon">📊</div>
+    <div class="btab-label">Status</div>
+  </div>
+  <div class="btab" id="btab-sms" onclick="switchTab('sms')">
+    <div class="btab-icon">📱</div>
+    <div class="btab-label">SMS</div>
+  </div>
+  <div class="btab" id="btab-agents" onclick="switchTab('agents')">
+    <div class="btab-icon">📋</div>
+    <div class="btab-label">Agents</div>
+  </div>
+  <div class="btab" id="btab-log" onclick="switchTab('log')">
+    <div class="btab-icon">📝</div>
+    <div class="btab-label">Log</div>
+  </div>
+</div>
+
+<!-- SEND MODAL -->
+<div id="send-modal">
+  <div class="send-sheet">
+    <div class="sheet-title">Confirm Send</div>
+    <div class="sheet-preview" id="sheet-preview"></div>
+    <div class="sheet-meta" id="sheet-meta"></div>
+    <div class="sheet-btns">
+      <button class="btn btn-secondary" onclick="closeSendModal()">Cancel</button>
+      <button class="btn btn-primary" id="btn-confirm" onclick="confirmSend()">Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<script>
+const BACKEND = localStorage.getItem('ccob_backendUrl') || window.location.origin;
+const KEY     = localStorage.getItem('ccob_backendKey') || '';
+
+let S = {
+  cc: { savvy: { state:'UP', msg:'' }, mitel: { state:'UP', msg:'' }, mobile: { state:'UP' }, integrations: { state:'UP' } },
+  did: 'UP',
+  sysMsg: '',
+  agents: [], agentTab: 'here', selAgents: new Set(),
+  groups: [], selGroups: new Set(), belize: false,
+  cannedResponses: JSON.parse(localStorage.getItem('ccob_cannedResponses') || '[]'),
+  alertTypes:      JSON.parse(localStorage.getItem('ccob_alertTypes')      || '[]'),
+};
+
+// ── CLOCK ──────────────────────────────────────────────────────────────
+(function tick() {
+  const n = new Date();
+  document.getElementById('hdr-clock').textContent = n.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+  document.getElementById('hdr-date').textContent  = n.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+  setTimeout(tick, 1000);
+})();
+
+// ── TOAST ──────────────────────────────────────────────────────────────
+let _toastT;
+function toast(msg, type='info') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = `show ${type}`;
+  clearTimeout(_toastT); _toastT = setTimeout(()=>{ el.className=''; }, 3000);
+}
+
+// ── LOG ────────────────────────────────────────────────────────────────
+function addLog(msg, type='info') {
+  const el = document.getElementById('act-log');
+  el.querySelector('[style*="No activity"]')?.remove();
+  const t = new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+  const d = document.createElement('div'); d.className='log-entry';
+  d.innerHTML = `<div class="log-dot ${type}"></div><div class="log-msg">${msg}</div><div class="log-time">${t}</div>`;
+  el.prepend(d);
+}
+function clearLog() {
+  document.getElementById('act-log').innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:32px">No activity yet</div>';
+}
+
+// ── TAB NAV ────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.btab').forEach(b => b.classList.remove('active'));
+  document.getElementById(`panel-${tab}`).classList.add('active');
+  document.getElementById(`btab-${tab}`).classList.add('active');
+  if (tab === 'agents' && !S.agents.length) fetchAgents();
+  if (tab === 'sms'    && !S.groups.length) fetchGroups();
+}
+
+// ── API ────────────────────────────────────────────────────────────────
+async function api(path, opts={}) {
+  const r = await fetch(BACKEND + path, {
+    ...opts,
+    headers: { 'Content-Type':'application/json', 'x-api-key': KEY, ...(opts.headers||{}) },
+  });
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  return r.json();
+}
+
+// ── STATUS LOAD ────────────────────────────────────────────────────────
+async function loadStatus() {
+  try {
+    const s = await fetch(BACKEND + '/api/status').then(r => r.json());
+    const m = { savvy: s.savvyPhone, mitel: s.mitelClassic, mobile: s.mobileApp, integrations: s.integrations };
+    Object.entries(m).forEach(([k, v]) => {
+      if (!v) return;
+      S.cc[k].state = v.state || 'UP';
+      if (k === 'savvy' || k === 'mitel') S.cc[k].msg = v.message || '';
+    });
+    S.did    = s.didStatus || 'UP';
+    S.sysMsg = s.systemsMessage || '';
+    renderStatus();
+  } catch (e) { addLog(`Status load error: ${e.message}`, 'error'); }
+}
+
+function renderStatus() {
+  // DID
+  const didUp = S.did === 'UP';
+  document.getElementById('did-chk').checked = didUp;
+  const dv = document.getElementById('did-val');
+  dv.textContent = didUp ? 'DIDs Available' : 'DIDs Unavailable';
+  dv.className   = `did-val ${didUp ? 'up' : 'down'}`;
+
+  // Savvy + Mitel
+  ['savvy','mitel'].forEach(k => {
+    const up = S.cc[k].state === 'UP';
+    document.getElementById(`cc-chk-${k}`).checked = up;
+    document.getElementById(`cc-card-${k}`).className = `card cc-card ${up ? 'up' : 'down'}`;
+    const lbl = document.getElementById(`cc-lbl-${k}`);
+    lbl.textContent = up ? 'UP' : 'DOWN';
+    lbl.className   = `tog-lbl ${up ? 'up' : 'down'}`;
+    const ta = document.getElementById(`msg-${k}`);
+    if (document.activeElement !== ta) ta.value = S.cc[k].msg;
+  });
+
+  // Systems
+  ['mobile','integrations'].forEach(k => {
+    const up = S.cc[k].state === 'UP';
+    document.getElementById(`cc-chk-${k}`).checked = up;
+    document.getElementById(`orb-${k}`).className  = `orb ${up ? 'up' : 'down'}`;
+    const lbl = document.getElementById(`cc-lbl-${k}`);
+    lbl.textContent = up ? 'UP' : 'DOWN';
+    lbl.className   = `tog-lbl ${up ? 'up' : 'down'}`;
+  });
+
+  // Systems msg
+  const ta = document.getElementById('sys-msg');
+  if (document.activeElement !== ta) ta.value = S.sysMsg;
+}
+
+async function syncStatus() {
+  const now = new Date().toISOString();
+  const payload = {
+    savvyPhone:   { state: S.cc.savvy.state,        message: S.cc.savvy.msg,  changedBy:'Mobile', changedAt: now },
+    mitelClassic: { state: S.cc.mitel.state,        message: S.cc.mitel.msg,  changedBy:'Mobile', changedAt: now },
+    mobileApp:    { state: S.cc.mobile.state,       message: '',              changedBy:'Mobile', changedAt: now },
+    integrations: { state: S.cc.integrations.state, message: '',              changedBy:'Mobile', changedAt: now },
+    didStatus:    S.did,
+    systemsMessage: S.sysMsg,
+    publicState:  Object.values(S.cc).every(c => c.state === 'UP') ? 'operational' : 'standby',
+    updatedAt:    now,
+  };
+  try { await api('/api/status', { method:'POST', body: JSON.stringify(payload) }); }
+  catch (e) { addLog(`Sync error: ${e.message}`, 'error'); }
+}
+
+function handleCC(k) {
+  const up = document.getElementById(`cc-chk-${k}`).checked;
+  S.cc[k].state = up ? 'UP' : 'DOWN';
+  renderStatus(); syncStatus();
+  const names = { savvy:'Savvy Phone', mitel:'Mitel Classic', mobile:'Mobile App', integrations:'Integrations' };
+  addLog(`${names[k]} → ${up ? 'UP' : 'DOWN'}`, up ? 'ok' : 'warn');
+  toast(`${names[k]} marked ${up ? 'UP ✓' : 'DOWN ⚠'}`, up ? 'ok' : 'warn');
+}
+
+function handleDID() {
+  const up = document.getElementById('did-chk').checked;
+  S.did = up ? 'UP' : 'DOWN';
+  renderStatus(); syncStatus();
+  addLog(`DIDs → ${up ? 'Available' : 'Unavailable'}`, up ? 'ok' : 'warn');
+  toast(`DIDs ${up ? 'Available' : 'Unavailable'}`, up ? 'ok' : 'warn');
+  const webhookUrl = up
+    ? (window.__SLACK_DIDS_AVAILABLE__   || '')
+    : (window.__SLACK_DIDS_UNAVAILABLE__ || '');
+  if (webhookUrl) {
+    api('/api/slack/notify', { method: 'POST', body: JSON.stringify({ url: webhookUrl }) })
+      .then(data => {
+        if (data.openUrl) window.open(data.openUrl, '_blank');
+        addLog('Slack notified ✓', 'info');
+      })
+      .catch(e => addLog(`Slack error: ${e.message}`, 'error'));
+  }
+}
+
+let _msgT = {};
+function handleMsg(k, v) {
+  S.cc[k].msg = v;
+  clearTimeout(_msgT[k]);
+  _msgT[k] = setTimeout(syncStatus, 1000);
+}
+
+let _sysT;
+function handleSysMsg(v) {
+  S.sysMsg = v;
+  clearTimeout(_sysT);
+  _sysT = setTimeout(syncStatus, 1000);
+}
+
+function fillCanned(k, v) {
+  if (!v) return;
+  document.getElementById(`msg-${k}`).value = v;
+  S.cc[k].msg = v; syncStatus();
+}
+
+function buildCannedDropdowns() {
+  ['savvy','mitel'].forEach(k => {
+    const sel = document.getElementById(`canned-${k}`);
+    sel.innerHTML = '<option value="">— Canned response —</option>';
+    S.cannedResponses.forEach(r => {
+      const o = document.createElement('option'); o.value = r.text; o.textContent = r.text.slice(0,55);
+      sel.appendChild(o);
+    });
+  });
+}
+
+// ── SMS ────────────────────────────────────────────────────────────────
+async function fetchGroups() {
+  const btn = document.getElementById('btn-rgrp');
+  if (btn) btn.disabled = true;
+  document.getElementById('group-chips').innerHTML = '<span style="color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px"><span class="spin"></span> Loading…</span>';
+  try {
+    const d = await api('/api/eztexting/groups');
+    S.groups = d.groups || [];
+    renderGroupChips();
+    addLog(`${S.groups.length} EZTexting groups loaded`, 'ok');
+  } catch (e) {
+    document.getElementById('group-chips').innerHTML = '<span style="color:var(--muted);font-size:12px">Failed to load — check connection</span>';
+    addLog(`Groups error: ${e.message}`, 'error');
+  }
+  if (btn) btn.disabled = false;
+}
+
+function renderGroupChips() {
+  const c = document.getElementById('group-chips');
+  if (!S.groups.length) { c.innerHTML = '<span style="color:var(--muted);font-size:12px">No groups found</span>'; return; }
+  c.innerHTML = '';
+  S.groups.forEach(g => {
+    const chip = document.createElement('div');
+    chip.className = `chip${S.selGroups.has(g.ID) ? ' sel' : ''}`;
+    chip.textContent = g.Name;
+    chip.onclick = () => {
+      S.selGroups.has(g.ID) ? S.selGroups.delete(g.ID) : S.selGroups.add(g.ID);
+      chip.classList.toggle('sel');
+    };
+    c.appendChild(chip);
+  });
+}
+
+function buildAlertChips() {
+  const c = document.getElementById('alert-chips');
+  if (!S.alertTypes.length) return;
+  c.innerHTML = '';
+  S.alertTypes.forEach(at => {
+    const chip = document.createElement('div'); chip.className = 'chip';
+    chip.textContent = at.label;
+    chip.onclick = () => {
+      document.querySelectorAll('#alert-chips .chip').forEach(x => x.classList.remove('sel-alt'));
+      chip.classList.add('sel-alt');
+      document.getElementById('sms-msg').value = at.message;
+      updateCC();
+    };
+    c.appendChild(chip);
+  });
+}
+
+function toggleBelize(el) {
+  S.belize = !S.belize;
+  el.classList.toggle('sel', S.belize);
+}
+
+function updateCC() {
+  const len = document.getElementById('sms-msg').value.length;
+  const el  = document.getElementById('char-ct');
+  el.textContent = `${len} / 160`;
+  el.className   = `char-ct${len > 140 ? ' warn' : ''}`;
+}
+
+function openSendModal() {
+  const msg = document.getElementById('sms-msg').value.trim();
+  if (!msg) { toast('Enter a message first', 'warn'); return; }
+  const sel = S.groups.filter(g => S.selGroups.has(g.ID));
+  const ind = document.getElementById('ind-num').value.trim();
+  if (!sel.length && !S.belize && !ind) { toast('Select at least one recipient', 'warn'); return; }
+  const recips = [...sel.map(g => g.Name), ...(S.belize ? ['Belize Agents'] : []), ...(ind ? [ind] : [])];
+  document.getElementById('sheet-preview').textContent = msg;
+  document.getElementById('sheet-meta').textContent    = `To: ${recips.join(', ')}`;
+  document.getElementById('send-modal').classList.add('open');
+}
+
+function closeSendModal() { document.getElementById('send-modal').classList.remove('open'); }
+
+async function confirmSend() {
+  const btn = document.getElementById('btn-confirm');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const msg  = document.getElementById('sms-msg').value.trim();
+  const sel  = S.groups.filter(g => S.selGroups.has(g.ID));
+  const ind  = document.getElementById('ind-num').value.trim();
+  const errs = [];
+  try {
+    if (sel.length || ind) await api('/api/eztexting/send', { method:'POST', body: JSON.stringify({ groups: sel.map(g=>g.ID), phoneNumber: ind||undefined, message: msg }) });
+    if (S.belize) await api('/api/smsto/send', { method:'POST', body: JSON.stringify({ message: msg }) });
+  } catch (e) { errs.push(e.message); }
+  btn.disabled = false; btn.textContent = 'Send';
+  closeSendModal();
+  if (errs.length) {
+    toast(`Send error: ${errs[0]}`, 'error');
+    addLog(`SMS send failed: ${errs[0]}`, 'error');
+  } else {
+    const recips = [...sel.map(g=>g.Name), ...(S.belize ? ['Belize'] : [])];
+    toast('Message sent!', 'ok');
+    addLog(`SMS → ${recips.join(', ')}`, 'ok');
+    document.getElementById('sms-msg').value = '';
+    document.querySelectorAll('#alert-chips .chip').forEach(x=>x.classList.remove('sel-alt'));
+    updateCC();
+  }
+}
+
+// ── AGENTS ─────────────────────────────────────────────────────────────
+async function fetchAgents() {
+  document.getElementById('agent-sub').textContent = 'Refreshing…';
+  try {
+    const d = await fetch(BACKEND + '/api/monday/agents').then(r => r.json());
+    S.agents = d.agents || [];
+    renderAgents();
+    const t = new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+    document.getElementById('agent-sub').textContent = `Synced ${t}`;
+    addLog(`${S.agents.length} agents loaded`, 'info');
+  } catch (e) {
+    document.getElementById('agent-sub').textContent = 'Load failed';
+    addLog(`Agents error: ${e.message}`, 'error');
+  }
+}
+
+function renderAgents() {
+  const here  = S.agents.filter(a => a.status === 'Here');
+  const stby  = S.agents.filter(a => a.status === 'On Standby');
+  const savvy = here.filter(a => (a.callCenter||'').toLowerCase().includes('savvy'));
+  const mitel = here.filter(a => !(a.callCenter||'').toLowerCase().includes('savvy'));
+
+  document.getElementById('cnt-savvy').textContent = savvy.length;
+  document.getElementById('cnt-mitel').textContent = mitel.length;
+  document.getElementById('cnt-stby').textContent  = stby.length;
+
+  const list = S.agentTab === 'here' ? here : stby;
+  const c    = document.getElementById('agent-list');
+  c.innerHTML = '';
+  if (!list.length) {
+    c.innerHTML = `<div style="color:var(--muted);font-size:13px;text-align:center;padding:24px">No agents ${S.agentTab === 'here' ? 'here' : 'on standby'}</div>`;
+    updateBulkBar(); return;
+  }
+  list.forEach(a => {
+    const sel = S.selAgents.has(a.id);
+    const t   = new Date(a.lastUpdate).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+    const div = document.createElement('div');
+    div.className = `agent-item${sel ? ' sel' : ''}`;
+    div.innerHTML = `
+      <input type="checkbox" class="agent-cb" ${sel ? 'checked' : ''} onchange="toggleAgent('${a.id}',this.checked)">
+      <div style="flex:1"><div class="agent-name">${a.name}</div><div class="agent-cc">${a.callCenter||'—'}</div></div>
+      <div class="agent-time">${t}</div>`;
+    c.appendChild(div);
+  });
+  updateBulkBar();
+}
+
+function switchAgentTab(tab) {
+  S.agentTab = tab; S.selAgents.clear();
+  document.getElementById('atab-here').classList.toggle('active', tab === 'here');
+  document.getElementById('atab-standby').classList.toggle('active', tab === 'standby');
+  renderAgents();
+}
+
+function toggleAgent(id, checked) {
+  checked ? S.selAgents.add(id) : S.selAgents.delete(id);
+  updateBulkBar();
+  document.querySelectorAll('.agent-item').forEach(el => {
+    const cb = el.querySelector('.agent-cb');
+    if (!cb) return;
+    const aid = cb.getAttribute('onchange')?.match(/'([^']+)'/)?.[1];
+    if (aid === id) el.classList.toggle('sel', checked);
+  });
+}
+
+function updateBulkBar() {
+  const n   = S.selAgents.size;
+  const bar = document.getElementById('bulk-bar');
+  bar.classList.toggle('vis', n > 0);
+  document.getElementById('bulk-ct').textContent = `${n} selected`;
+}
+
+function clearSel() { S.selAgents.clear(); renderAgents(); }
+
+async function bulkStandby() {
+  const ids = [...S.selAgents];
+  if (!ids.length) return;
+  toast(`Moving ${ids.length} agent(s)…`, 'info');
+  let ok=0, fail=0;
+  await Promise.all(ids.map(async id => {
+    try { await api(`/api/monday/agent/${id}/standby`, { method:'POST' }); ok++; }
+    catch { fail++; }
+  }));
+  S.selAgents.clear();
+  if (ok)   { toast(`${ok} moved to Standby`, 'ok');    addLog(`${ok} agent(s) → Standby`, 'ok'); }
+  if (fail) { toast(`${fail} failed`, 'error'); }
+  await fetchAgents();
+}
+
+// ── SLACK MANUAL FIRE ──────────────────────────────────────────────────
+// Canonical workflow map — mirrors server-managed workflows in CCOB_Dashboard.html
+const SLACK_WORKFLOWS = {
+  unavail:      { urlKey: '__SLACK_DIDS_UNAVAILABLE__', label: 'DIDs Unavailable' },
+  avail:        { urlKey: '__SLACK_DIDS_AVAILABLE__',   label: 'DIDs Available' },
+  savvy:        { urlKey: '__SLACK_SAVVY_ACTIVE__',    label: 'Savvy Phone Active' },
+  savvyInactive:{ urlKey: '__SLACK_SAVVY_INACTIVE__', label: 'Savvy Phone Inactive' },
+};
+
+function fireSlackWorkflow(type) {
+  const wf = SLACK_WORKFLOWS[type];
+  if (!wf) return;
+  const url = window[wf.urlKey] || '';
+  if (!url) { toast('Slack webhook not configured', 'warn'); return; }
+  api('/api/slack/notify', { method: 'POST', body: JSON.stringify({ url }) })
+    .then(data => {
+      if (data.openUrl) window.open(data.openUrl, '_blank');
+      toast(`Slack: ${wf.label} fired ✓`, 'ok');
+      addLog(`Slack fired: ${wf.label}`, 'ok');
+    })
+    .catch(e => { toast(`Slack error: ${e.message}`, 'error'); addLog(`Slack error: ${e.message}`, 'error'); });
+}
+
+// ── DID COUNTS ─────────────────────────────────────────────────────────
+async function fetchDids() {
+  try {
+    const d = await fetch(BACKEND + '/api/bandwidth/dids').then(r => r.json());
+    document.getElementById('did-count-savvy').textContent = d.savvy ?? '—';
+    document.getElementById('did-count-mitel').textContent = d.mitel ?? '—';
+  } catch { /* silent — DID counts are non-critical */ }
+}
+
+// ── INIT ───────────────────────────────────────────────────────────────
+loadStatus();
+fetchDids();
+setInterval(loadStatus, 15000);
+setInterval(fetchDids, 30000);
+buildCannedDropdowns();
+buildAlertChips();
+fetchGroups();
+</script>
+</body>
+</html>

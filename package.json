@@ -1,0 +1,26 @@
+{
+  "name": "callcenter-ops",
+  "version": "1.0.0",
+  "description": "Call Center Ops Dashboard backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "concurrently --names \"server,client,tunnel\" --prefix-colors \"cyan,green,magenta\" \"node --watch server.js\" \"npm run dev --prefix client\" \"~/cloudflared tunnel --url http://localhost:3001\"",
+    "build": "npm run build --prefix client",
+    "tunnel": "~/cloudflared tunnel --url http://localhost:3001"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^8.4.1",
+    "express-session": "^1.19.0",
+    "helmet": "^8.1.0",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
