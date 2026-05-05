@@ -6,6 +6,7 @@ const SETTINGS_TABS = [
   { id: 'general',    label: 'Call Centers' },
   { id: 'alert-cfg',  label: 'Alert Templates' },
   { id: 'canned-cfg', label: 'Canned Responses' },
+  { id: 'portal',     label: 'Employee Portal' },
   { id: 'users',      label: 'User Management' },
 ];
 
@@ -188,8 +189,81 @@ export default function Settings() {
         </div>
       )}
 
+      {/* Employee Portal */}
+      {activeTab === 'portal' && <PortalWidgets />}
+
       {/* User Management */}
       {activeTab === 'users' && <UserManagement />}
     </div>
+  );
+}
+
+function PortalWidgets() {
+  const [copied, setCopied] = useState(null);
+  const base = window.location.origin;
+  const apiKey = 'ccops2024secret';
+
+  const widgets = [
+    { id: 'savvy', label: 'Savvy Phone', cc: 'savvy' },
+    { id: 'mitel', label: 'Mitel Classic', cc: 'mitel' },
+  ];
+
+  function iframeUrl(cc) {
+    return `${base}/widget?cc=${cc}&key=${apiKey}`;
+  }
+
+  function iframeEmbed(cc) {
+    return `<iframe src="${iframeUrl(cc)}" width="320" height="90" frameborder="0" scrolling="no" style="border:none;"></iframe>`;
+  }
+
+  function copy(text, id) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(id);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  }
+
+  return (
+    <>
+      <div className="settings-card">
+        <h3>Employee Portal Widgets</h3>
+        <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 0 }}>
+          Embeddable status widgets for the Answering Legal staff site. Add each as an HTML iframe in Wix via Insert → Embed → HTML iFrame.
+        </p>
+      </div>
+      {widgets.map(w => (
+        <div className="settings-card" key={w.id}>
+          <h3>{w.label}</h3>
+          <div className="form-row" style={{ marginBottom: 12 }}>
+            <label className="field-label">Widget URL</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input type="text" readOnly value={iframeUrl(w.cc)} style={{ fontFamily: 'var(--mono)', fontSize: 11 }} />
+              <button className="btn btn-secondary btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => copy(iframeUrl(w.cc), `url-${w.id}`)}>
+                {copied === `url-${w.id}` ? 'Copied!' : 'Copy URL'}
+              </button>
+            </div>
+          </div>
+          <div className="form-row" style={{ marginBottom: 16 }}>
+            <label className="field-label">Embed Code</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input type="text" readOnly value={iframeEmbed(w.cc)} style={{ fontFamily: 'var(--mono)', fontSize: 11 }} />
+              <button className="btn btn-secondary btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => copy(iframeEmbed(w.cc), `embed-${w.id}`)}>
+                {copied === `embed-${w.id}` ? 'Copied!' : 'Copy Embed'}
+              </button>
+            </div>
+          </div>
+          <label className="field-label" style={{ marginBottom: 8, display: 'block' }}>Live Preview</label>
+          <iframe
+            src={iframeUrl(w.cc)}
+            width="320"
+            height="90"
+            frameBorder="0"
+            scrolling="no"
+            style={{ border: 'none', borderRadius: 8, display: 'block' }}
+            title={`${w.label} widget preview`}
+          />
+        </div>
+      ))}
+    </>
   );
 }
