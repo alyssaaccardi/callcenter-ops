@@ -62,6 +62,13 @@ const authLimiter = rateLimit({
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ─── Embeddable Widget (allow iframing from any origin) ───────────────────────
+app.get('/widget', (req, res) => {
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('Content-Security-Policy', "frame-ancestors *");
+  res.sendFile(path.join(__dirname, 'public', 'CCOB_Widget.html'));
+});
+
 // ─── TV Session Token Store ───────────────────────────────────────────────────
 const TV_SESSIONS_FILE = path.join(__dirname, 'tv-sessions.json');
 
