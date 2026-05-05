@@ -60,10 +60,6 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Block direct file access
-app.use('/CCOB_Dashboard.html',  (req, res) => res.status(404).send('Not found'));
-app.use('/CCOB_TV_Display.html', (req, res) => res.status(404).send('Not found'));
-
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── TV Session Token Store ───────────────────────────────────────────────────
@@ -98,9 +94,12 @@ setInterval(() => {
 
 // ─── Serve React app (production build) ──────────────────────────────────────
 app.use('/assets', express.static(path.join(__dirname, 'public', 'app', 'assets')));
-app.use('/app', express.static(path.join(__dirname, 'public', 'app')));
-app.get('/app/*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'app', 'index.html'));
+
+// ─── TV Session: Validate Token (no auth required — used by TV display pages) ─
+app.get('/api/tv-session/validate', (req, res) => {
+  const t = req.query.t;
+  const exp = t && tvSessions.get(t);
+  res.json({ valid: !!(t && exp && exp > Date.now()) });
 });
 
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
@@ -158,20 +157,9 @@ app.delete('/api/users/:email', requireRole('super_admin'), (req, res) => {
   res.json({ success: true });
 });
 
-// ─── Dashboard Routes (SPA handles auth) ─────────────────────────────────────
-app.get('/dashboard', (req, res) => {
-  const reactBuild = path.join(__dirname, 'public', 'app', 'index.html');
-  if (fs.existsSync(reactBuild)) return res.redirect('/');
-  const html = fs.readFileSync(path.join(__dirname, 'public', 'CCOB_Dashboard.html'), 'utf8');
-  res.send(html);
-});
-
-app.get('/mobile', (req, res) => {
-  const reactBuild = path.join(__dirname, 'public', 'app', 'index.html');
-  if (fs.existsSync(reactBuild)) return res.sendFile(reactBuild);
-  const html = fs.readFileSync(path.join(__dirname, 'public', 'CCOB_Mobile.html'), 'utf8');
-  res.send(html);
-});
+// ─── Dashboard Routes ─────────────────────────────────────────────────────────
+app.get('/dashboard', (req, res) => res.redirect('/'));
+app.get('/mobile', (req, res) => res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
 
 // ─── TV Session: Generate Token ───────────────────────────────────────────────
 app.post('/api/tv-session', requireAuth, (req, res) => {
@@ -181,25 +169,9 @@ app.post('/api/tv-session', requireAuth, (req, res) => {
   res.json({ token });
 });
 
-// ─── Dialed In Dash Route (session-gated) ────────────────────────────────────
-app.get('/dialed-in', (req, res) => {
-  const t = req.query.t;
-  const exp = t && tvSessions.get(t);
-  if (!t || !exp || exp < Date.now()) {
-    return res.status(403).send(`<!DOCTYPE html><html><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0e1520;color:#f0f4ff"><div style="text-align:center"><h2 style="margin-bottom:8px">Access Denied</h2><p style="color:#4a5a7a">Open this display from the Operations Dashboard.</p></div></body></html>`);
-  }
-  res.sendFile(path.join(__dirname, 'public', 'CCOB_TV_Display.html'));
-});
-
-// ─── Sales/Support Teams Dash (Pulse) Route ──────────────────────────────────
-app.get('/dialed-in-pulse', (req, res) => {
-  const t = req.query.t;
-  const exp = t && tvSessions.get(t);
-  if (!t || !exp || exp < Date.now()) {
-    return res.status(403).send(`<!DOCTYPE html><html><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0e1520;color:#f0f4ff"><div style="text-align:center"><h2 style="margin-bottom:8px">Access Denied</h2><p style="color:#4a5a7a">Open this display from the Operations Dashboard.</p></div></body></html>`);
-  }
-  res.sendFile(path.join(__dirname, 'public', 'CCOB_Pulse_Display.html'));
-});
+// ─── TV Display Routes (token validated client-side by React) ─────────────────
+app.get('/dialed-in',       (req, res) => res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
+app.get('/dialed-in-pulse', (req, res) => res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
 
 // ─── Status Store (persisted to disk) ────────────────────────────────────────
 const STATUS_FILE = path.join(__dirname, 'status-store.json');
@@ -742,18 +714,9 @@ app.get('/api/hubspot/dids', async (req, res) => {
   }
 });
 
-// ─── Login Route (serves SPA — React Router renders LoginPage) ────────────────
-app.get('/login', (req, res) => {
-  const reactBuild = path.join(__dirname, 'public', 'app', 'index.html');
-  if (fs.existsSync(reactBuild)) return res.sendFile(reactBuild);
-  res.redirect('/');
-});
-
 // ─── React SPA Catch-All ─────────────────────────────────────────────────────
 app.get('*', (req, res) => {
-  const reactBuild = path.join(__dirname, 'public', 'app', 'index.html');
-  if (fs.existsSync(reactBuild)) return res.sendFile(reactBuild);
-  res.status(404).send('Not found');
+  res.sendFile(path.join(__dirname, 'public', 'app', 'index.html'));
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────

@@ -12,6 +12,8 @@ import AgentBoard from './modules/AgentBoard';
 import Settings from './modules/Settings';
 import MobilePage from './pages/MobilePage';
 import LoginPage from './pages/LoginPage';
+import DialedInPage from './pages/DialedInPage';
+import PulsePage from './pages/PulsePage';
 
 function Dashboard() {
   const [activeModule, setActiveModule] = useState('status');
@@ -61,6 +63,8 @@ export default function App() {
           <Toast />
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/dialed-in" element={<DialedInPage />} />
+            <Route path="/dialed-in-pulse" element={<PulsePage />} />
             <Route path="/mobile" element={
               <ProtectedRoute><MobilePage /></ProtectedRoute>
             } />

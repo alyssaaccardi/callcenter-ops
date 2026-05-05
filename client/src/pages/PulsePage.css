@@ -1,0 +1,174 @@
+/* ─── Pulse Display — Sales/Support Teams ─────────────────────────────────── */
+
+.pulse-page {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #0e1520;
+  font-family: 'Barlow Condensed', sans-serif;
+  color: #f0f4ff;
+}
+
+.pulse-page::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 28px, rgba(255,255,255,0.018) 28px, rgba(255,255,255,0.018) 30px),
+    repeating-linear-gradient(90deg, transparent, transparent 58px, rgba(255,255,255,0.012) 58px, rgba(255,255,255,0.012) 60px);
+  pointer-events: none; z-index: 0;
+}
+
+.pulse-page::after {
+  content: '';
+  position: fixed; inset: 0;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.7) 100%);
+  pointer-events: none; z-index: 0;
+}
+
+.pulse-page.pulse-loading,
+.pulse-page.pulse-denied {
+  display: flex; align-items: center; justify-content: center;
+}
+.pulse-page.pulse-denied div { text-align: center; }
+.pulse-page.pulse-denied h2 { font-family: 'Bebas Neue', sans-serif; font-size: 36px; letter-spacing: 0.1em; margin-bottom: 8px; color: #f0f4ff; }
+.pulse-page.pulse-denied p  { color: #4a5a7a; font-size: 18px; font-family: 'Barlow Condensed', sans-serif; }
+
+.pulse-stripe-top    { position: fixed; top: 0; left: 0; right: 0; height: 6px; background: linear-gradient(90deg, #ef4444, #f59e0b, #22c55e, #00c9b1, #1a6fe8, #8b5cf6, #ef4444); z-index: 10; }
+.pulse-stripe-bottom { position: fixed; bottom: 0; left: 0; right: 0; height: 6px; background: linear-gradient(90deg, #1a6fe8, #00c9b1, #22c55e, #f59e0b, #ef4444, #8b5cf6, #1a6fe8); z-index: 10; }
+
+.pulse-diag-lines { position: fixed; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
+.pulse-diag-lines::before { content: ''; position: absolute; top: -50%; left: -10%; width: 3px; height: 200%; background: linear-gradient(180deg, transparent, rgba(0,201,177,0.12), transparent); transform: rotate(15deg); transform-origin: top left; }
+.pulse-diag-lines::after  { content: ''; position: absolute; top: -50%; right: -10%; width: 3px; height: 200%; background: linear-gradient(180deg, transparent, rgba(26,111,232,0.1), transparent); transform: rotate(-15deg); transform-origin: top right; }
+
+.pulse-wrapper { position: relative; z-index: 2; width: 100%; height: 100%; display: flex; flex-direction: column; padding: 14px 20px; }
+
+/* ── HEADER ── */
+.pulse-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); flex-shrink: 0; }
+.pulse-header-left { display: flex; align-items: center; gap: 14px; }
+.pulse-header-logo  { width: 44px; height: 44px; border-radius: 50%; border: 2px solid #00c9b1; object-fit: cover; }
+.pulse-header-brand { font-family: 'Bebas Neue', sans-serif; font-size: 28px; letter-spacing: 0.12em; color: #f0f4ff; line-height: 1; }
+.pulse-header-sub   { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #00c9b1; letter-spacing: 0.2em; text-transform: uppercase; margin-top: 2px; }
+.pulse-header-center { text-align: center; }
+.pulse-header-title { font-family: 'Bebas Neue', sans-serif; font-size: 36px; letter-spacing: 0.2em; color: rgba(255,255,255,0.4); text-transform: uppercase; }
+.pulse-header-right { text-align: right; }
+.pulse-clock { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 600; color: #f0f4ff; }
+.pulse-date  { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #4a5a7a; margin-top: 2px; letter-spacing: 0.1em; text-transform: uppercase; }
+
+/* ── MAIN GRID ── */
+.pulse-main-grid {
+  display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px;
+  flex: 1; padding: 12px 0; min-height: 0;
+}
+
+/* ── DID PANEL ── */
+.pulse-did-panel {
+  position: relative; border-radius: 8px; overflow: hidden;
+  display: flex; flex-direction: column;
+  border: 1px solid rgba(0,201,177,0.3); background: rgba(255,255,255,0.02);
+  transition: border-color 0.5s;
+}
+.pulse-did-panel.pulse-down { border-color: rgba(239,68,68,0.4); }
+
+.pulse-panel-accent { position: absolute; top: 0; left: 0; bottom: 0; width: 5px; transition: background 0.5s; }
+.pulse-did-panel .pulse-panel-accent           { background: linear-gradient(180deg, #00c9b1, #22c55e); }
+.pulse-did-panel.pulse-down .pulse-panel-accent { background: linear-gradient(180deg, #f59e0b, #ef4444); }
+
+.pulse-corner    { position: absolute; width: 18px; height: 18px; }
+.pulse-corner-tl { top: 8px; left: 12px; border-top: 2px solid; border-left: 2px solid; }
+.pulse-corner-tr { top: 8px; right: 8px; border-top: 2px solid; border-right: 2px solid; }
+.pulse-corner-bl { bottom: 8px; left: 12px; border-bottom: 2px solid; border-left: 2px solid; }
+.pulse-corner-br { bottom: 8px; right: 8px; border-bottom: 2px solid; border-right: 2px solid; }
+.pulse-did-panel .pulse-corner           { border-color: rgba(0,201,177,0.4); }
+.pulse-did-panel.pulse-down .pulse-corner { border-color: rgba(239,68,68,0.4); }
+
+.pulse-panel-inner { padding: 24px 24px 24px 32px; flex: 1; display: flex; flex-direction: column; }
+
+.pulse-did-hero-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.25em; text-transform: uppercase; color: #4a5a7a; margin-bottom: 24px; }
+
+.pulse-did-status-pill {
+  display: inline-flex; align-items: center; gap: 18px;
+  padding: clamp(18px, 2.5vh, 32px) clamp(32px, 5vw, 60px);
+  border-radius: 40px; font-family: 'Bebas Neue', sans-serif;
+  font-size: clamp(48px, 7vw, 96px); letter-spacing: 0.12em;
+  border: 2px solid transparent; transition: all 0.5s;
+  align-self: flex-start; margin-top: 8px;
+}
+.pulse-did-status-pill.pulse-up   { background: rgba(20,184,166,0.12); color: #00c9b1; border-color: rgba(20,184,166,0.4); box-shadow: 0 0 40px rgba(0,201,177,0.15); }
+.pulse-did-status-pill.pulse-down { background: rgba(251,191,36,0.12); color: #f59e0b; border-color: rgba(251,191,36,0.4); box-shadow: 0 0 40px rgba(245,158,11,0.15); animation: pulse-flicker-border 2s ease-in-out infinite; }
+
+.pulse-did-pill-dot { width: clamp(16px, 2vw, 28px); height: clamp(16px, 2vw, 28px); border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.pulse-did-status-pill.pulse-up   .pulse-did-pill-dot { animation: pulse-breathe-green 3s ease-in-out infinite; }
+.pulse-did-status-pill.pulse-down .pulse-did-pill-dot { animation: pulse-anim-red 1s ease-in-out infinite; }
+
+/* DID pool counts */
+.pulse-pool-counts { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+.pulse-pool-row    { display: flex; align-items: baseline; gap: 10px; }
+.pulse-pool-label  { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: #4a5a7a; white-space: nowrap; }
+.pulse-pool-count  { font-family: 'Bebas Neue', sans-serif; font-size: clamp(28px, 3.5vw, 48px); line-height: 1; color: #00c9b1; letter-spacing: 0.04em; transition: color 0.4s; }
+.pulse-pool-count.pulse-zero { color: #f59e0b; }
+
+/* ── SYSTEMS COL ── */
+.pulse-systems-col { display: flex; flex-direction: column; gap: 14px; }
+
+.pulse-sys-panel {
+  position: relative; border-radius: 8px; overflow: hidden;
+  flex: 1; display: flex; flex-direction: column;
+  border: 1px solid rgba(255,255,255,0.07); background: rgba(255,255,255,0.02);
+  transition: border-color 0.5s;
+}
+.pulse-sys-panel.pulse-up   { border-color: rgba(0,201,177,0.3); }
+.pulse-sys-panel.pulse-down { border-color: rgba(239,68,68,0.4); }
+.pulse-sys-panel.pulse-up   .pulse-panel-accent { background: linear-gradient(180deg, #00c9b1, #22c55e); }
+.pulse-sys-panel.pulse-down .pulse-panel-accent { background: linear-gradient(180deg, #f59e0b, #ef4444); }
+.pulse-sys-panel.pulse-up   .pulse-corner { border-color: rgba(0,201,177,0.4); }
+.pulse-sys-panel.pulse-down .pulse-corner { border-color: rgba(239,68,68,0.4); }
+
+.pulse-sys-inner { padding: 18px 18px 18px 26px; flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.pulse-sys-name  { font-family: 'Bebas Neue', sans-serif; font-size: clamp(30px, 3.5vw, 48px); letter-spacing: 0.06em; line-height: 1; }
+
+.pulse-orb-row { display: flex; align-items: center; gap: 14px; }
+.pulse-orb { width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0; position: relative; }
+.pulse-orb::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; opacity: 0.3; }
+.pulse-orb.pulse-up   { background: #22c55e; box-shadow: 0 0 16px rgba(34,197,94,0.8); animation: pulse-breathe-green 3s ease-in-out infinite; }
+.pulse-orb.pulse-up::after { background: #22c55e; animation: pulse-breathe-green-ring 3s ease-in-out infinite; }
+.pulse-orb.pulse-down { background: #ef4444; box-shadow: 0 0 16px rgba(239,68,68,0.8); animation: pulse-anim-red 1s ease-in-out infinite; }
+.pulse-orb.pulse-down::after { background: #ef4444; animation: pulse-anim-red-ring 1s ease-in-out infinite; }
+
+.pulse-status-word { font-family: 'Bebas Neue', sans-serif; font-size: clamp(22px, 3vw, 38px); letter-spacing: 0.08em; transition: color 0.5s; }
+.pulse-status-word.pulse-up   { color: #22c55e; }
+.pulse-status-word.pulse-down { color: #ef4444; }
+
+.pulse-sys-alert { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(14px, 1.8vw, 20px); font-weight: 600; line-height: 1.35; }
+.pulse-sys-alert.pulse-alert-messages { color: #f59e0b; }
+.pulse-sys-alert.pulse-alert-app      { color: #ef4444; }
+
+/* ── FOOTER ── */
+.pulse-footer { display: flex; align-items: center; justify-content: center; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); flex-shrink: 0; position: relative; }
+
+.pulse-global-pill { display: inline-flex; align-items: center; gap: 10px; padding: 8px 28px; border-radius: 40px; font-family: 'Bebas Neue', sans-serif; font-size: 20px; letter-spacing: 0.15em; transition: all 0.5s; }
+.pulse-global-pill.pulse-operational { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.4); color: #22c55e; }
+.pulse-global-pill.pulse-standby     { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.5); color: #ef4444; animation: pulse-flicker-border 2s ease-in-out infinite; }
+
+.pulse-global-dot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; }
+.pulse-global-pill.pulse-operational .pulse-global-dot { animation: pulse-breathe-green 3s ease-in-out infinite; }
+.pulse-global-pill.pulse-standby     .pulse-global-dot { animation: pulse-anim-red 1s ease-in-out infinite; }
+
+.pulse-sync-info { font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #4a5a7a; position: absolute; right: 20px; letter-spacing: 0.1em; }
+
+.pulse-spinner { display: inline-block; width: 24px; height: 24px; border: 2px solid rgba(255,255,255,0.1); border-top-color: #00c9b1; border-radius: 50%; animation: pulse-spin 0.7s linear infinite; }
+
+@keyframes pulse-breathe-green      { 0%,100%{box-shadow:0 0 10px rgba(34,197,94,0.6)} 50%{box-shadow:0 0 28px rgba(34,197,94,1)} }
+@keyframes pulse-breathe-green-ring { 0%,100%{opacity:0.15;transform:scale(1)} 50%{opacity:0.4;transform:scale(1.3)} }
+@keyframes pulse-anim-red           { 0%,100%{box-shadow:0 0 10px rgba(239,68,68,0.7)} 50%{box-shadow:0 0 30px rgba(239,68,68,1)} }
+@keyframes pulse-anim-red-ring      { 0%,100%{opacity:0.2;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.4)} }
+@keyframes pulse-flicker-border     { 0%,100%{border-color:rgba(239,68,68,0.5)} 50%{border-color:rgba(239,68,68,0.15)} }
+@keyframes pulse-spin               { to{transform:rotate(360deg)} }
+
+@keyframes pulse-downRain {
+  0%   { transform: translate(var(--tx-start), 0) rotate(var(--rot-start)) scale(1); opacity: 1; }
+  100% { transform: translate(var(--tx-end), 110vh) rotate(var(--rot-end)) scale(0.7); opacity: 0; }
+}
+@keyframes pulse-muscleFloat {
+  0%   { opacity: 1; transform: translateY(0) translateX(0) rotate(var(--rot-start)); }
+  100% { opacity: 0; transform: translateY(-115vh) translateX(var(--drift)) rotate(var(--rot-end)); }
+}
