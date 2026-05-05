@@ -29,7 +29,8 @@ export default function Topbar({ activeModule }) {
     status.savvyPhone?.state !== 'DOWN' &&
     status.mitelClassic?.state !== 'DOWN' &&
     status.mobileApp?.state !== 'DOWN' &&
-    status.integrations?.state !== 'DOWN'
+    !status.mobileApp?.messagesDown &&
+    !status.integrations?.messagesDown
   ) : true;
 
   return (
