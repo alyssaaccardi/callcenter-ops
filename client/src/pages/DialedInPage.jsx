@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../context/AuthContext';
 import './DialedInPage.css';
 
 const POLL_MS = 15000;
@@ -135,6 +136,8 @@ function SysChip({ label, isUp, statusWord, alert }) {
 
 export default function DialedInPage() {
   const token = new URLSearchParams(window.location.search).get('t');
+  const { user } = useAuth();
+  const isTvUser = user?.role === 'tv_display';
 
   const [tokenValid, setTokenValid] = useState(null);
   const [status, setStatus] = useState(null);
@@ -160,12 +163,13 @@ export default function DialedInPage() {
   }, []);
 
   useEffect(() => {
+    if (isTvUser) { setTokenValid(true); return; }
     if (!token) { setTokenValid(false); return; }
     fetch(`/api/tv-session/validate?t=${encodeURIComponent(token)}`)
       .then(r => r.json())
       .then(d => setTokenValid(!!d.valid))
       .catch(() => setTokenValid(false));
-  }, [token]);
+  }, [token, isTvUser]);
 
   useEffect(() => {
     if (!dids) return;

@@ -4,6 +4,7 @@ import api from '../api';
 const ROLES = [
   { value: 'super_admin', label: 'Super Admin' },
   { value: 'call_center_ops', label: 'Call Center Ops' },
+  { value: 'tv_display', label: 'TV Display' },
 ];
 
 export default function UserManagement() {

@@ -154,7 +154,7 @@ app.get('/api/users', requireRole('super_admin'), (req, res) => {
 app.post('/api/users', requireRole('super_admin'), (req, res) => {
   const { email, name, role } = req.body;
   if (!email || !name || !role) return res.status(400).json({ error: 'email, name, and role are required' });
-  if (!['super_admin', 'call_center_ops'].includes(role)) return res.status(400).json({ error: 'invalid role' });
+  if (!['super_admin', 'call_center_ops', 'tv_display'].includes(role)) return res.status(400).json({ error: 'invalid role' });
   addUser(email, name, role);
   res.json({ success: true });
 });

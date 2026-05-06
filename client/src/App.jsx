@@ -19,6 +19,8 @@ function Dashboard() {
   const [activeModule, setActiveModule] = useState('status');
   const { user } = useAuth();
 
+  if (user?.role === 'tv_display') return <Navigate to="/dialed-in" replace />;
+
   const moduleMap = {
     status:   <StatusBoard />,
     sms:      <SmsModule />,
