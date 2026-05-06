@@ -8,7 +8,9 @@ export function AppProvider({ children }) {
   const [slackConfig, setSlackConfig] = useState({ didsUnavailable: '', didsAvailable: '', savvyActive: '', savvyInactive: '' });
   const [status, setStatus] = useState(null);
   const [didCounts, setDidCounts] = useState(null);
-  const [activityLog, setActivityLog] = useState([]);
+  const [activityLog, setActivityLog] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ccob_activityLog') || '[]'); } catch { return []; }
+  });
   const [toasts, setToasts] = useState([]);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('ccob_dark') === '1');
 
@@ -29,7 +31,11 @@ export function AppProvider({ children }) {
       msg,
       type,
     };
-    setActivityLog(prev => [entry, ...prev].slice(0, 100));
+    setActivityLog(prev => {
+      const next = [entry, ...prev].slice(0, 500);
+      try { localStorage.setItem('ccob_activityLog', JSON.stringify(next)); } catch {}
+      return next;
+    });
   }, []);
 
   // Load Slack config from authenticated endpoint
