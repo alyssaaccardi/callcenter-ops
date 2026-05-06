@@ -8,9 +8,7 @@ export function AppProvider({ children }) {
   const [slackConfig, setSlackConfig] = useState({ didsUnavailable: '', didsAvailable: '', savvyActive: '', savvyInactive: '' });
   const [status, setStatus] = useState(null);
   const [didCounts, setDidCounts] = useState(null);
-  const [activityLog, setActivityLog] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('ccob_activityLog') || '[]'); } catch { return []; }
-  });
+  const [activityLog, setActivityLog] = useState([]);
   const [toasts, setToasts] = useState([]);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('ccob_dark') === '1');
 
@@ -25,17 +23,18 @@ export function AppProvider({ children }) {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
   }, []);
 
+  useEffect(() => {
+    api.get('/api/activity-log').then(res => setActivityLog(res.data || [])).catch(() => {});
+  }, []);
+
   const addLog = useCallback((msg, type = 'info') => {
     const entry = {
       time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       msg,
-      type,
+      type: type || 'info',
     };
-    setActivityLog(prev => {
-      const next = [entry, ...prev].slice(0, 500);
-      try { localStorage.setItem('ccob_activityLog', JSON.stringify(next)); } catch {}
-      return next;
-    });
+    setActivityLog(prev => [entry, ...prev].slice(0, 500));
+    api.post('/api/activity-log', { msg, type }).catch(() => {});
   }, []);
 
   // Load Slack config from authenticated endpoint

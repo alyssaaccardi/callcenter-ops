@@ -183,6 +183,36 @@ app.get('/dialed-in-pulse', (req, res) => res.sendFile(path.join(__dirname, 'pub
 // ─── Status Store (persisted to disk) ────────────────────────────────────────
 const STATUS_FILE = path.join(__dirname, 'status-store.json');
 
+// ─── Activity Log ─────────────────────────────────────────────────────────────
+const LOG_FILE = path.join(__dirname, 'activity-log.json');
+const LOG_MAX  = 500;
+
+function loadLog() {
+  try { return JSON.parse(fs.readFileSync(LOG_FILE, 'utf8')); } catch { return []; }
+}
+function saveLog(entries) {
+  fs.writeFileSync(LOG_FILE, JSON.stringify(entries));
+}
+
+let activityLog = loadLog();
+
+app.get('/api/activity-log', requireAuth, (req, res) => {
+  res.json(activityLog);
+});
+
+app.post('/api/activity-log', requireAuth, (req, res) => {
+  const { msg, type } = req.body;
+  if (!msg) return res.status(400).json({ error: 'msg required' });
+  const entry = {
+    time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    msg,
+    type: type || 'info',
+  };
+  activityLog = [entry, ...activityLog].slice(0, LOG_MAX);
+  saveLog(activityLog);
+  res.json({ ok: true });
+});
+
 function loadStatusStore() {
   try {
     return JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8'));
