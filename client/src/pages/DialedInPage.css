@@ -212,6 +212,13 @@
 .tv-sys-chip-word.tv-down { color: #ef4444; }
 .tv-sys-chip-alert { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(11px, 1.3vw, 16px); font-weight: 600; color: #f59e0b; line-height: 1.2; }
 
+.tv-queue-stats { display: flex; align-items: center; gap: 16px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); }
+.tv-queue-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 1; }
+.tv-queue-stat-label { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(10px, 1.1vw, 13px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.1em; text-transform: uppercase; }
+.tv-queue-stat-value { font-family: 'Bebas Neue', sans-serif; font-size: clamp(22px, 2.4vw, 32px); letter-spacing: 0.04em; color: #c8d8f8; line-height: 1; }
+.tv-queue-stat-value.tv-queue-warn { color: #f59e0b; }
+.tv-queue-stat-divider { width: 1px; height: 32px; background: rgba(255,255,255,0.1); flex-shrink: 0; }
+
 .tv-did-pool-chip { align-items: center; text-align: center; }
 .tv-did-pool-chip .tv-sys-chip-name { text-align: center; }
 .tv-did-pool-chip .tv-sys-chip-body { align-items: center; }

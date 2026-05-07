@@ -752,6 +752,38 @@ app.get('/api/hubspot/dids', async (req, res) => {
   }
 });
 
+// ─── Xcally Realtime Queue ───────────────────────────────────────────────────
+const XCALLY_QUEUE_NAME = 'Answering_Legal';
+
+app.get('/api/xcally/queue', async (req, res) => {
+  try {
+    const base = process.env.XCALLY_URL;
+    const user = process.env.XCALLY_USER;
+    const pass = process.env.XCALLY_PASS;
+    if (!base || !user || !pass) return res.status(500).json({ error: 'Xcally not configured' });
+
+    const r = await axios.get(`${base}/api/realtime/queues`, {
+      auth: { username: user, password: pass },
+    });
+    const queue = (r.data?.rows || []).find(q => q.name === XCALLY_QUEUE_NAME);
+    if (!queue) return res.status(404).json({ error: `Queue ${XCALLY_QUEUE_NAME} not found` });
+
+    const avgHoldTime = queue.answered > 0
+      ? Math.round(queue.sumHoldTime / queue.answered)
+      : 0;
+
+    res.json({
+      waiting:     queue.waiting,
+      avgHoldTime,
+      answered:    queue.answered,
+      abandoned:   queue.abandoned,
+    });
+  } catch (err) {
+    console.error('Xcally queue error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch Xcally queue data' });
+  }
+});
+
 // ─── React SPA Catch-All ─────────────────────────────────────────────────────
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'app', 'index.html'));

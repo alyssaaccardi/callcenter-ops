@@ -75,7 +75,13 @@ function classifyByCC(agents) {
   return groups;
 }
 
-function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, message, changedBy, changedAt, counts }) {
+function fmtSeconds(s) {
+  if (s === null || s === undefined) return '—';
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, message, changedBy, changedAt, counts, xcally }) {
   function fmtAttr() {
     if (!changedBy || !changedAt) return '';
     return `Updated by ${changedBy} at ${new Date(changedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
@@ -113,6 +119,21 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
           </div>
           {counts.standbyNames && <div className="tv-standby-names">{counts.standbyNames}</div>}
         </div>
+        {xcally !== undefined && (
+          <div className="tv-queue-stats">
+            <div className="tv-queue-stat">
+              <div className="tv-queue-stat-label">Callers Waiting</div>
+              <div className={`tv-queue-stat-value${xcally?.waiting > 0 ? ' tv-queue-warn' : ''}`}>
+                {xcally?.waiting ?? '—'}
+              </div>
+            </div>
+            <div className="tv-queue-stat-divider" />
+            <div className="tv-queue-stat">
+              <div className="tv-queue-stat-label">Avg Hold Time</div>
+              <div className="tv-queue-stat-value">{fmtSeconds(xcally?.avgHoldTime)}</div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -143,6 +164,7 @@ export default function DialedInPage() {
   const [status, setStatus] = useState(null);
   const [dids, setDids] = useState(null);
   const [hsDids, setHsDids] = useState(null);
+  const [xcally, setXcally] = useState(null);
   const [agents, setAgents] = useState({ savvy: { here: 0, standby: 0, standbyNames: '' }, mitel: { here: 0, standby: 0, standbyNames: '' } });
   const [didPop, setDidPop] = useState({ savvy: false, mitel: false });
   const [syncInfo, setSyncInfo] = useState('Checking status...');
@@ -192,10 +214,11 @@ export default function DialedInPage() {
 
     async function fetchStatus() {
       try {
-        const [sRes, dRes, hsRes] = await Promise.all([fetch('/api/status'), fetch('/api/bandwidth/dids'), fetch('/api/hubspot/dids')]);
+        const [sRes, dRes, hsRes, xcRes] = await Promise.all([fetch('/api/status'), fetch('/api/bandwidth/dids'), fetch('/api/hubspot/dids'), fetch('/api/xcally/queue')]);
         const s  = sRes.ok  ? await sRes.json()  : null;
         const d  = dRes.ok  ? await dRes.json()  : null;
         const hs = hsRes.ok ? await hsRes.json() : null;
+        const xc = xcRes.ok ? await xcRes.json() : null;
         if (s) {
           const savvyNow = s.savvyPhone?.state !== 'DOWN';
           const mitelNow = s.mitelClassic?.state !== 'DOWN';
@@ -207,6 +230,7 @@ export default function DialedInPage() {
         setStatus(s);
         setDids(d);
         setHsDids(hs);
+        setXcally(xc);
         const t = new Date(d?.syncedAt || s?.updatedAt || Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         setSyncInfo(`Live · Last sync: ${t}`);
       } catch (err) {
@@ -336,7 +360,7 @@ export default function DialedInPage() {
             isUp={savvyUp} locationLabel="Stafford Location" carrierLabel="via Bandwidth"
             name="Savvy Phone" didCount={dids?.savvy} didPop={didPop.savvy}
             message={savvy?.message} changedBy={savvy?.changedBy} changedAt={savvy?.changedAt}
-            counts={agents.savvy}
+            counts={agents.savvy} xcally={xcally}
           />
           <CcPanel
             isUp={mitelUp} locationLabel="Mitel Location" carrierLabel="via Bandwidth"
