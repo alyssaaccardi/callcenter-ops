@@ -349,25 +349,29 @@ export default function DialedInPage() {
             statusWord={integrMessagesOk ? 'Messages Routing' : 'Degraded'}
             alert={integrAlert}
           />
-          <div className="tv-sys-chip tv-up">
+          <div className={`tv-sys-chip ${didUp ? 'tv-up' : 'tv-down'} tv-did-pool-chip`}>
             <div className="tv-sys-chip-accent" />
-            <div className="tv-sys-chip-name">📞 HubSpot DID Pool</div>
+            <div className="tv-sys-chip-name">Available DIDs</div>
             <div className="tv-sys-chip-body">
-              <div className="tv-did-pool-row">
-                <div className="tv-did-pool-item">
-                  <span className="tv-did-pool-label">Pool</span>
-                  <span className={`tv-did-pool-count${hsDids?.didPool === 0 ? ' tv-zero' : ''}`}>
-                    {hsDids?.didPool ?? '—'}
-                  </span>
+              {!didUp ? (
+                <div className="tv-did-pool-unavailable">Unavailable</div>
+              ) : (
+                <div className="tv-did-pool-row">
+                  <div className="tv-did-pool-item">
+                    <span className="tv-did-pool-label">Pool</span>
+                    <span className={`tv-did-pool-count${hsDids?.didPool === 0 ? ' tv-zero' : ''}`}>
+                      {hsDids?.didPool ?? '—'}
+                    </span>
+                  </div>
+                  <div className="tv-did-pool-divider" />
+                  <div className="tv-did-pool-item">
+                    <span className="tv-did-pool-label">Instant</span>
+                    <span className={`tv-did-pool-count${hsDids?.instantDidPool === 0 ? ' tv-zero' : ''}`}>
+                      {hsDids?.instantDidPool ?? '—'}
+                    </span>
+                  </div>
                 </div>
-                <div className="tv-did-pool-divider" />
-                <div className="tv-did-pool-item">
-                  <span className="tv-did-pool-label">Instant</span>
-                  <span className={`tv-did-pool-count${hsDids?.instantDidPool === 0 ? ' tv-zero' : ''}`}>
-                    {hsDids?.instantDidPool ?? '—'}
-                  </span>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
