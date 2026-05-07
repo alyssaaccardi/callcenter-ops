@@ -149,13 +149,15 @@ body.dark .user-role { color: var(--teal); }
 .topbar {
   background: rgba(255,255,255,0.7); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   border-bottom: 1px solid rgba(255,255,255,0.8); box-shadow: 0 1px 12px rgba(168,130,220,0.08);
-  padding: 0 28px; height: 52px; display: flex; align-items: center; justify-content: flex-end;
+  padding: 0 28px; height: 52px; display: flex; align-items: center; justify-content: space-between;
   position: sticky; top: 0; z-index: 50;
 }
 body.dark .topbar { background: #070d18; border-bottom: 1px solid rgba(255,255,255,0.07); backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none; }
 .topbar-title { font-family: 'Bebas Neue', sans-serif; font-size: 20px; font-weight: 400; letter-spacing: 0.06em; color: #1a1a3e; }
 body.dark .topbar-title { color: #f0f4ff; }
 .topbar-right { display: flex; align-items: center; gap: 16px; }
+.topbar-greeting { font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color: #6b47b8; }
+body.dark .topbar-greeting { color: #a78bfa; }
 .live-clock { font-family: var(--mono); font-size: 12px; color: var(--purple-lt); }
 body.dark .live-clock { color: var(--teal); }
 .dual-clock { display: flex; align-items: center; gap: 10px; }

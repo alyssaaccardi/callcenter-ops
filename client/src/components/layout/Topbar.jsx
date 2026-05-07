@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 
 const MODULE_TITLES = {
   status:   'System Status Board',
@@ -22,6 +23,8 @@ function useClock(tz) {
 
 export default function Topbar({ activeModule }) {
   const { status, darkMode, setDarkMode } = useApp();
+  const { user } = useAuth();
+  const firstName = user?.name?.split(' ')[0] || '';
   const estTime = useClock('America/New_York');
   const bzTime  = useClock('America/Belize');
 
@@ -35,6 +38,9 @@ export default function Topbar({ activeModule }) {
 
   return (
     <div className="topbar">
+      {firstName && (
+        <div className="topbar-greeting">Hey {firstName}, have a savvy day!</div>
+      )}
       <div className="topbar-right">
         <div className="dual-clock">
           <div className="dual-clock-entry">
