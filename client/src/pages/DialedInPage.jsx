@@ -359,14 +359,14 @@ export default function DialedInPage() {
                 <div className="tv-did-pool-row">
                   <div className="tv-did-pool-item">
                     <span className="tv-did-pool-label">Pool</span>
-                    <span className={`tv-did-pool-count${hsDids?.didPool === 0 ? ' tv-zero' : ''}`}>
+                    <span className={`tv-did-pool-count${hsDids?.didPool != null && hsDids.didPool < 20 ? ' tv-zero' : ''}`}>
                       {hsDids?.didPool ?? '—'}
                     </span>
                   </div>
                   <div className="tv-did-pool-divider" />
                   <div className="tv-did-pool-item">
                     <span className="tv-did-pool-label">Instant</span>
-                    <span className={`tv-did-pool-count${hsDids?.instantDidPool === 0 ? ' tv-zero' : ''}`}>
+                    <span className={`tv-did-pool-count${hsDids?.instantDidPool != null && hsDids.instantDidPool < 20 ? ' tv-zero' : ''}`}>
                       {hsDids?.instantDidPool ?? '—'}
                     </span>
                   </div>
