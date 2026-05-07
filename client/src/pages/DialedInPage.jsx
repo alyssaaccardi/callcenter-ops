@@ -142,6 +142,7 @@ export default function DialedInPage() {
   const [tokenValid, setTokenValid] = useState(null);
   const [status, setStatus] = useState(null);
   const [dids, setDids] = useState(null);
+  const [hsDids, setHsDids] = useState(null);
   const [agents, setAgents] = useState({ savvy: { here: 0, standby: 0, standbyNames: '' }, mitel: { here: 0, standby: 0, standbyNames: '' } });
   const [didPop, setDidPop] = useState({ savvy: false, mitel: false });
   const [syncInfo, setSyncInfo] = useState('Checking status...');
@@ -191,9 +192,10 @@ export default function DialedInPage() {
 
     async function fetchStatus() {
       try {
-        const [sRes, dRes] = await Promise.all([fetch('/api/status'), fetch('/api/bandwidth/dids')]);
-        const s = sRes.ok ? await sRes.json() : null;
-        const d = dRes.ok ? await dRes.json() : null;
+        const [sRes, dRes, hsRes] = await Promise.all([fetch('/api/status'), fetch('/api/bandwidth/dids'), fetch('/api/hubspot/dids')]);
+        const s  = sRes.ok  ? await sRes.json()  : null;
+        const d  = dRes.ok  ? await dRes.json()  : null;
+        const hs = hsRes.ok ? await hsRes.json() : null;
         if (s) {
           const savvyNow = s.savvyPhone?.state !== 'DOWN';
           const mitelNow = s.mitelClassic?.state !== 'DOWN';
@@ -204,6 +206,7 @@ export default function DialedInPage() {
         }
         setStatus(s);
         setDids(d);
+        setHsDids(hs);
         const t = new Date(d?.syncedAt || s?.updatedAt || Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         setSyncInfo(`Live · Last sync: ${t}`);
       } catch (err) {
@@ -346,6 +349,27 @@ export default function DialedInPage() {
             statusWord={integrMessagesOk ? 'Messages Routing' : 'Degraded'}
             alert={integrAlert}
           />
+          <div className="tv-sys-chip tv-up">
+            <div className="tv-sys-chip-accent" />
+            <div className="tv-sys-chip-name">📞 HubSpot DID Pool</div>
+            <div className="tv-sys-chip-body">
+              <div className="tv-did-pool-row">
+                <div className="tv-did-pool-item">
+                  <span className="tv-did-pool-label">Pool</span>
+                  <span className={`tv-did-pool-count${hsDids?.didPool === 0 ? ' tv-zero' : ''}`}>
+                    {hsDids?.didPool ?? '—'}
+                  </span>
+                </div>
+                <div className="tv-did-pool-divider" />
+                <div className="tv-did-pool-item">
+                  <span className="tv-did-pool-label">Instant</span>
+                  <span className={`tv-did-pool-count${hsDids?.instantDidPool === 0 ? ' tv-zero' : ''}`}>
+                    {hsDids?.instantDidPool ?? '—'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="tv-footer">
