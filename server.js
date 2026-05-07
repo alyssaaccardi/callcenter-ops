@@ -201,10 +201,11 @@ app.get('/api/activity-log', requireAuth, (req, res) => {
 });
 
 app.post('/api/activity-log', requireAuth, (req, res) => {
-  const { msg, type } = req.body;
+  const { msg, type, user } = req.body;
   if (!msg) return res.status(400).json({ error: 'msg required' });
   const entry = {
-    time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' }),
+    user: user || req.user?.name || '',
     msg,
     type: type || 'info',
   };

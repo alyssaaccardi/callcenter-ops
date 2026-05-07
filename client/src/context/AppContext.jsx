@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import api from '../api';
+import { useAuth } from './AuthContext';
 
 const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
+  const { user } = useAuth();
   const [slackConfig, setSlackConfig] = useState({ didsUnavailable: '', didsAvailable: '', savvyActive: '', savvyInactive: '' });
   const [status, setStatus] = useState(null);
   const [didCounts, setDidCounts] = useState(null);
@@ -29,13 +31,14 @@ export function AppProvider({ children }) {
 
   const addLog = useCallback((msg, type = 'info') => {
     const entry = {
-      time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' }),
+      user: user?.name || '',
       msg,
       type: type || 'info',
     };
     setActivityLog(prev => [entry, ...prev].slice(0, 500));
-    api.post('/api/activity-log', { msg, type }).catch(() => {});
-  }, []);
+    api.post('/api/activity-log', { msg, type, user: entry.user }).catch(() => {});
+  }, [user]);
 
   // Load Slack config from authenticated endpoint
   useEffect(() => {

@@ -359,6 +359,7 @@ function ActivityLog() {
         {activityLog.map((entry, i) => (
           <div key={i} className="log-entry">
             <span className="log-time">{entry.time}</span>
+            {entry.user && <span className="log-user">{entry.user}</span>}
             <span className={`log-msg ${entry.type}`}>{entry.msg}</span>
           </div>
         ))}
