@@ -39,7 +39,7 @@ export default function Topbar({ activeModule }) {
   return (
     <div className="topbar">
       {firstName && (
-        <div className="topbar-greeting">Hey {firstName}, have a savvy day!</div>
+        <div className="topbar-greeting">Hey {firstName}, have a Savvy day!</div>
       )}
       <div className="topbar-right">
         <div className="dual-clock">
