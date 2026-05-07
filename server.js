@@ -762,19 +762,25 @@ app.get('/api/xcally/queue', async (req, res) => {
     const pass = process.env.XCALLY_PASS;
     if (!base || !user || !pass) return res.status(500).json({ error: 'Xcally not configured' });
 
-    const r = await axios.get(`${base}/api/realtime/queues`, {
-      auth: { username: user, password: pass },
-    });
-    const queue = (r.data?.rows || []).find(q => q.name === XCALLY_QUEUE_NAME);
+    const auth = { username: user, password: pass };
+    const [queueRes, channelsRes] = await Promise.all([
+      axios.get(`${base}/api/realtime/queues`, { auth }),
+      axios.get(`${base}/api/rpc/voice/queues/channels`, { auth }),
+    ]);
+
+    const queue = (queueRes.data?.rows || []).find(q => q.name === XCALLY_QUEUE_NAME);
     if (!queue) return res.status(404).json({ error: `Queue ${XCALLY_QUEUE_NAME} not found` });
 
-    const avgHoldTime = queue.answered > 0
-      ? Math.round(queue.sumHoldTime / queue.answered)
+    const activeCallers = (channelsRes.data?.rows || []).filter(
+      r => r.queue === XCALLY_QUEUE_NAME && !r.queuecallerexit && !r.queuecallerabandon
+    );
+    const longestWait = activeCallers.length > 0
+      ? Math.max(...activeCallers.map(r => r.holdtime || 0))
       : 0;
 
     res.json({
       waiting:     queue.waiting,
-      avgHoldTime,
+      longestWait,
       answered:    queue.answered,
       abandoned:   queue.abandoned,
     });

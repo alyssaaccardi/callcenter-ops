@@ -129,8 +129,8 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
             </div>
             <div className="tv-queue-stat-divider" />
             <div className="tv-queue-stat">
-              <div className="tv-queue-stat-label">Avg Hold Time</div>
-              <div className="tv-queue-stat-value">{fmtSeconds(xcally?.avgHoldTime)}</div>
+              <div className="tv-queue-stat-label">Longest Wait</div>
+              <div className="tv-queue-stat-value">{fmtSeconds(xcally?.longestWait)}</div>
             </div>
           </div>
         )}
