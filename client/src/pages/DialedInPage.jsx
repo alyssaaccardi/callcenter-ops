@@ -316,8 +316,18 @@ export default function DialedInPage() {
             </div>
           </div>
           <div className="tv-header-right">
-            <div className="tv-clock">{time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
-            <div className="tv-date">{time.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</div>
+            <div className="tv-dual-clock">
+              <div className="tv-clock-entry">
+                <span className="tv-clock-label">EST</span>
+                <span className="tv-clock">{time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' })}</span>
+              </div>
+              <div className="tv-clock-sep" />
+              <div className="tv-clock-entry">
+                <span className="tv-clock-label">BZ</span>
+                <span className="tv-clock">{time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'America/Belize' })}</span>
+              </div>
+            </div>
+            <div className="tv-date">{time.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'America/New_York' })}</div>
           </div>
         </div>
 

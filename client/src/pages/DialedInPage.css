@@ -87,6 +87,10 @@
 .tv-header-center { text-align: center; }
 .tv-header-title { font-family: 'Bebas Neue', sans-serif; font-size: 36px; letter-spacing: 0.2em; color: rgba(255,255,255,0.4); text-transform: uppercase; }
 .tv-header-right { text-align: right; }
+.tv-dual-clock { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.tv-clock-entry { display: flex; align-items: baseline; gap: 5px; }
+.tv-clock-label { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700; color: #4a5a7a; letter-spacing: 0.12em; text-transform: uppercase; }
+.tv-clock-sep { width: 1px; height: 16px; background: rgba(255,255,255,0.15); }
 .tv-clock { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 600; color: #f0f4ff; letter-spacing: 0.05em; }
 .tv-date  { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #4a5a7a; margin-top: 2px; letter-spacing: 0.1em; text-transform: uppercase; }
 
