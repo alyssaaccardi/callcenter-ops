@@ -64,7 +64,9 @@ export default function SlackWorkflows() {
               <span className="workflow-scope">{wf.scope}</span>
             </div>
             <div className="workflow-url-display">
-              {wf.url || '(not configured — check Settings → API Keys → Slack)'}
+              {wf.url
+                ? wf.url.replace(/(hooks\.slack\.com\/triggers\/[^/]+\/)\d+\/\S+/, '$1••••••••/••••••••')
+                : '(not configured — check Settings → API Keys → Slack)'}
             </div>
             <div className="workflow-actions">
               <button

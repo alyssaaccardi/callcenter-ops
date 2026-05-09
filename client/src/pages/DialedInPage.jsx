@@ -119,7 +119,7 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
           </div>
           {counts.standbyNames && <div className="tv-standby-names">{counts.standbyNames}</div>}
         </div>
-        {xcally !== undefined && (
+        {xcally != null && (
           <div className="tv-queue-stats">
             <div className="tv-queue-stat">
               <div className="tv-queue-stat-label">Callers Waiting</div>

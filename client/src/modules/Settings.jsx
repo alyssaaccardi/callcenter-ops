@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useApp } from '../context/AppContext';
 import UserManagement from '../components/UserManagement';
 
 const SETTINGS_TABS = [
@@ -22,7 +21,6 @@ function useLocalSetting(key, defaultVal) {
 }
 
 export default function Settings() {
-  const { toast, addLog } = useApp();
   const [activeTab, setActiveTab] = useState('general');
 
   // Call centers
@@ -63,11 +61,6 @@ export default function Settings() {
     setCannedResponses(cannedResponses.filter((_, idx) => idx !== i));
   }
 
-  function saveAll() {
-    toast('Settings saved', 'success');
-    addLog('Settings saved', 'ok');
-  }
-
   return (
     <div>
       <div className="page-header">
@@ -75,7 +68,6 @@ export default function Settings() {
           <div className="page-title">Settings</div>
           <div className="page-sub">API keys, integrations, and call center configuration</div>
         </div>
-        <button className="btn btn-primary" onClick={saveAll}>Save All Settings</button>
       </div>
 
       <div className="settings-subnav">

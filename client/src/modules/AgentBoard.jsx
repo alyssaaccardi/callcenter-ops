@@ -12,6 +12,7 @@ export default function AgentBoard() {
   const { toast, addLog } = useApp();
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
   const [activeTab, setActiveTab] = useState('here');
   const [selected, setSelected] = useState(new Set());
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -33,12 +34,14 @@ export default function AgentBoard() {
 
   async function fetchAgents() {
     setLoading(true);
+    setFetchError(false);
     try {
       const res = await api.get('/api/monday/agents');
       setAgents(res.data?.agents || []);
       setLastUpdated(new Date().toLocaleTimeString());
       setSelected(new Set());
     } catch (e) {
+      setFetchError(true);
       toast('Failed to load agents', 'error');
     } finally {
       setLoading(false);
@@ -93,7 +96,7 @@ export default function AgentBoard() {
   }
 
   function selectAll(val) {
-    if (val) setSelected(new Set(hereAgents.map(a => a.id)));
+    if (val) setSelected(new Set((hereAgents || []).map(a => a.id)));
     else setSelected(new Set());
   }
 
@@ -191,8 +194,8 @@ export default function AgentBoard() {
             <tbody>
               {agents.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 12 }}>
-                    Click Refresh to load agents from Monday.com
+                  <td colSpan={5} style={{ textAlign: 'center', padding: 24, color: fetchError ? 'var(--danger)' : 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 12 }}>
+                    {fetchError ? 'Failed to load agents — check Monday.com connection' : 'Click Refresh to load agents from Monday.com'}
                   </td>
                 </tr>
               )}
@@ -244,8 +247,8 @@ export default function AgentBoard() {
             <tbody>
               {agents.length === 0 && (
                 <tr>
-                  <td colSpan={4} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 12 }}>
-                    Click Refresh to load agents from Monday.com
+                  <td colSpan={4} style={{ textAlign: 'center', padding: 24, color: fetchError ? 'var(--danger)' : 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 12 }}>
+                    {fetchError ? 'Failed to load agents — check Monday.com connection' : 'Click Refresh to load agents from Monday.com'}
                   </td>
                 </tr>
               )}

@@ -357,7 +357,7 @@ function ActivityLog() {
       <div className="log-feed">
         {activityLog.length === 0 && <div className="log-empty">No activity yet.</div>}
         {activityLog.map((entry, i) => (
-          <div key={i} className="log-entry">
+          <div key={`${entry.time}-${i}`} className="log-entry">
             <span className="log-time">{entry.time}</span>
             {entry.user && <span className="log-user">{entry.user}</span>}
             <span className={`log-msg ${entry.type}`}>{entry.msg}</span>

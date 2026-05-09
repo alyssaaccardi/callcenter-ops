@@ -7,6 +7,12 @@ const ROLES = [
   { value: 'tv_display', label: 'TV Display' },
 ];
 
+const ROLE_STYLE = {
+  super_admin:    { background: 'rgba(99,102,241,0.2)',  color: '#a5b4fc' },
+  call_center_ops:{ background: 'rgba(0,201,177,0.15)',  color: '#00c9b1' },
+  tv_display:     { background: 'rgba(251,146,60,0.15)', color: '#fb923c' },
+};
+
 export default function UserManagement() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -16,6 +22,7 @@ export default function UserManagement() {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [confirmEmail, setConfirmEmail] = useState(null);
 
   async function fetchUsers() {
     try {
@@ -50,7 +57,8 @@ export default function UserManagement() {
   }
 
   async function handleRemove(userEmail) {
-    if (!confirm(`Remove ${userEmail}?`)) return;
+    if (confirmEmail !== userEmail) { setConfirmEmail(userEmail); return; }
+    setConfirmEmail(null);
     try {
       await api.delete(`/api/users/${encodeURIComponent(userEmail)}`);
       await fetchUsers();
@@ -83,20 +91,27 @@ export default function UserManagement() {
                   <td style={{ padding: '10px 0' }}>
                     <span style={{
                       fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
-                      background: u.role === 'super_admin' ? 'rgba(99,102,241,0.2)' : 'rgba(0,201,177,0.15)',
-                      color: u.role === 'super_admin' ? '#a5b4fc' : '#00c9b1',
+                      ...(ROLE_STYLE[u.role] || ROLE_STYLE.call_center_ops),
                     }}>
                       {ROLES.find(r => r.value === u.role)?.label || u.role}
                     </span>
                   </td>
                   <td style={{ padding: '10px 0', textAlign: 'right' }}>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => handleRemove(u.email)}
-                      style={{ color: 'var(--danger)', fontSize: 12 }}
-                    >
-                      Remove
-                    </button>
+                    {confirmEmail === u.email ? (
+                      <span style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                        <span style={{ fontSize: 12, color: 'var(--danger)' }}>Confirm?</span>
+                        <button className="btn btn-danger btn-sm" onClick={() => handleRemove(u.email)}>Yes</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setConfirmEmail(null)}>No</button>
+                      </span>
+                    ) : (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => handleRemove(u.email)}
+                        style={{ color: 'var(--danger)', fontSize: 12 }}
+                      >
+                        Remove
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

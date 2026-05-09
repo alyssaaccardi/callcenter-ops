@@ -11,10 +11,11 @@ const MODULE_TITLES = {
 };
 
 function useClock(tz) {
-  const [time, setTime] = useState('');
+  const [time, setTime] = useState(() =>
+    new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: tz })
+  );
   useEffect(() => {
     const tick = () => setTime(new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: tz }));
-    tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [tz]);
