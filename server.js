@@ -196,16 +196,18 @@ app.delete('/api/users/:email', requireRole('super_admin'), (req, res) => {
 });
 
 // ─── Tutorial Routes ──────────────────────────────────────────────────────────
-// Tutorials the current user should see (enabled + role match + not dismissed)
+// Tutorials the current user should see (enabled + role/user match + not dismissed)
 app.get('/api/tutorials', requireAuth, (req, res) => {
   const tutorials = loadTutorials();
   const users     = listUsers();
   const dismissed = users[req.user.email]?.dismissedTutorials || [];
-  const role      = req.user.role;
-  const visible   = Object.values(tutorials).filter(t => {
+  const { role, email } = req.user;
+  const visible = Object.values(tutorials).filter(t => {
     if (!t.enabled) return false;
     if (dismissed.includes(t.id)) return false;
-    return t.roles.includes('all') || t.roles.includes(role);
+    const roles = t.enabledRoles || t.roles || [];
+    const ulist = t.enabledUsers || [];
+    return roles.includes('all') || roles.includes(role) || ulist.includes(email);
   });
   res.json({ tutorials: visible });
 });
@@ -221,14 +223,17 @@ app.get('/api/tutorials/admin', requireRole('super_admin'), (req, res) => {
   res.json({ tutorials: Object.values(loadTutorials()) });
 });
 
-// Admin: toggle enabled, optionally reset all dismissals
+// Admin: update tutorial config (enabled, enabledRoles, enabledUsers, resetDismissals)
 app.patch('/api/tutorials/:id', requireRole('super_admin'), (req, res) => {
   const tutorials = loadTutorials();
   if (!tutorials[req.params.id]) return res.status(404).json({ error: 'Not found' });
-  if (req.body.enabled !== undefined) tutorials[req.params.id].enabled = req.body.enabled;
+  const t = tutorials[req.params.id];
+  if (req.body.enabled       !== undefined) t.enabled      = req.body.enabled;
+  if (req.body.enabledRoles  !== undefined) t.enabledRoles = req.body.enabledRoles;
+  if (req.body.enabledUsers  !== undefined) t.enabledUsers = req.body.enabledUsers;
   saveTutorials(tutorials);
   if (req.body.resetDismissals) resetTutorialDismissals(req.params.id);
-  res.json({ success: true, tutorial: tutorials[req.params.id] });
+  res.json({ success: true, tutorial: t });
 });
 
 // ─── Dashboard Routes ─────────────────────────────────────────────────────────

@@ -4,13 +4,15 @@
     "title": "Canned Responses",
     "description": "How to use and create canned response templates on the Status Board",
     "enabled": true,
-    "roles": ["super_admin", "call_center_ops"]
+    "enabledRoles": ["super_admin", "call_center_ops"],
+    "enabledUsers": []
   },
   "general-intro": {
     "id": "general-intro",
     "title": "General Introduction",
     "description": "Welcome overview shown to all new users on first login",
     "enabled": false,
-    "roles": ["all"]
+    "enabledRoles": ["all"],
+    "enabledUsers": []
   }
 }
