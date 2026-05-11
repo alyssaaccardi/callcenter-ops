@@ -1,0 +1,36 @@
+/* ── HubSpot placeholder card ────────────────────────────────────────────────── */
+.tc-hubspot-strip {
+  display: flex;
+}
+
+.tc-hubspot-card {
+  max-width: 260px;
+  border-color: rgba(251,191,36,0.25) !important;
+  background: rgba(251,191,36,0.04) !important;
+  opacity: 0.75;
+  cursor: default;
+}
+
+.tc-placeholder-val {
+  color: rgba(60,50,120,0.25) !important;
+}
+
+.tc-placeholder-sub {
+  font-size: 10px;
+  color: rgba(60,50,120,0.35);
+  margin-top: 3px;
+  font-style: italic;
+}
+
+body.dark .tc-hubspot-card {
+  border-color: rgba(251,191,36,0.2) !important;
+  background: rgba(251,191,36,0.06) !important;
+}
+
+body.dark .tc-placeholder-val {
+  color: rgba(226,232,240,0.2) !important;
+}
+
+body.dark .tc-placeholder-sub {
+  color: rgba(226,232,240,0.3);
+}

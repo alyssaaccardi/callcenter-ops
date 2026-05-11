@@ -62,7 +62,7 @@ export default function GroupSelect({ groups, selected, onChange, loading }) {
 
       {open && (
         <div className="group-dropdown">
-          {loading && <div className="group-dropdown-empty">Loading groups…</div>}
+          {loading && <div className="group-dropdown-empty">Dialing in...</div>}
           {!loading && filtered.length === 0 && (
             <div className="group-dropdown-empty">No groups found</div>
           )}

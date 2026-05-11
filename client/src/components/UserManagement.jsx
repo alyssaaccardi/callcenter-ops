@@ -4,12 +4,16 @@ import api from '../api';
 const ROLES = [
   { value: 'super_admin', label: 'Super Admin' },
   { value: 'call_center_ops', label: 'Call Center Ops' },
+  { value: 'support', label: 'Support' },
+  { value: 'tech', label: 'Tech Team' },
   { value: 'tv_display', label: 'TV Display' },
 ];
 
 const ROLE_STYLE = {
   super_admin:    { background: 'rgba(99,102,241,0.2)',  color: '#a5b4fc' },
   call_center_ops:{ background: 'rgba(0,201,177,0.15)',  color: '#00c9b1' },
+  support:        { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
+  tech:           { background: 'rgba(16,185,129,0.15)', color: '#34d399' },
   tv_display:     { background: 'rgba(251,146,60,0.15)', color: '#fb923c' },
 };
 
@@ -72,7 +76,7 @@ export default function UserManagement() {
       <div className="settings-card">
         <h3>Users</h3>
         {loading ? (
-          <div style={{ color: 'var(--muted)', fontSize: 13 }}>Loading...</div>
+          <div style={{ color: 'var(--muted)', fontSize: 13 }}>Dialing in...</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>

@@ -11,7 +11,8 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { passport, requireAuth, requireRole, listUsers, addUser, removeUser } = require('./auth');
 
-https.globalAgent.setMaxListeners(20);
+https.globalAgent.setMaxListeners(50);
+require('events').EventEmitter.defaultMaxListeners = 50;
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -154,7 +155,7 @@ app.get('/api/users', requireRole('super_admin'), (req, res) => {
 app.post('/api/users', requireRole('super_admin'), (req, res) => {
   const { email, name, role } = req.body;
   if (!email || !name || !role) return res.status(400).json({ error: 'email, name, and role are required' });
-  if (!['super_admin', 'call_center_ops', 'tv_display'].includes(role)) return res.status(400).json({ error: 'invalid role' });
+  if (!['super_admin', 'call_center_ops', 'tv_display', 'support'].includes(role)) return res.status(400).json({ error: 'invalid role' });
   addUser(email, name, role);
   res.json({ success: true });
 });
@@ -262,6 +263,96 @@ app.post('/api/status', requireAuth, async (req, res) => {
   saveStatusStore();
 
   res.json({ success: true });
+});
+
+// ─── Slack Workflows (persisted) ─────────────────────────────────────────────
+const WORKFLOWS_FILE = path.join(__dirname, 'slack-workflows.json');
+
+const BUILTIN_WORKFLOWS = [
+  { id: 'builtin_didsUnavailable', name: 'DIDs Unavailable',     scope: 'DID Status',  icon: '🔴', builtin: true, envKey: 'SLACK_DID_UNAVAILABLE_URL' },
+  { id: 'builtin_didsAvailable',   name: 'DIDs Available',       scope: 'DID Status',  icon: '🟢', builtin: true, envKey: 'SLACK_DID_AVAILABLE_URL'   },
+  { id: 'builtin_savvyActive',     name: 'Savvy Phone Active',   scope: 'Savvy Phone', icon: '✅', builtin: true, envKey: 'SLACK_SAVVY_ACTIVE_URL'    },
+  { id: 'builtin_savvyInactive',   name: 'Savvy Phone Inactive', scope: 'Savvy Phone', icon: '⚠️', builtin: true, envKey: 'SLACK_SAVVY_INACTIVE_URL'  },
+];
+
+function loadWorkflows() {
+  let stored = [];
+  try { stored = JSON.parse(fs.readFileSync(WORKFLOWS_FILE, 'utf8')); } catch { stored = []; }
+  const storedIds = new Set(stored.map(w => w.id));
+  for (const b of BUILTIN_WORKFLOWS) {
+    if (!storedIds.has(b.id)) stored.unshift({ ...b, url: process.env[b.envKey] || '', description: '' });
+  }
+  return stored;
+}
+
+function saveWorkflows(wfs) {
+  fs.writeFileSync(WORKFLOWS_FILE, JSON.stringify(wfs));
+}
+
+function auditWorkflow(msg, userName) {
+  const entry = {
+    time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' }),
+    user: userName || '',
+    msg,
+    type: 'info',
+  };
+  activityLog = [entry, ...activityLog].slice(0, LOG_MAX);
+  saveLog(activityLog);
+}
+
+app.get('/api/slack/workflows', requireAuth, (req, res) => {
+  res.json(loadWorkflows());
+});
+
+app.post('/api/slack/workflows', requireAuth, (req, res) => {
+  const { name, scope, icon, url, description } = req.body;
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  const wfs = loadWorkflows();
+  const wf = {
+    id: `custom_${Date.now()}`,
+    name: name.trim(),
+    scope: (scope || '').trim(),
+    icon: icon || '⚡',
+    url: (url || '').trim(),
+    description: (description || '').trim(),
+    builtin: false,
+    createdAt: new Date().toISOString(),
+  };
+  wfs.push(wf);
+  saveWorkflows(wfs);
+  auditWorkflow(`Added Slack workflow: "${wf.name}"`, req.user?.name);
+  res.json(wf);
+});
+
+app.put('/api/slack/workflows/:id', requireAuth, (req, res) => {
+  const wfs = loadWorkflows();
+  const idx = wfs.findIndex(w => w.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Workflow not found' });
+  const prev = wfs[idx].name;
+  const { name, scope, icon, url, description } = req.body;
+  wfs[idx] = {
+    ...wfs[idx],
+    name: (name || wfs[idx].name).trim(),
+    scope: scope !== undefined ? scope.trim() : wfs[idx].scope,
+    icon: icon || wfs[idx].icon,
+    url: url !== undefined ? url.trim() : wfs[idx].url,
+    description: description !== undefined ? description.trim() : (wfs[idx].description || ''),
+    updatedAt: new Date().toISOString(),
+  };
+  saveWorkflows(wfs);
+  const label = name && name.trim() !== prev ? `"${prev}" → "${name.trim()}"` : `"${prev}"`;
+  auditWorkflow(`Updated Slack workflow: ${label}`, req.user?.name);
+  res.json(wfs[idx]);
+});
+
+app.delete('/api/slack/workflows/:id', requireAuth, (req, res) => {
+  const wfs = loadWorkflows();
+  const target = wfs.find(w => w.id === req.params.id);
+  if (!target) return res.status(404).json({ error: 'Workflow not found' });
+  if (target.builtin) return res.status(403).json({ error: 'Built-in workflows cannot be deleted' });
+  saveWorkflows(wfs.filter(w => w.id !== req.params.id));
+  auditWorkflow(`Deleted Slack workflow: "${target.name}"`, req.user?.name);
+  res.json({ ok: true });
 });
 
 // ─── Slack Proxy ──────────────────────────────────────────────────────────────
@@ -699,6 +790,577 @@ app.post('/api/monday/agent/:id/here', requireAuth, async (req, res) => {
   }
 });
 
+// ─── Monday.com: Support Overdue Tasks ───────────────────────────────────────
+app.get('/api/monday/support-tasks', async (req, res) => {
+  const token = req.query.t;
+  if (token) {
+    const sessions = loadTvSessions();
+    if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
+  } else if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const apiKey  = process.env.MONDAY_API_KEY;
+  const boardId = process.env.MONDAY_SUPPORT_TASK_BOARD_ID || '18358060875';
+  if (!apiKey) return res.status(500).json({ error: 'Monday.com credentials not configured' });
+
+  const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
+  const itemFields = `id name updated_at column_values(ids: ["color_mkxwxqsx", "status", "date_mkx5zfsz", "dropdown_mkxjmeyh", "multiple_person_mkx5smfv"]) { id text }`;
+
+  try {
+    const allItems = [];
+    let cursor = null;
+
+    do {
+      const query = cursor
+        ? `query { next_items_page(limit: 200, cursor: "${cursor}") { cursor items { ${itemFields} } } }`
+        : `query { boards(ids: [${boardId}]) { items_page(limit: 200) { cursor items { ${itemFields} } } } }`;
+
+      const response = await axios.post('https://api.monday.com/v2', { query }, { headers });
+      if (response.data?.errors) throw new Error(response.data.errors[0]?.message);
+
+      const page = cursor
+        ? response.data?.data?.next_items_page
+        : response.data?.data?.boards?.[0]?.items_page;
+
+      allItems.push(...(page?.items || []));
+      cursor = page?.cursor || null;
+    } while (cursor);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const DONE_PHRASES = ['done', 'complete', 'closed', "won't fix", 'cancelled', 'resolved'];
+
+    const tasks = allItems.map(item => {
+      const statusCol   = item.column_values?.find(c => c.id === 'color_mkxwxqsx');
+      const priorityCol = item.column_values?.find(c => c.id === 'status');
+      const dateCol     = item.column_values?.find(c => c.id === 'date_mkx5zfsz');
+      return {
+        id:         item.id,
+        name:       item.name,
+        status:     statusCol?.text   || '',
+        priority:   priorityCol?.text || '',
+        dueDate:    dateCol?.text     || '',
+        lastUpdate: item.updated_at,
+        link:       `https://answeringlegal-unit.monday.com/boards/${boardId}/pulses/${item.id}`,
+      };
+    }).filter(task => {
+      const statusLow = (task.status || '').toLowerCase();
+      if (statusLow === 'done' || statusLow === 'closed' || statusLow === 'cancelled') return false;
+      // Overdue = explicit Overdue status, OR past due date without completion
+      if (statusLow === 'overdue') return true;
+      if (!task.dueDate) return false;
+      const due = new Date(task.dueDate);
+      return !isNaN(due) && due < today;
+    });
+
+    res.json({ tasks });
+  } catch (err) {
+    console.error('Monday support tasks error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch support tasks', details: err.message });
+  }
+});
+
+// ─── Monday.com: Support Task Board Stats ────────────────────────────────────
+app.get('/api/monday/support-stats', async (req, res) => {
+  const token = req.query.t;
+  if (token) {
+    const sessions = loadTvSessions();
+    if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
+  } else if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const apiKey  = process.env.MONDAY_API_KEY;
+  const boardId = process.env.MONDAY_SUPPORT_TASK_BOARD_ID || '18358060875';
+  if (!apiKey) return res.status(500).json({ error: 'Monday.com credentials not configured' });
+
+  const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
+  const itemFields = `id name updated_at column_values(ids: ["color_mkxwxqsx", "status", "date_mkx5zfsz", "dropdown_mkxjmeyh", "multiple_person_mkx5smfv", "dropdown_mkzc9hm"]) { id text }`;
+
+  try {
+    const allItems = [];
+    let cursor = null;
+
+    do {
+      const query = cursor
+        ? `query { next_items_page(limit: 200, cursor: "${cursor}") { cursor items { ${itemFields} } } }`
+        : `query { boards(ids: [${boardId}]) { items_page(limit: 200) { cursor items { ${itemFields} } } } }`;
+
+      const response = await axios.post('https://api.monday.com/v2', { query }, { headers });
+      if (response.data?.errors) throw new Error(response.data.errors[0]?.message);
+
+      const page = cursor
+        ? response.data?.data?.next_items_page
+        : response.data?.data?.boards?.[0]?.items_page;
+
+      allItems.push(...(page?.items || []));
+      cursor = page?.cursor || null;
+    } while (cursor);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const byStatus = {};
+    const byPriority = {};
+    const bySquad = {};
+    const byAssignee = {};
+    let overdue = 0, dueToday = 0, dueThisWeek = 0;
+
+    const endOfWeek = new Date(today);
+    endOfWeek.setDate(today.getDate() + (7 - today.getDay()));
+
+    for (const item of allItems) {
+      const statusText   = item.column_values?.find(c => c.id === 'color_mkxwxqsx')?.text || 'Not Set';
+      const priorityText = item.column_values?.find(c => c.id === 'status')?.text || 'None';
+      const dueDateText  = item.column_values?.find(c => c.id === 'date_mkx5zfsz')?.text || '';
+      const squadText    = item.column_values?.find(c => c.id === 'dropdown_mkxjmeyh')?.text || 'Unassigned';
+      const assigneeTxt  = item.column_values?.find(c => c.id === 'multiple_person_mkx5smfv')?.text || '';
+
+      byStatus[statusText] = (byStatus[statusText] || 0) + 1;
+      byPriority[priorityText] = (byPriority[priorityText] || 0) + 1;
+      bySquad[squadText] = (bySquad[squadText] || 0) + 1;
+      if (assigneeTxt) {
+        for (const name of assigneeTxt.split(',').map(s => s.trim()).filter(Boolean)) {
+          byAssignee[name] = (byAssignee[name] || 0) + 1;
+        }
+      }
+
+      if (dueDateText) {
+        const due = new Date(dueDateText);
+        if (!isNaN(due)) {
+          const dueDay = new Date(due); dueDay.setHours(0,0,0,0);
+          if (dueDay < today) overdue++;
+          else if (dueDay.getTime() === today.getTime()) dueToday++;
+          else if (dueDay <= endOfWeek) dueThisWeek++;
+        }
+      }
+      if ((statusText || '').toLowerCase() === 'overdue') overdue = Math.max(overdue, 1);
+    }
+
+    res.json({
+      total: allItems.length,
+      overdue,
+      dueToday,
+      dueThisWeek,
+      byStatus:   Object.entries(byStatus).sort((a,b) => b[1]-a[1]).map(([label,count]) => ({ label, count })),
+      byPriority: Object.entries(byPriority).sort((a,b) => b[1]-a[1]).map(([label,count]) => ({ label, count })),
+      bySquad:    Object.entries(bySquad).sort((a,b) => b[1]-a[1]).map(([label,count]) => ({ label, count })),
+      byAssignee: Object.entries(byAssignee).sort((a,b) => b[1]-a[1]).slice(0,10).map(([label,count]) => ({ label, count })),
+    });
+  } catch (err) {
+    console.error('Monday support stats error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch support stats', details: err.message });
+  }
+});
+
+// ─── Zendesk Helpers ─────────────────────────────────────────────────────────
+function zdHeaders() {
+  const email = process.env.ZENDESK_EMAIL;
+  const token = process.env.ZENDESK_API_TOKEN;
+  if (!email || !token) throw new Error('Zendesk not configured');
+  const encoded = Buffer.from(`${email}/token:${token}`).toString('base64');
+  return { Authorization: `Basic ${encoded}`, 'Content-Type': 'application/json' };
+}
+
+function zdBase() {
+  const sub = process.env.ZENDESK_SUBDOMAIN;
+  if (!sub) throw new Error('ZENDESK_SUBDOMAIN not configured');
+  return `https://${sub}.zendesk.com/api/v2`;
+}
+
+// ─── Zendesk Group IDs ────────────────────────────────────────────────────────
+const ZD_SUPPORT_GROUPS   = ['21144265188763', '29126651333275'];
+const ZD_ESCALATION_GROUP = '37189086269723';
+const ZD_TECH_GROUPS      = ['21144204914587', '37940070419611', '21144716643995', '40495779771547', '29755770910107', '27880413441307'];
+
+// Tech team agent name roster — used for leaderboard filtering since group IDs may not match
+const TECH_ROSTER = ['leah', 'jake', 'tabitha', 'jessica', 'jessie'];
+
+// Agents excluded from support leaderboard (managers, non-agents, etc.)
+const SUPPORT_LB_EXCLUDE = ['chrissy'];
+
+async function zdGroupMembers(base, headers, groupIds) {
+  const sets = await Promise.all(groupIds.map(async id => {
+    try {
+      const r = await axios.get(`${base}/group_memberships.json?group_id=${id}&per_page=100`, { headers });
+      return (r.data?.group_memberships || []).map(m => m.user_id);
+    } catch { return []; }
+  }));
+  return [...new Set(sets.flat())];
+}
+
+function subtractBusinessHours(date, hours) {
+  const result = new Date(date);
+  let remaining = hours;
+  while (remaining > 0) {
+    result.setTime(result.getTime() - 3600000);
+    const day = result.getDay(), hr = result.getHours();
+    if (day >= 1 && day <= 5 && hr >= 9 && hr < 17) remaining--;
+  }
+  return result;
+}
+
+// ─── Zendesk: Stale Tickets (NEW/OPEN, not touched N+ biz hours) ─────────────
+app.get('/api/zendesk/stale-tickets', async (req, res) => {
+  const token = req.query.t;
+  if (token) {
+    const sessions = loadTvSessions();
+    if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
+  } else if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const headers = zdHeaders();
+    const base    = zdBase();
+    const hours   = Math.min(Math.max(parseInt(req.query.hours) || 24, 1), 168);
+    const cutoff  = subtractBusinessHours(new Date(), hours);
+    const sub     = process.env.ZENDESK_SUBDOMAIN;
+    const team    = req.query.team || null;
+
+    // Format date for Zendesk search (YYYY-MM-DD HH:MM avoids ISO colon encoding issues)
+    const pad = n => String(n).padStart(2, '0');
+    const zdDate = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+
+    // Build group filter for team-scoped views
+    // Support also claims tickets with no group/assignee (unrouted new tickets)
+    let groupFilter = '';
+    if (team) {
+      const groups = team === 'tech' ? ZD_TECH_GROUPS : [...ZD_SUPPORT_GROUPS, ZD_ESCALATION_GROUP];
+      groupFilter = ' ' + groups.map(id => `group_id:${id}`).join(' ');
+      if (team !== 'tech') groupFilter += ' group_id:none';
+    }
+
+    const query = `type:ticket status:new status:open -status:solved -status:closed -status:deleted updated<${zdDate(cutoff)}${groupFilter}`;
+
+    const resp = await axios.get(`${base}/search.json`, {
+      headers,
+      params: { query, sort_by: 'updated_at', sort_order: 'asc', per_page: 100 },
+    });
+
+    const tickets = (resp.data?.results || [])
+      .filter(t => t.status === 'new' || t.status === 'open')
+      .map(t => ({
+        id:        t.id,
+        subject:   t.subject,
+        status:    t.status,
+        updatedAt: t.updated_at,
+        link:      `https://${sub}.zendesk.com/agent/tickets/${t.id}`,
+      }))
+      .sort((a, b) => new Date(a.updatedAt) - new Date(b.updatedAt));
+
+    res.json({ tickets, hours, cutoff: cutoff.toISOString() });
+  } catch (err) {
+    if (err.message === 'Zendesk not configured') return res.json({ tickets: [], unconfigured: true });
+    console.error('Zendesk stale tickets error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch stale tickets', details: err.message });
+  }
+});
+
+// ─── Zendesk: CSAT Ratings ───────────────────────────────────────────────────
+app.get('/api/zendesk/csat', async (req, res) => {
+  const token = req.query.t;
+  if (token) {
+    const sessions = loadTvSessions();
+    if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
+  } else if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const headers = zdHeaders();
+    const base    = zdBase();
+    const sub     = process.env.ZENDESK_SUBDOMAIN;
+
+    // Resolve start time from period param (or legacy days param)
+    const period = req.query.period;
+    let startTime = null;
+    if (period && period !== 'all') {
+      const now = new Date();
+      let start;
+      if      (period === 'today')      { start = new Date(now); start.setUTCHours(0, 0, 0, 0); }
+      else if (period === 'yesterday')  { start = new Date(now); start.setUTCDate(start.getUTCDate() - 1); start.setUTCHours(0, 0, 0, 0); }
+      else if (period === '90d')        { start = new Date(now); start.setUTCDate(start.getUTCDate() - 90); }
+      else if (period === '180d')       { start = new Date(now); start.setUTCDate(start.getUTCDate() - 180); }
+      else if (period === 'this-week')  {
+        start = new Date(now);
+        const dow = now.getUTCDay();
+        start.setUTCDate(now.getUTCDate() - (dow === 0 ? 6 : dow - 1));
+        start.setUTCHours(0, 0, 0, 0);
+      }
+      else if (period === 'last-week')  {
+        start = new Date(now);
+        const dow = now.getUTCDay();
+        start.setUTCDate(now.getUTCDate() - (dow === 0 ? 6 : dow - 1) - 7);
+        start.setUTCHours(0, 0, 0, 0);
+      }
+      else if (period === 'last-month') {
+        start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+      }
+      if (start) startTime = Math.floor(start.getTime() / 1000);
+    } else {
+      const days = Math.min(parseInt(req.query.days) || 180, 365);
+      const since = new Date();
+      since.setDate(since.getDate() - days);
+      startTime = Math.floor(since.getTime() / 1000);
+    }
+
+    const stParam = startTime ? `&start_time=${startTime}` : '';
+    const [goodRes, badRes] = await Promise.all([
+      axios.get(`${base}/satisfaction_ratings.json?score=good&sort_order=desc&per_page=100${stParam}`, { headers }),
+      axios.get(`${base}/satisfaction_ratings.json?score=bad&sort_order=desc&per_page=100${stParam}`, { headers }),
+    ]);
+
+    // Build optional team filter — use group membership for team-scoped filtering
+    let teamAgentIds = null;
+    const team = req.query.team || null;
+    if (team) {
+      try {
+        const groupIds  = team === 'tech' ? ZD_TECH_GROUPS : [...ZD_SUPPORT_GROUPS, ZD_ESCALATION_GROUP];
+        const memberIds = await zdGroupMembers(base, headers, groupIds);
+        if (memberIds.length) teamAgentIds = new Set(memberIds);
+      } catch { /* non-fatal — fall through to unfiltered */ }
+    }
+
+    const byTeam = r => !teamAgentIds || teamAgentIds.has(r.assignee_id);
+
+    const mapRating = (r, score) => ({
+      id:        r.id,
+      score,
+      comment:   r.comment || '',
+      createdAt: r.created_at,
+      ticketId:  r.ticket_id,
+      requester: r.requester?.name || '',
+      link:      `https://${sub}.zendesk.com/agent/tickets/${r.ticket_id}`,
+    });
+
+    const goodAll = (goodRes.data?.satisfaction_ratings || [])
+      .filter(r => byTeam(r) && r.comment && r.comment.trim())
+      .map(r => mapRating(r, 'good'));
+
+    const badAll = (badRes.data?.satisfaction_ratings || [])
+      .filter(r => byTeam(r))
+      .map(r => mapRating(r, 'bad'));
+
+    // Combined, most recent first (capped for list display)
+    const ratings = [...goodAll, ...badAll]
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 60);
+
+    // Weekly trend — roll back to Monday for each rating's week
+    const weeklyMap = {};
+    [...goodAll, ...badAll].forEach(r => {
+      const d   = new Date(r.createdAt);
+      const dow = d.getUTCDay(); // 0=Sun
+      const mon = new Date(d);
+      mon.setUTCDate(d.getUTCDate() - (dow === 0 ? 6 : dow - 1));
+      mon.setUTCHours(0, 0, 0, 0);
+      const key = mon.toISOString().slice(0, 10);
+      if (!weeklyMap[key]) weeklyMap[key] = { week: key, good: 0, bad: 0 };
+      if (r.score === 'good') weeklyMap[key].good++;
+      else weeklyMap[key].bad++;
+    });
+    const trend = Object.values(weeklyMap).sort((a, b) => a.week.localeCompare(b.week));
+
+    res.json({ ratings, trend, totalGood: goodAll.length, totalBad: badAll.length });
+  } catch (err) {
+    if (err.message === 'Zendesk not configured') return res.json({ ratings: [], trend: [], totalGood: 0, totalBad: 0, unconfigured: true });
+    console.error('Zendesk CSAT error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch CSAT ratings', details: err.message });
+  }
+});
+
+// ─── Zendesk: Leaderboard — all active agents across all groups ───────────────
+app.get('/api/zendesk/leaderboard', async (req, res) => {
+  const token = req.query.t;
+  if (token) {
+    const sessions = loadTvSessions();
+    if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
+  } else if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const period = req.query.period || 'this-week';
+  const team   = req.query.team   || 'support';
+
+  try {
+    const headers = zdHeaders();
+    const base    = zdBase();
+
+    // Resolve full user records
+    const usersRes  = await axios.get(`${base}/users.json?role=agent&per_page=100`, { headers });
+    const allAgents = (usersRes.data?.users || []).filter(u => u.active && !u.suspended);
+
+    let users;
+    const groupIds = team === 'tech' ? ZD_TECH_GROUPS : [...ZD_SUPPORT_GROUPS, ZD_ESCALATION_GROUP];
+    if (team === 'tech') {
+      // Filter by known name roster — avoids relying on correct group IDs
+      users = allAgents.filter(u => TECH_ROSTER.some(n => u.name.toLowerCase().includes(n)));
+    } else {
+      const memberIds = await zdGroupMembers(base, headers, groupIds);
+      if (!memberIds.length) return res.json({ support: [], escalation: [], csatGood: 0, csatBad: 0, zdSubdomain: process.env.ZENDESK_SUBDOMAIN || null });
+      const memberSet = new Set(memberIds);
+      users = allAgents
+        .filter(u => memberSet.has(u.id))
+        .filter(u => !SUPPORT_LB_EXCLUDE.some(n => u.name.toLowerCase().includes(n)));
+    }
+    if (!users.length) return res.json({ support: [], escalation: [], csatGood: 0, csatBad: 0, zdSubdomain: process.env.ZENDESK_SUBDOMAIN || null });
+
+    // For support leaderboard: track escalation sub-section membership
+    let escalationSet = new Set();
+    if (team !== 'tech') {
+      const escIds = await zdGroupMembers(base, headers, [ZD_ESCALATION_GROUP]);
+      escalationSet = new Set(escIds);
+    }
+    const isEscalation = u => escalationSet.has(u.id);
+
+    // Build date filter string for solved tickets
+    const now    = new Date();
+    const pad    = n => String(n).padStart(2, '0');
+    const zdDate = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+
+    let solvedFilter = '';
+    let periodStart  = null;
+    if (period !== 'all') {
+      let start, end;
+      if      (period === 'today')     { start = new Date(now); start.setUTCHours(0, 0, 0, 0); }
+      else if (period === 'yesterday') { start = new Date(now); start.setUTCDate(start.getUTCDate() - 1); start.setUTCHours(0, 0, 0, 0); end = new Date(now); end.setUTCHours(0, 0, 0, 0); }
+      else if (period === '90d')       { start = new Date(now); start.setUTCDate(start.getUTCDate() - 90); }
+      else if (period === '180d')      { start = new Date(now); start.setUTCDate(start.getUTCDate() - 180); }
+      else if (period === 'this-week') {
+        start = new Date(now);
+        const dow = now.getUTCDay();
+        start.setUTCDate(now.getUTCDate() - (dow === 0 ? 6 : dow - 1));
+        start.setUTCHours(0, 0, 0, 0);
+      }
+      else if (period === 'last-week') {
+        const dow = now.getUTCDay();
+        start = new Date(now);
+        start.setUTCDate(now.getUTCDate() - (dow === 0 ? 6 : dow - 1) - 7);
+        start.setUTCHours(0, 0, 0, 0);
+        end = new Date(start);
+        end.setUTCDate(start.getUTCDate() + 6);
+        end.setUTCHours(23, 59, 0, 0);
+      }
+      else if (period === 'last-month') {
+        start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+        end   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23, 59, 0, 0));
+      }
+      if (start) {
+        periodStart  = start;
+        // Use `solved>` to filter by actual solve date, not last-update date
+        solvedFilter = ` solved>${zdDate(start)}`;
+        if (end) solvedFilter += ` solved<${zdDate(end)}`;
+      }
+    }
+
+    const agentStats = await Promise.all(users.map(async u => {
+      try {
+        const [openRes, solvedRes] = await Promise.all([
+          axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id} status:open status:new` } }),
+          axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id} status:solved${solvedFilter}` } }),
+        ]);
+        return { id: u.id, name: u.name, open: openRes.data?.count || 0, solved: solvedRes.data?.count || 0, _u: u };
+      } catch {
+        return { id: u.id, name: u.name, open: 0, solved: 0, _u: u };
+      }
+    }));
+
+    const hasActivity = a => a.solved > 0 || a.open > 0;
+    const byActivity  = (a, b) => b.solved - a.solved || a.open - b.open;
+
+    // Split into sections — support has escalation sub-section, tech does not
+    const support    = agentStats.filter(a => hasActivity(a)).sort(byActivity).map(({ _u, ...rest }) => rest);
+    const escalation = team === 'tech'
+      ? []
+      : agentStats.filter(a => isEscalation(a._u) && hasActivity(a)).sort(byActivity).map(({ _u, ...rest }) => rest);
+
+    // Fetch team-scoped CSAT counts via group filter on ticket search
+    let csatGood = 0, csatBad = 0;
+    try {
+      const csatGroups = groupIds.map(id => `group_id:${id}`).join(' ');
+      const dateFilter = periodStart ? ` solved>${zdDate(periodStart)}` : '';
+      const [cgRes, cbRes] = await Promise.all([
+        axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket satisfaction:good ${csatGroups}${dateFilter}` } }),
+        axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket satisfaction:bad ${csatGroups}${dateFilter}` } }),
+      ]);
+      csatGood = cgRes.data?.count || 0;
+      csatBad  = cbRes.data?.count || 0;
+    } catch { /* non-fatal */ }
+
+    res.json({ agents: [...support, ...escalation], support, escalation, groupName: null, csatGood, csatBad, zdSubdomain: process.env.ZENDESK_SUBDOMAIN || null });
+  } catch (err) {
+    if (err.message === 'Zendesk not configured') return res.json({ agents: [], unconfigured: true });
+    console.error('Zendesk leaderboard error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch leaderboard', details: err.message });
+  }
+});
+
+// ─── Zendesk: List all groups (admin debug) ──────────────────────────────────
+app.get('/api/zendesk/groups', requireAuth, async (req, res) => {
+  try {
+    const headers = zdHeaders();
+    const base    = zdBase();
+    const r = await axios.get(`${base}/groups.json?per_page=100`, { headers });
+    const groups  = (r.data?.groups || []).map(g => ({ id: g.id, name: g.name }));
+    // Also get member counts for ZD_TECH_GROUPS
+    const techCounts = await Promise.all(ZD_TECH_GROUPS.map(async id => {
+      try {
+        const mr = await axios.get(`${base}/group_memberships.json?group_id=${id}&per_page=100`, { headers });
+        return { id, count: mr.data?.group_memberships?.length ?? 0 };
+      } catch { return { id, count: 'error' }; }
+    }));
+    res.json({ groups, techGroupMemberCounts: techCounts });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Zendesk: Queue stats — open/new/pending counts ─────────────────────────
+app.get('/api/zendesk/queue-stats', async (req, res) => {
+  const token = req.query.t;
+  if (token) {
+    const sessions = loadTvSessions();
+    if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
+  } else if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const headers = zdHeaders();
+    const base    = zdBase();
+    const team    = req.query.team || null;
+
+    // Build group filter for team-scoped views
+    // Support also claims tickets with no group/assignee (unrouted new tickets)
+    let groupFilter = '';
+    if (team) {
+      const groups = team === 'tech' ? ZD_TECH_GROUPS : [...ZD_SUPPORT_GROUPS, ZD_ESCALATION_GROUP];
+      groupFilter = ' ' + groups.map(id => `group_id:${id}`).join(' ');
+      if (team !== 'tech') groupFilter += ' group_id:none';
+    }
+
+    const q = (status) => `type:ticket status:${status}${groupFilter}`;
+    const [newRes, openRes, pendingRes, onHoldRes] = await Promise.all([
+      axios.get(`${base}/search.json`, { headers, params: { query: q('new')     } }),
+      axios.get(`${base}/search.json`, { headers, params: { query: q('open')    } }),
+      axios.get(`${base}/search.json`, { headers, params: { query: q('pending') } }),
+      axios.get(`${base}/search.json`, { headers, params: { query: q('hold')    } }),
+    ]);
+    res.json({
+      new:          newRes.data?.count     || 0,
+      open:         openRes.data?.count    || 0,
+      pending:      pendingRes.data?.count || 0,
+      onHold:       onHoldRes.data?.count  || 0,
+      zdSubdomain:  process.env.ZENDESK_SUBDOMAIN || null,
+    });
+  } catch (err) {
+    if (err.message === 'Zendesk not configured') return res.json({ new: 0, open: 0, pending: 0, onHold: 0, unconfigured: true });
+    console.error('Zendesk queue-stats error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch queue stats' });
+  }
+});
+
 // ─── HubSpot: DID Pool Counts ────────────────────────────────────────────────
 let hubspotDidCache = null;
 let hubspotDidCacheAt = 0;
@@ -749,6 +1411,69 @@ app.get('/api/hubspot/dids', async (req, res) => {
   } catch (err) {
     console.error('HubSpot DID error:', err.response?.data || err.message);
     res.status(500).json({ error: 'Failed to fetch HubSpot DID counts', details: err.message });
+  }
+});
+
+// ─── Monday.com: Account Review Board ────────────────────────────────────────
+const ACCOUNT_REVIEW_BOARD_ID = '18374393367';
+
+app.get('/api/monday/account-review', async (req, res) => {
+  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Unauthorized' });
+
+  const apiKey = process.env.MONDAY_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'Monday.com credentials not configured' });
+
+  const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
+  const colIds  = `["date4","dropdown_mkx66k90","status","rating_mkx62jww","rating_mm0ma61q","long_text_mkx82hag","integration_mkxjtjnt","dropdown_mkxjq6br","numeric_mm0j487r","multiple_person_mm0j46sv"]`;
+  const itemFields = `id name updated_at column_values(ids: ${colIds}) { id text }`;
+
+  // Fetch the 500 most recently updated items — the board has 17k+ items total and
+  // Monday's column filter rules don't work on this board type, so order_by is the
+  // only way to get a manageable slice without timing out.
+  const gqlQuery = `query {
+    boards(ids: [${ACCOUNT_REVIEW_BOARD_ID}]) {
+      items_page(limit: 500, query_params: {
+        order_by: [{ column_id: "__last_updated__", direction: desc }]
+      }) { items { ${itemFields} } }
+    }
+  }`;
+
+  try {
+    const response = await axios.post('https://api.monday.com/v2', { query: gqlQuery }, { headers, timeout: 20000 });
+
+    if (response.data?.errors) throw new Error(response.data.errors[0]?.message);
+
+    const allItems = response.data?.data?.boards?.[0]?.items_page?.items || [];
+
+    const col = (item, id) => item.column_values?.find(c => c.id === id)?.text || '';
+
+    const items = allItems.map(item => {
+      const buildRaw     = col(item, 'rating_mkx62jww');
+      const usabilityRaw = col(item, 'rating_mm0ma61q');
+      const adjustCount  = parseInt(col(item, 'numeric_mm0j487r')) || 0;
+      const hubspotRaw   = col(item, 'integration_mkxjtjnt');
+
+      return {
+        id:           item.id,
+        name:         item.name,
+        dateOpened:   col(item, 'date4'),
+        openedBy:     col(item, 'dropdown_mkx66k90') || col(item, 'multiple_person_mm0j46sv'),
+        status:       col(item, 'status'),
+        buildQuality: buildRaw     ? parseInt(buildRaw)     || null : null,
+        usability:    usabilityRaw ? parseInt(usabilityRaw) || null : null,
+        adjustments:  col(item, 'long_text_mkx82hag'),
+        adjustCount,
+        dealStage:    col(item, 'dropdown_mkxjq6br'),
+        hubspotUrl:   hubspotRaw || '',
+        updatedAt:    item.updated_at,
+        link:         `https://answeringlegal-unit.monday.com/boards/${ACCOUNT_REVIEW_BOARD_ID}/pulses/${item.id}`,
+      };
+    });
+
+    res.json({ items });
+  } catch (err) {
+    console.error('Account review error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch account review data', details: err.message });
   }
 });
 

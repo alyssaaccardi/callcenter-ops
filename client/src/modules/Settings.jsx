@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
-import UserManagement from '../components/UserManagement';
+import { useAuth } from '../context/AuthContext';
 
-const SETTINGS_TABS = [
-  { id: 'general',    label: 'Call Centers' },
-  { id: 'alert-cfg',  label: 'Alert Templates' },
-  { id: 'canned-cfg', label: 'Canned Responses' },
-  { id: 'portal',     label: 'Employee Portal' },
-  { id: 'users',      label: 'User Management' },
+const ALL_SETTINGS_TABS = [
+  { id: 'general',    label: 'Call Centers',     roles: ['super_admin', 'call_center_ops'] },
+  { id: 'alert-cfg',  label: 'Alert Templates',  roles: ['super_admin', 'call_center_ops'] },
+  { id: 'canned-cfg', label: 'Canned Responses', roles: ['super_admin', 'call_center_ops'] },
+  { id: 'portal',     label: 'Employee Portal',  roles: ['super_admin', 'call_center_ops'] },
 ];
 
 function useLocalSetting(key, defaultVal) {
@@ -21,6 +20,8 @@ function useLocalSetting(key, defaultVal) {
 }
 
 export default function Settings() {
+  const { user } = useAuth();
+  const SETTINGS_TABS = ALL_SETTINGS_TABS.filter(t => t.roles.includes(user?.role));
   const [activeTab, setActiveTab] = useState('general');
 
   // Call centers
@@ -183,9 +184,6 @@ export default function Settings() {
 
       {/* Employee Portal */}
       {activeTab === 'portal' && <PortalWidgets />}
-
-      {/* User Management */}
-      {activeTab === 'users' && <UserManagement />}
     </div>
   );
 }

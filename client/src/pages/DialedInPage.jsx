@@ -327,7 +327,7 @@ export default function DialedInPage() {
       <div className="tv-wrapper">
         <div className="tv-header">
           <div className="tv-header-left">
-            <img className="tv-header-logo" src="/al-logo.png" alt="AL" />
+            <img className="tv-header-logo" src="/dialedin-logo-dark.png" alt="Answering Legal" />
             <div>
               <div className="tv-header-brand">Answering Legal</div>
               <div className="tv-header-sub">Call Center Operations</div>

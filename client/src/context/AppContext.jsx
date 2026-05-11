@@ -10,6 +10,7 @@ export function AppProvider({ children }) {
   const [slackConfig, setSlackConfig] = useState({ didsUnavailable: '', didsAvailable: '', savvyActive: '', savvyInactive: '' });
   const [status, setStatus] = useState(null);
   const [didCounts, setDidCounts] = useState(null);
+  const [hubspotDids, setHubspotDids] = useState(null);
   const [activityLog, setActivityLog] = useState([]);
   const [toasts, setToasts] = useState([]);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('ccob_dark') === '1');
@@ -67,11 +68,22 @@ export function AppProvider({ children }) {
     return () => clearInterval(interval);
   }, []);
 
+  // Poll /api/hubspot/dids every 60s
+  useEffect(() => {
+    const fetchHsDids = () => {
+      axios.get('/api/hubspot/dids').then(res => setHubspotDids(res.data)).catch(() => {});
+    };
+    fetchHsDids();
+    const interval = setInterval(fetchHsDids, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <AppContext.Provider value={{
       slackConfig,
       status, setStatus,
       didCounts,
+      hubspotDids,
       activityLog, addLog,
       toasts, toast,
       darkMode, setDarkMode,
