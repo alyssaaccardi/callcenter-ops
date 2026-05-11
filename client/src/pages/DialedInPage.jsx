@@ -81,7 +81,7 @@ function fmtSeconds(s) {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, message, changedBy, changedAt, counts, xcally }) {
+function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, message, changedBy, changedAt, counts, xcally, queueStats }) {
   function fmtAttr() {
     if (!changedBy || !changedAt) return '';
     return `Updated by ${changedBy} at ${new Date(changedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
@@ -134,6 +134,25 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
             </div>
           </div>
         )}
+        {queueStats?.queues?.length > 0 && (
+          <div className={`tv-mitel-stats${queueStats.updatedAt && Date.now() - new Date(queueStats.updatedAt).getTime() > 30000 ? ' stale' : ''}`}>
+            <div className="tv-mitel-stats-header">
+              <span className="tv-mitel-stats-title">Today's Calls</span>
+              <span className="tv-mitel-stats-cols">
+                <span>Answered</span><span>Longest Wait</span>
+              </span>
+            </div>
+            {queueStats.queues.map(q => (
+              <div key={q.id} className="tv-mitel-stats-row">
+                <span className="tv-mitel-stats-queue">{q.name}</span>
+                <span className="tv-mitel-stats-cols">
+                  <span className="tv-mitel-answered">{q.answered.toLocaleString()}</span>
+                  <span className="tv-mitel-wait">{q.recentMaxWait != null ? fmtSeconds(q.recentMaxWait) : '—'}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -165,6 +184,7 @@ export default function DialedInPage() {
   const [dids, setDids] = useState(null);
   const [hsDids, setHsDids] = useState(null);
   const [xcally, setXcally] = useState(null);
+  const [mitelStats, setMitelStats] = useState(null);
   const [agents, setAgents] = useState({ savvy: { here: 0, standby: 0, standbyNames: '' }, mitel: { here: 0, standby: 0, standbyNames: '' } });
   const [didPop, setDidPop] = useState({ savvy: false, mitel: false });
   const [syncInfo, setSyncInfo] = useState('Checking status...');
@@ -261,6 +281,20 @@ export default function DialedInPage() {
     return () => { clearInterval(id1); clearInterval(id2); };
   }, [tokenValid]);
 
+  // Mitel queue stats — SSE subscription for near-real-time updates (~5s lag)
+  useEffect(() => {
+    if (!tokenValid) return;
+    const url = token ? `/api/mitel/queue-stats/stream?t=${encodeURIComponent(token)}` : '/api/mitel/queue-stats/stream';
+    const es = new EventSource(url, { withCredentials: true });
+    es.onmessage = (e) => {
+      try {
+        const mq = JSON.parse(e.data);
+        if (mq && !mq.unconfigured && !mq.error) setMitelStats(mq);
+      } catch (_) {}
+    };
+    return () => es.close();
+  }, [tokenValid]);
+
   // Expose mkShow/mkDismiss for external callers (e.g. dashboard window reference)
   useEffect(() => {
     window.mkShow = () => {
@@ -330,7 +364,7 @@ export default function DialedInPage() {
             <img className="tv-header-logo" src="/dialedin-logo-dark.png" alt="Answering Legal" />
             <div>
               <div className="tv-header-brand">Answering Legal</div>
-              <div className="tv-header-sub">Call Center Operations</div>
+              <div className="tv-header-sub">Dialed In Dash</div>
             </div>
           </div>
           <div className="tv-header-center">
@@ -366,7 +400,7 @@ export default function DialedInPage() {
             isUp={mitelUp} locationLabel="Mitel Location" carrierLabel="via Bandwidth"
             name="Mitel Classic" didCount={dids?.mitel} didPop={didPop.mitel}
             message={mitel?.message} changedBy={mitel?.changedBy} changedAt={mitel?.changedAt}
-            counts={agents.mitel}
+            counts={agents.mitel} queueStats={mitelStats}
           />
         </div>
 

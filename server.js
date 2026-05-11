@@ -17,6 +17,9 @@ require('events').EventEmitter.defaultMaxListeners = 50;
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+let mitelQueueCache = null;
+const mitelSseClients = new Set();
+
 app.set('trust proxy', 1);
 
 app.use(cors({
@@ -805,7 +808,7 @@ app.get('/api/monday/support-tasks', async (req, res) => {
   if (!apiKey) return res.status(500).json({ error: 'Monday.com credentials not configured' });
 
   const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
-  const itemFields = `id name updated_at column_values(ids: ["color_mkxwxqsx", "status", "date_mkx5zfsz", "dropdown_mkxjmeyh", "multiple_person_mkx5smfv"]) { id text }`;
+  const itemFields = `id name updated_at column_values(ids: ["color_mkxwxqsx", "status", "date_mkx5zfsz", "dropdown_mkzc9hm", "text_mkx5ca0q", "text_mkx5cpnb", "dropdown_mkxjmeyh", "multiple_person_mkx5smfv"]) { id text value }`;
 
   try {
     const allItems = [];
@@ -829,32 +832,59 @@ app.get('/api/monday/support-tasks', async (req, res) => {
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
     const DONE_PHRASES = ['done', 'complete', 'closed', "won't fix", 'cancelled', 'resolved'];
 
-    const tasks = allItems.map(item => {
+    const mapped = allItems.map(item => {
       const statusCol   = item.column_values?.find(c => c.id === 'color_mkxwxqsx');
       const priorityCol = item.column_values?.find(c => c.id === 'status');
       const dateCol     = item.column_values?.find(c => c.id === 'date_mkx5zfsz');
+      const taskTypeCol = item.column_values?.find(c => c.id === 'dropdown_mkzc9hm');
+      const accountCol  = item.column_values?.find(c => c.id === 'text_mkx5ca0q');
+      const descCol     = item.column_values?.find(c => c.id === 'text_mkx5cpnb');
+      const assigneeCol = item.column_values?.find(c => c.id === 'multiple_person_mkx5smfv');
+
+      // Extract time from date column raw value: {"date":"2024-01-15","time":"14:30:00"}
+      let dueTime = '';
+      try {
+        const raw = dateCol?.value ? JSON.parse(dateCol.value) : null;
+        if (raw?.time) dueTime = raw.time.slice(0, 5); // "HH:MM"
+      } catch { /* ignore */ }
+
       return {
-        id:         item.id,
-        name:       item.name,
-        status:     statusCol?.text   || '',
-        priority:   priorityCol?.text || '',
-        dueDate:    dateCol?.text     || '',
-        lastUpdate: item.updated_at,
-        link:       `https://answeringlegal-unit.monday.com/boards/${boardId}/pulses/${item.id}`,
+        id:          item.id,
+        name:        item.name,
+        status:      statusCol?.text  || '',
+        priority:    priorityCol?.text || '',
+        dueDate:     dateCol?.text    || '',
+        dueTime,
+        taskType:    taskTypeCol?.text || '',
+        accountName: accountCol?.text  || '',
+        description: descCol?.text     || '',
+        assignee:    assigneeCol?.text  || '',
+        lastUpdate:  item.updated_at,
+        link:        `https://answeringlegal-unit.monday.com/boards/${boardId}/pulses/${item.id}`,
       };
     }).filter(task => {
       const statusLow = (task.status || '').toLowerCase();
-      if (statusLow === 'done' || statusLow === 'closed' || statusLow === 'cancelled') return false;
-      // Overdue = explicit Overdue status, OR past due date without completion
+      return !DONE_PHRASES.some(p => statusLow.includes(p));
+    });
+
+    const overdue  = mapped.filter(task => {
+      const statusLow = (task.status || '').toLowerCase();
       if (statusLow === 'overdue') return true;
       if (!task.dueDate) return false;
-      const due = new Date(task.dueDate);
+      const due = new Date(task.dueDate); due.setHours(0, 0, 0, 0);
       return !isNaN(due) && due < today;
     });
 
-    res.json({ tasks });
+    const upcoming = mapped.filter(task => {
+      if (!task.dueDate) return false;
+      const due = new Date(task.dueDate); due.setHours(0, 0, 0, 0);
+      return !isNaN(due) && due >= today && due < tomorrow;
+    });
+
+    res.json({ tasks: overdue, overdue, upcoming });
   } catch (err) {
     console.error('Monday support tasks error:', err.response?.data || err.message);
     res.status(500).json({ error: 'Failed to fetch support tasks', details: err.message });
@@ -972,10 +1002,15 @@ function zdBase() {
 // ─── Zendesk Group IDs ────────────────────────────────────────────────────────
 const ZD_SUPPORT_GROUPS   = ['21144265188763', '29126651333275'];
 const ZD_ESCALATION_GROUP = '37189086269723';
-const ZD_TECH_GROUPS      = ['21144204914587', '37940070419611', '21144716643995', '40495779771547', '29755770910107', '27880413441307'];
-
-// Tech team agent name roster — used for leaderboard filtering since group IDs may not match
-const TECH_ROSTER = ['leah', 'jake', 'tabitha', 'jessica', 'jessie'];
+const ZD_SUPPORT_EXCLUDE_GROUPS = ['29755770910107']; // AL Intake Chat Pro — agents here excluded from support views
+const TECH_GROUP_DEFS = [
+  { id: '37940070419611', name: 'Tech Team' },
+  { id: '21144204914587', name: 'Mobile App Team' },
+  { id: '21144716643995', name: 'Integrations Team' },
+  { id: '27880413441307', name: 'Legal Video Calls' },
+  { id: '40495779771547', name: 'Intake Chat Pro' },
+];
+const ZD_TECH_GROUPS = TECH_GROUP_DEFS.map(g => g.id);
 
 // Agents excluded from support leaderboard (managers, non-agents, etc.)
 const SUPPORT_LB_EXCLUDE = ['chrissy'];
@@ -1194,18 +1229,30 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
 
     let users;
     const groupIds = team === 'tech' ? ZD_TECH_GROUPS : [...ZD_SUPPORT_GROUPS, ZD_ESCALATION_GROUP];
+
+    // For tech: fetch per-group membership to build delineated sections
+    let techGroupSets = null;
     if (team === 'tech') {
-      // Filter by known name roster — avoids relying on correct group IDs
-      users = allAgents.filter(u => TECH_ROSTER.some(n => u.name.toLowerCase().includes(n)));
+      techGroupSets = await Promise.all(
+        TECH_GROUP_DEFS.map(async g => {
+          const ids = await zdGroupMembers(base, headers, [g.id]);
+          return { name: g.name, memberSet: new Set(ids) };
+        })
+      );
+      const allTechIds = new Set(techGroupSets.flatMap(g => [...g.memberSet]));
+      users = allAgents.filter(u => allTechIds.has(u.id));
     } else {
       const memberIds = await zdGroupMembers(base, headers, groupIds);
       if (!memberIds.length) return res.json({ support: [], escalation: [], csatGood: 0, csatBad: 0, zdSubdomain: process.env.ZENDESK_SUBDOMAIN || null });
       const memberSet = new Set(memberIds);
+      const excludeIds = await zdGroupMembers(base, headers, ZD_SUPPORT_EXCLUDE_GROUPS);
+      const excludeSet = new Set(excludeIds);
       users = allAgents
         .filter(u => memberSet.has(u.id))
+        .filter(u => !excludeSet.has(u.id))
         .filter(u => !SUPPORT_LB_EXCLUDE.some(n => u.name.toLowerCase().includes(n)));
     }
-    if (!users.length) return res.json({ support: [], escalation: [], csatGood: 0, csatBad: 0, zdSubdomain: process.env.ZENDESK_SUBDOMAIN || null });
+    if (!users.length) return res.json({ sections: null, support: [], escalation: [], csatGood: 0, csatBad: 0, zdSubdomain: process.env.ZENDESK_SUBDOMAIN || null });
 
     // For support leaderboard: track escalation sub-section membership
     let escalationSet = new Set();
@@ -1221,6 +1268,7 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
     const zdDate = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 
     let solvedFilter = '';
+    let replyFilter  = '';
     let periodStart  = null;
     if (period !== 'all') {
       let start, end;
@@ -1249,32 +1297,54 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
       }
       if (start) {
         periodStart  = start;
-        // Use `solved>` to filter by actual solve date, not last-update date
         solvedFilter = ` solved>${zdDate(start)}`;
         if (end) solvedFilter += ` solved<${zdDate(end)}`;
+        replyFilter  = ` updated>${zdDate(start)}`;
+        if (end) replyFilter += ` updated<${zdDate(end)}`;
       }
     }
 
     const agentStats = await Promise.all(users.map(async u => {
       try {
-        const [openRes, solvedRes] = await Promise.all([
+        const [openRes, repliesRes, touchedRes] = await Promise.all([
           axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id} status:open status:new` } }),
-          axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id} status:solved${solvedFilter}` } }),
+          axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket commenter:${u.id}${replyFilter}` } }),
+          axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id}${replyFilter}` } }),
         ]);
-        return { id: u.id, name: u.name, open: openRes.data?.count || 0, solved: solvedRes.data?.count || 0, _u: u };
+        return { id: u.id, name: u.name, open: openRes.data?.count || 0, replies: repliesRes.data?.count || 0, touched: touchedRes.data?.count || 0, _u: u };
       } catch {
-        return { id: u.id, name: u.name, open: 0, solved: 0, _u: u };
+        return { id: u.id, name: u.name, open: 0, replies: 0, touched: 0, _u: u };
       }
     }));
 
-    const hasActivity = a => a.solved > 0 || a.open > 0;
-    const byActivity  = (a, b) => b.solved - a.solved || a.open - b.open;
+    const hasActivity = a => a.replies > 0 || a.touched > 0 || a.open > 0;
+    const byActivity  = (a, b) => b.replies - a.replies || b.touched - a.touched || a.open - b.open;
 
-    // Split into sections — support has escalation sub-section, tech does not
-    const support    = agentStats.filter(a => hasActivity(a)).sort(byActivity).map(({ _u, ...rest }) => rest);
-    const escalation = team === 'tech'
-      ? []
-      : agentStats.filter(a => isEscalation(a._u) && hasActivity(a)).sort(byActivity).map(({ _u, ...rest }) => rest);
+    let sections = null;
+    let support, escalation;
+
+    if (team === 'tech' && techGroupSets) {
+      // Build delineated sections — one per Zendesk group, agents can appear in multiple
+      sections = techGroupSets
+        .map(g => ({
+          name: g.name,
+          agents: agentStats
+            .filter(a => g.memberSet.has(a.id))
+            .sort(byActivity)
+            .map(({ _u, ...rest }) => rest),
+        }))
+        .filter(s => s.agents.length > 0);
+      // Flat deduplicated list for summary stats
+      const seen = new Set();
+      support = agentStats
+        .filter(a => { if (seen.has(a.id)) return false; seen.add(a.id); return true; })
+        .sort(byActivity)
+        .map(({ _u, ...rest }) => rest);
+      escalation = [];
+    } else {
+      support    = agentStats.filter(a => hasActivity(a)).sort(byActivity).map(({ _u, ...rest }) => rest);
+      escalation = agentStats.filter(a => isEscalation(a._u) && hasActivity(a)).sort(byActivity).map(({ _u, ...rest }) => rest);
+    }
 
     // Fetch team-scoped CSAT counts via group filter on ticket search
     let csatGood = 0, csatBad = 0;
@@ -1289,7 +1359,7 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
       csatBad  = cbRes.data?.count || 0;
     } catch { /* non-fatal */ }
 
-    res.json({ agents: [...support, ...escalation], support, escalation, groupName: null, csatGood, csatBad, zdSubdomain: process.env.ZENDESK_SUBDOMAIN || null });
+    res.json({ sections, agents: [...support, ...escalation], support, escalation, groupName: null, csatGood, csatBad, zdSubdomain: process.env.ZENDESK_SUBDOMAIN || null });
   } catch (err) {
     if (err.message === 'Zendesk not configured') return res.json({ agents: [], unconfigured: true });
     console.error('Zendesk leaderboard error:', err.response?.data || err.message);
@@ -1312,6 +1382,22 @@ app.get('/api/zendesk/groups', requireAuth, async (req, res) => {
       } catch { return { id, count: 'error' }; }
     }));
     res.json({ groups, techGroupMemberCounts: techCounts });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Zendesk: List all active agents (admin debug) ───────────────────────────
+app.get('/api/zendesk/agents', requireAuth, async (req, res) => {
+  try {
+    const headers = zdHeaders();
+    const base    = zdBase();
+    const r = await axios.get(`${base}/users.json?role=agent&per_page=100`, { headers });
+    const agents = (r.data?.users || [])
+      .filter(u => u.active && !u.suspended)
+      .map(u => ({ id: u.id, name: u.name, email: u.email }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ agents, count: agents.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1348,11 +1434,12 @@ app.get('/api/zendesk/queue-stats', async (req, res) => {
       axios.get(`${base}/search.json`, { headers, params: { query: q('hold')    } }),
     ]);
     res.json({
-      new:          newRes.data?.count     || 0,
-      open:         openRes.data?.count    || 0,
-      pending:      pendingRes.data?.count || 0,
-      onHold:       onHoldRes.data?.count  || 0,
-      zdSubdomain:  process.env.ZENDESK_SUBDOMAIN || null,
+      new:           newRes.data?.count     || 0,
+      open:          openRes.data?.count    || 0,
+      pending:       pendingRes.data?.count || 0,
+      onHold:        onHoldRes.data?.count  || 0,
+      zdGroupFilter: groupFilter.trim()     || null,
+      zdSubdomain:   process.env.ZENDESK_SUBDOMAIN || null,
     });
   } catch (err) {
     if (err.message === 'Zendesk not configured') return res.json({ new: 0, open: 0, pending: 0, onHold: 0, unconfigured: true });
@@ -1515,12 +1602,74 @@ app.get('/api/xcally/queue', async (req, res) => {
   }
 });
 
+async function pollMitelQueues() {
+  const binId  = process.env.JSONBIN_MITEL_QUEUES_BIN_ID;
+  const apiKey = process.env.JSONBIN_API_KEY;
+  if (!binId || !apiKey) return;
+  try {
+    const r = await axios.get(`https://api.jsonbin.io/v3/b/${binId}/latest`, {
+      headers: { 'X-Master-Key': apiKey },
+      timeout: 5000,
+    });
+    const data = r.data.record;
+    if (!mitelQueueCache || data.updatedAt !== mitelQueueCache.updatedAt) {
+      mitelQueueCache = data;
+      const payload = `data: ${JSON.stringify(data)}\n\n`;
+      for (const client of mitelSseClients) client.write(payload);
+    }
+  } catch (err) {
+    console.error('[mitel] background poll error:', err.message);
+  }
+}
+
+// Mitel queue stats — returns from in-memory cache (updated every 5s by background poller)
+app.get('/api/mitel/queue-stats', (req, res) => {
+  const token = req.query.t;
+  if (token) {
+    const sessions = loadTvSessions();
+    if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
+  } else if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  if (!process.env.JSONBIN_MITEL_QUEUES_BIN_ID || !process.env.JSONBIN_API_KEY) return res.json({ unconfigured: true });
+  if (mitelQueueCache) return res.json(mitelQueueCache);
+  res.status(503).json({ error: 'Mitel stats not yet available' });
+});
+
+// Mitel queue stats — SSE stream (pushes update within ~5s of new poller data)
+app.get('/api/mitel/queue-stats/stream', (req, res) => {
+  const token = req.query.t;
+  if (token) {
+    const sessions = loadTvSessions();
+    if (!sessions.has(token)) return res.status(401).end();
+  } else if (!req.isAuthenticated()) {
+    return res.status(401).end();
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders();
+
+  if (mitelQueueCache) res.write(`data: ${JSON.stringify(mitelQueueCache)}\n\n`);
+
+  mitelSseClients.add(res);
+  const heartbeat = setInterval(() => res.write(':heartbeat\n\n'), 25000);
+  req.on('close', () => { clearInterval(heartbeat); mitelSseClients.delete(res); });
+});
+
 // ─── React SPA Catch-All ─────────────────────────────────────────────────────
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'app', 'index.html'));
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
+pollMitelQueues();
+setInterval(pollMitelQueues, 5000);
+
 app.listen(PORT, () => {
   console.log(`✅ Call Center Ops Backend running on port ${PORT}`);
   console.log(`   App: http://localhost:${PORT}/`);
