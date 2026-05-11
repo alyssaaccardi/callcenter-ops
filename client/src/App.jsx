@@ -22,6 +22,7 @@ import MobilePage from './pages/MobilePage';
 import LoginPage from './pages/LoginPage';
 import DialedInPage from './pages/DialedInPage';
 import SupportTVPage from './pages/SupportTVPage';
+import WhatsNew from './components/WhatsNew';
 
 function Dashboard() {
   const { user } = useAuth();
@@ -60,6 +61,7 @@ function DashboardInner({ user, defaultModule }) {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <WhatsNew />
       <Sidebar activeModule={activeModule} onModuleChange={setActiveModule} />
       <div className="app-wrapper">
         {!isPortal && <Topbar />}
