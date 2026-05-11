@@ -1,0 +1,16 @@
+{
+  "canned-responses": {
+    "id": "canned-responses",
+    "title": "Canned Responses",
+    "description": "How to use and create canned response templates on the Status Board",
+    "enabled": true,
+    "roles": ["super_admin", "call_center_ops"]
+  },
+  "general-intro": {
+    "id": "general-intro",
+    "title": "General Introduction",
+    "description": "Welcome overview shown to all new users on first login",
+    "enabled": false,
+    "roles": ["all"]
+  }
+}

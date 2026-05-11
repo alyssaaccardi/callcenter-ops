@@ -20,6 +20,33 @@ const PORT = process.env.PORT || 3001;
 let mitelQueueCache = null;
 const mitelSseClients = new Set();
 
+// ─── Tutorial helpers ─────────────────────────────────────────────────────────
+const TUTORIALS_FILE = path.join(__dirname, 'tutorials.json');
+const USERS_FILE     = path.join(__dirname, 'users.json');
+
+function loadTutorials() {
+  try { return JSON.parse(fs.readFileSync(TUTORIALS_FILE, 'utf8')); } catch { return {}; }
+}
+function saveTutorials(t) { fs.writeFileSync(TUTORIALS_FILE, JSON.stringify(t, null, 2)); }
+
+function dismissTutorialForUser(email, id) {
+  try {
+    const users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+    if (!users[email]) return;
+    const d = users[email].dismissedTutorials || [];
+    if (!d.includes(id)) { users[email].dismissedTutorials = [...d, id]; fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2)); }
+  } catch {}
+}
+function resetTutorialDismissals(id) {
+  try {
+    const users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+    for (const email of Object.keys(users)) {
+      if (users[email].dismissedTutorials) users[email].dismissedTutorials = users[email].dismissedTutorials.filter(x => x !== id);
+    }
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+  } catch {}
+}
+
 app.set('trust proxy', 1);
 
 app.use(cors({
@@ -166,6 +193,42 @@ app.post('/api/users', requireRole('super_admin'), (req, res) => {
 app.delete('/api/users/:email', requireRole('super_admin'), (req, res) => {
   removeUser(req.params.email);
   res.json({ success: true });
+});
+
+// ─── Tutorial Routes ──────────────────────────────────────────────────────────
+// Tutorials the current user should see (enabled + role match + not dismissed)
+app.get('/api/tutorials', requireAuth, (req, res) => {
+  const tutorials = loadTutorials();
+  const users     = listUsers();
+  const dismissed = users[req.user.email]?.dismissedTutorials || [];
+  const role      = req.user.role;
+  const visible   = Object.values(tutorials).filter(t => {
+    if (!t.enabled) return false;
+    if (dismissed.includes(t.id)) return false;
+    return t.roles.includes('all') || t.roles.includes(role);
+  });
+  res.json({ tutorials: visible });
+});
+
+// Permanently dismiss a tutorial for the current user
+app.post('/api/tutorials/:id/dismiss', requireAuth, (req, res) => {
+  dismissTutorialForUser(req.user.email, req.params.id);
+  res.json({ success: true });
+});
+
+// Admin: list all tutorials with config
+app.get('/api/tutorials/admin', requireRole('super_admin'), (req, res) => {
+  res.json({ tutorials: Object.values(loadTutorials()) });
+});
+
+// Admin: toggle enabled, optionally reset all dismissals
+app.patch('/api/tutorials/:id', requireRole('super_admin'), (req, res) => {
+  const tutorials = loadTutorials();
+  if (!tutorials[req.params.id]) return res.status(404).json({ error: 'Not found' });
+  if (req.body.enabled !== undefined) tutorials[req.params.id].enabled = req.body.enabled;
+  saveTutorials(tutorials);
+  if (req.body.resetDismissals) resetTutorialDismissals(req.params.id);
+  res.json({ success: true, tutorial: tutorials[req.params.id] });
 });
 
 // ─── Dashboard Routes ─────────────────────────────────────────────────────────

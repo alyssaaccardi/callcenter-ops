@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
 
 const ROLES = [
@@ -16,6 +16,69 @@ const ROLE_STYLE = {
   tech:           { background: 'rgba(16,185,129,0.15)', color: '#34d399' },
   tv_display:     { background: 'rgba(251,146,60,0.15)', color: '#fb923c' },
 };
+
+function TutorialsPanel() {
+  const [tutorials, setTutorials] = useState([]);
+  const [busy, setBusy] = useState({});
+
+  const load = useCallback(async () => {
+    try { const r = await api.get('/api/tutorials/admin'); setTutorials(r.data.tutorials || []); } catch {}
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function toggle(id, enabled) {
+    setBusy(b => ({ ...b, [id]: true }));
+    try { await api.patch(`/api/tutorials/${id}`, { enabled }); await load(); } catch {}
+    setBusy(b => ({ ...b, [id]: false }));
+  }
+
+  async function reset(id) {
+    setBusy(b => ({ ...b, [`${id}_reset`]: true }));
+    try { await api.patch(`/api/tutorials/${id}`, { resetDismissals: true }); await load(); } catch {}
+    setBusy(b => ({ ...b, [`${id}_reset`]: false }));
+  }
+
+  return (
+    <div className="settings-card" style={{ marginTop: 24 }}>
+      <h3 style={{ marginBottom: 4 }}>Tutorials</h3>
+      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 16px' }}>
+        Toggle tutorials on to auto-show them for eligible users on login until dismissed. Reset to re-surface for everyone.
+      </p>
+      {tutorials.map(t => (
+        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{t.title}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{t.description}</div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3, fontFamily: 'var(--mono)', letterSpacing: '0.05em' }}>
+              {t.roles.includes('all') ? 'All users' : t.roles.join(', ')}
+            </div>
+          </div>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ fontSize: 11, color: 'var(--muted)' }}
+            disabled={busy[`${t.id}_reset`]}
+            onClick={() => reset(t.id)}
+            title="Clear all dismissals so every user sees this tutorial again"
+          >
+            {busy[`${t.id}_reset`] ? '…' : 'Reset'}
+          </button>
+          <button
+            className={`btn btn-sm${t.enabled ? ' btn-danger' : ' btn-primary'}`}
+            style={{ minWidth: 64, fontSize: 12 }}
+            disabled={busy[t.id]}
+            onClick={() => toggle(t.id, !t.enabled)}
+          >
+            {busy[t.id] ? '…' : t.enabled ? 'Disable' : 'Enable'}
+          </button>
+        </div>
+      ))}
+      {tutorials.length === 0 && (
+        <div style={{ color: 'var(--muted)', fontSize: 13 }}>No tutorials configured.</div>
+      )}
+    </div>
+  );
+}
 
 export default function UserManagement() {
   const [users, setUsers] = useState([]);
@@ -162,6 +225,8 @@ export default function UserManagement() {
           </button>
         </form>
       </div>
+
+      <TutorialsPanel />
     </div>
   );
 }
