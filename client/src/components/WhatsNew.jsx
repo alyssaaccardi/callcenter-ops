@@ -5,18 +5,93 @@ const KEY     = 'ccob_wn_v1';
 const SESSION = 'ccob_wn_session';
 const ROLES   = ['super_admin', 'call_center_ops'];
 
+/* ── Mini UI mockup helpers ──────────────────────────────────────────────── */
+
+function NavPath({ items }) {
+  return (
+    <div className="wn-nav-path">
+      {items.map((item, i) => (
+        <React.Fragment key={i}>
+          <span className="wn-nav-crumb">{item}</span>
+          {i < items.length - 1 && <span className="wn-nav-arrow">›</span>}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+function UiSelect({ label }) {
+  return (
+    <div className="wn-ui-select">
+      <span>{label}</span>
+      <span className="wn-ui-select-arrow">▾</span>
+    </div>
+  );
+}
+
+function UiTabs({ tabs, active }) {
+  return (
+    <div className="wn-ui-tabs">
+      {tabs.map(t => (
+        <div key={t} className={`wn-ui-tab${t === active ? ' active' : ''}`}>{t}</div>
+      ))}
+    </div>
+  );
+}
+
+function UiButton({ label, variant = 'secondary' }) {
+  return <div className={`wn-ui-btn ${variant}`}>{label}</div>;
+}
+
+function UiSidebarItem({ icon, label }) {
+  return (
+    <div className="wn-ui-sidebar-item">
+      <span>{icon}</span>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function UiSettingsTabs({ active }) {
+  const tabs = ['Call Centers', 'Alert Templates', 'Canned Responses', 'Employee Portal'];
+  return (
+    <div className="wn-ui-settings-tabs">
+      {tabs.map(t => (
+        <div key={t} className={`wn-ui-settings-tab${t === active ? ' active' : ''}`}>{t}</div>
+      ))}
+    </div>
+  );
+}
+
+function UiFormRow() {
+  return (
+    <div className="wn-ui-form">
+      <div className="wn-ui-form-row">
+        <div className="wn-ui-form-label">Label</div>
+        <div className="wn-ui-form-input">Carrier Outage</div>
+      </div>
+      <div className="wn-ui-form-row">
+        <div className="wn-ui-form-label">Message</div>
+        <div className="wn-ui-form-textarea">We're aware of a carrier outage affecting…</div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Step definitions ────────────────────────────────────────────────────── */
+
 const STEPS = [
   {
     icon: '💬',
     title: 'Canned Responses',
-    subtitle: "Pre-written status messages at your fingertips",
+    subtitle: 'Pre-written status messages, ready to go',
     body: (
       <>
-        <p>Canned responses are saved message templates you can instantly apply when updating a call center's status — no retyping the same message every time.</p>
-        <p>They show up as a dropdown on the <strong>Status Board</strong> and let you blast out consistent messages in one click.</p>
+        <p>Canned responses are saved message templates you can instantly drop into a call center's status update — no retyping the same thing every time.</p>
+        <p>They live in <strong>Settings</strong> and appear as a dropdown on the <strong>Status Board</strong> wherever you write a status message.</p>
         <div className="wn-callout">
           <span className="wn-callout-icon">💡</span>
-          Great for recurring situations — system degradations, scheduled maintenance, carrier outages, or "all clear" messages.
+          Perfect for recurring situations — carrier outages, scheduled maintenance, system degradation, or "all clear" messages.
         </div>
       </>
     ),
@@ -24,62 +99,115 @@ const STEPS = [
   {
     icon: '🖱️',
     title: 'Using a Canned Response',
-    subtitle: 'Fill your status message in one click',
+    subtitle: 'Status Board → pick a template → done',
     body: (
-      <>
-        <div className="wn-steps-list">
-          <div className="wn-step-row">
+      <div className="wn-pointed-steps">
+
+        <div className="wn-pointed-row">
+          <div className="wn-pointed-left">
             <div className="wn-step-num">1</div>
-            <div className="wn-step-text">Open <strong>Status Board</strong> from the sidebar.</div>
+            <div className="wn-pointed-line" />
           </div>
-          <div className="wn-step-row">
-            <div className="wn-step-num">2</div>
-            <div className="wn-step-text">Select the <strong>Savvy Phone</strong> or <strong>Mitel Classic</strong> tab.</div>
-          </div>
-          <div className="wn-step-row">
-            <div className="wn-step-num">3</div>
-            <div className="wn-step-text">Click the <strong>"— Select Canned Response —"</strong> dropdown beneath <em>Status Message</em>.</div>
-          </div>
-          <div className="wn-step-row">
-            <div className="wn-step-num">4</div>
-            <div className="wn-step-text">Pick a template — it fills the message box instantly. Hit <strong>Save Message</strong>.</div>
+          <div className="wn-pointed-right">
+            <div className="wn-step-text">Click <strong>Status Board</strong> in the sidebar</div>
+            <UiSidebarItem icon="📊" label="Status Board" />
           </div>
         </div>
-      </>
+
+        <div className="wn-pointed-row">
+          <div className="wn-pointed-left">
+            <div className="wn-step-num">2</div>
+            <div className="wn-pointed-line" />
+          </div>
+          <div className="wn-pointed-right">
+            <div className="wn-step-text">Select the <strong>Savvy Phone</strong> or <strong>Mitel Classic</strong> tab</div>
+            <UiTabs tabs={['Savvy Phone', 'Mitel Classic', 'Systems']} active="Savvy Phone" />
+          </div>
+        </div>
+
+        <div className="wn-pointed-row">
+          <div className="wn-pointed-left">
+            <div className="wn-step-num">3</div>
+            <div className="wn-pointed-line" />
+          </div>
+          <div className="wn-pointed-right">
+            <div className="wn-step-text">Open this dropdown under <strong>Status Message</strong></div>
+            <UiSelect label="— Select Canned Response —" />
+          </div>
+        </div>
+
+        <div className="wn-pointed-row last">
+          <div className="wn-pointed-left">
+            <div className="wn-step-num">4</div>
+          </div>
+          <div className="wn-pointed-right">
+            <div className="wn-step-text">Pick your template, then hit <strong>Save Message</strong></div>
+            <UiButton label="Save Message" variant="secondary" />
+          </div>
+        </div>
+
+      </div>
     ),
   },
   {
     icon: '✏️',
     title: 'Creating Canned Responses',
-    subtitle: 'Build your library in Settings',
+    subtitle: 'Settings → Canned Responses → Add',
     body: (
-      <>
-        <div className="wn-steps-list">
-          <div className="wn-step-row">
+      <div className="wn-pointed-steps">
+
+        <div className="wn-pointed-row">
+          <div className="wn-pointed-left">
             <div className="wn-step-num">1</div>
-            <div className="wn-step-text">Click <strong>⚙️ Settings</strong> in the sidebar (scroll down if needed).</div>
+            <div className="wn-pointed-line" />
           </div>
-          <div className="wn-step-row">
+          <div className="wn-pointed-right">
+            <div className="wn-step-text">Click <strong>⚙️ Settings</strong> in the sidebar <span className="wn-muted">(scroll down)</span></div>
+            <UiSidebarItem icon="⚙️" label="Settings" />
+          </div>
+        </div>
+
+        <div className="wn-pointed-row">
+          <div className="wn-pointed-left">
             <div className="wn-step-num">2</div>
-            <div className="wn-step-text">Open the <strong>Canned Responses</strong> tab.</div>
+            <div className="wn-pointed-line" />
           </div>
-          <div className="wn-step-row">
+          <div className="wn-pointed-right">
+            <div className="wn-step-text">Click the <strong>Canned Responses</strong> tab</div>
+            <UiSettingsTabs active="Canned Responses" />
+          </div>
+        </div>
+
+        <div className="wn-pointed-row">
+          <div className="wn-pointed-left">
             <div className="wn-step-num">3</div>
-            <div className="wn-step-text">Click <strong>+ Add Response</strong>, then fill in a short <em>label</em> (e.g. "Carrier Outage") and the full <em>message text</em>.</div>
+            <div className="wn-pointed-line" />
           </div>
-          <div className="wn-step-row">
+          <div className="wn-pointed-right">
+            <div className="wn-step-text">Click <strong>+ Add Response</strong> and fill in a label and message</div>
+            <UiFormRow />
+          </div>
+        </div>
+
+        <div className="wn-pointed-row last">
+          <div className="wn-pointed-left">
             <div className="wn-step-num">4</div>
-            <div className="wn-step-text">Saves automatically to your browser. Available immediately on the Status Board.</div>
+          </div>
+          <div className="wn-pointed-right">
+            <div className="wn-step-text">Saves automatically — shows up on the Status Board immediately</div>
+            <div className="wn-callout" style={{ marginTop: 6 }}>
+              <span className="wn-callout-icon">📌</span>
+              Stored per-browser, so each user builds their own library.
+            </div>
           </div>
         </div>
-        <div className="wn-callout">
-          <span className="wn-callout-icon">📌</span>
-          Canned responses are stored per-browser. Each user on their own machine manages their own library.
-        </div>
-      </>
+
+      </div>
     ),
   },
 ];
+
+/* ── Component ───────────────────────────────────────────────────────────── */
 
 export default function WhatsNew() {
   const { user } = useAuth();
@@ -113,6 +241,7 @@ export default function WhatsNew() {
   return (
     <div className="wn-overlay" onClick={e => e.target === e.currentTarget && dismiss()}>
       <div className="wn-modal" role="dialog" aria-modal="true">
+
         <div className="wn-header">
           <div className="wn-eyebrow">✨ What's New</div>
           <button className="wn-close" onClick={dismiss} aria-label="Close">✕</button>
@@ -138,21 +267,16 @@ export default function WhatsNew() {
 
         <div className="wn-footer">
           {!isFirst && (
-            <button className="btn btn-ghost btn-sm" onClick={() => setStep(s => s - 1)}>
-              ← Back
-            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setStep(s => s - 1)}>← Back</button>
           )}
           <span style={{ flex: 1 }} />
           {!isLast ? (
-            <button className="btn btn-secondary btn-sm" onClick={() => setStep(s => s + 1)}>
-              Next →
-            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setStep(s => s + 1)}>Next →</button>
           ) : (
-            <button className="btn btn-primary btn-sm" onClick={gotIt}>
-              Got it!
-            </button>
+            <button className="btn btn-primary btn-sm" onClick={gotIt}>Got it!</button>
           )}
         </div>
+
       </div>
     </div>
   );
