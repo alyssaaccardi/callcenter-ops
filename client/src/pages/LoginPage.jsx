@@ -25,6 +25,8 @@ export default function LoginPage() {
 
         <div className="login-divider" />
 
+        <div className="login-tod">Welcome to the Dialed In Dash</div>
+
         <div className="login-tagline">
           The dashboard your<br />queue warned you about.
         </div>
@@ -34,8 +36,6 @@ export default function LoginPage() {
             Your account is not authorized. Contact your administrator.
           </div>
         )}
-
-        <div className="login-tod">Welcome to the Dialed In Dash</div>
 
         <a href="/auth/google" className="login-google-btn">
           <svg width="18" height="18" viewBox="0 0 48 48" style={{ flexShrink: 0 }}>
