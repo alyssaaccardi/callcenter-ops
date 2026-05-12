@@ -1573,6 +1573,7 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
       csatBad  = cbRes.data?.count || 0;
     } catch { /* non-fatal */ }
 
+    console.log(`[LB] team=${team} period=${period} support=${support?.length} escalation=${escalation?.length} publicReplyMap=${publicReplyMap?.size}`);
     res.json({ sections, agents: [...support, ...escalation], support, escalation, groupName: null, csatGood, csatBad, zdSubdomain: process.env.ZENDESK_SUBDOMAIN || null });
   } catch (err) {
     if (err.message === 'Zendesk not configured') return res.json({ agents: [], unconfigured: true });
