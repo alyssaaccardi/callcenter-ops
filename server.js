@@ -22,8 +22,13 @@ const mitelSseClients = new Set();
 
 // Cache for Zendesk incremental public-reply maps (avoids hammering the 10 req/min limit)
 // Key is start timestamp so "today" and "this-week" share the same entry on Monday.
-const zdPublicReplyCache   = new Map(); // startTs -> { map, expires }
+const zdPublicReplyCache    = new Map(); // startTs -> { map, expires }
 const zdPublicReplyInflight = new Map(); // startTs -> Promise (dedup concurrent fetches)
+
+// Cache for full leaderboard responses — prevents TV display 10s polling from firing
+// 36 Zendesk search queries every cycle and exhausting the rate limit.
+const zdLeaderboardCache    = new Map(); // `${team}:${period}` -> { data, expires }
+const zdLeaderboardInflight = new Map(); // `${team}:${period}` -> Promise
 
 // ─── Tutorial helpers ─────────────────────────────────────────────────────────
 const TUTORIALS_FILE = path.join(__dirname, 'tutorials.json');
@@ -1380,10 +1385,21 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const period = req.query.period || 'this-week';
-  const team   = req.query.team   || 'support';
+  const period   = req.query.period || 'this-week';
+  const team     = req.query.team   || 'support';
+  const cacheKey = `${team}:${period}`;
 
   try {
+    // Return cached result if fresh — prevents TV display 10s polling from firing
+    // 36+ Zendesk search queries every cycle and exhausting the rate limit.
+    const cached = zdLeaderboardCache.get(cacheKey);
+    if (cached && cached.expires > Date.now()) return res.json(cached.data);
+    if (zdLeaderboardInflight.has(cacheKey)) {
+      const data = await zdLeaderboardInflight.get(cacheKey);
+      return res.json(data);
+    }
+
+    const buildPromise = (async () => {
     const headers = zdHeaders();
     const base    = zdBase();
 
@@ -1563,8 +1579,8 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
         .map(({ _u, ...rest }) => rest);
       escalation = [];
     } else {
-      support    = agentStats.sort(byActivity).map(({ _u, ...rest }) => rest);
-      escalation = agentStats.filter(a => isEscalation(a._u)).sort(byActivity).map(({ _u, ...rest }) => rest);
+      support    = agentStats.filter(a => hasActivity(a)).sort(byActivity).map(({ _u, ...rest }) => rest);
+      escalation = agentStats.filter(a => isEscalation(a._u) && hasActivity(a)).sort(byActivity).map(({ _u, ...rest }) => rest);
     }
 
     // Fetch team-scoped CSAT counts via group filter on ticket search
@@ -1580,8 +1596,17 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
       csatBad  = cbRes.data?.count || 0;
     } catch { /* non-fatal */ }
 
-    res.json({ sections, agents: [...support, ...escalation], support, escalation, groupName: null, csatGood, csatBad, zdSubdomain: process.env.ZENDESK_SUBDOMAIN || null });
+    const responseData = { sections, agents: [...support, ...escalation], support, escalation, groupName: null, csatGood, csatBad, zdSubdomain: process.env.ZENDESK_SUBDOMAIN || null };
+    zdLeaderboardCache.set(cacheKey, { data: responseData, expires: Date.now() + 3 * 60 * 1000 });
+    zdLeaderboardInflight.delete(cacheKey);
+    return responseData;
+    })();
+
+    zdLeaderboardInflight.set(cacheKey, buildPromise);
+    const data = await buildPromise;
+    res.json(data);
   } catch (err) {
+    zdLeaderboardInflight.delete(cacheKey);
     if (err.message === 'Zendesk not configured') return res.json({ agents: [], unconfigured: true });
     console.error('Zendesk leaderboard error:', err.response?.data || err.message);
     res.status(500).json({ error: 'Failed to fetch leaderboard', details: err.message });
