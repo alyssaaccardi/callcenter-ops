@@ -586,14 +586,24 @@ body.dark .sc-task-working-banner {
   border-color: rgba(245,158,11,0.25);
 }
 .sc-task-working-banner-icon  { font-size: 12px; flex-shrink: 0; }
-.sc-task-working-banner-label { font-size: 11px; font-weight: 600; color: #b45309; flex-shrink: 0; }
+.sc-task-working-banner-label { font-size: 11px; font-weight: 700; color: #b45309; flex-shrink: 0; letter-spacing: 0.02em; }
 body.dark .sc-task-working-banner-label { color: #fbbf24; }
+.sc-task-working-banner-sep   { font-size: 10px; color: #d97706; opacity: 0.5; flex-shrink: 0; }
+.sc-task-working-avatar {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: rgba(245,158,11,0.35); color: #92400e;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 800; flex-shrink: 0;
+}
+body.dark .sc-task-working-avatar { background: rgba(245,158,11,0.25); color: #fbbf24; }
 .sc-task-working-banner-name  {
   font-size: 11px; font-weight: 700; color: #92400e;
   background: rgba(245,158,11,0.2); border-radius: 3px;
   padding: 1px 6px; flex-shrink: 0;
 }
 body.dark .sc-task-working-banner-name { color: #fde68a; background: rgba(245,158,11,0.15); }
+.sc-task-unassigned { font-size: 11px; color: #a16207; font-style: italic; flex-shrink: 0; }
+body.dark .sc-task-unassigned { color: #ca8a04; }
 
 /* ── Overdue days badge ── */
 .sc-task-overdue-badge {
@@ -652,6 +662,13 @@ body.dark .sc-task-overdue-badge.today    .sc-task-overdue-unit { color: #34d399
   margin-left: auto;
 }
 body.dark .sc-task-assignee { color: #94a3b8; }
+.sc-task-assignee-dot {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: rgba(168,85,247,0.2);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 8px; font-weight: 800; color: var(--purple, #7c3aed); flex-shrink: 0;
+}
+body.dark .sc-task-assignee-dot { background: rgba(168,85,247,0.25); color: #a78bfa; }
 
 .sc-task-arrow { font-size: 12px; color: #334155; flex-shrink: 0; }
 

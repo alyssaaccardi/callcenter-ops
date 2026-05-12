@@ -281,6 +281,89 @@ function SystemStatusStrip({ status, hubspotDids }) {
   );
 }
 
+function daysLate(str) {
+  if (!str) return 0;
+  const due = new Date(str); if (isNaN(due)) return 0;
+  due.setHours(0, 0, 0, 0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.round((today - due) / 86400000));
+}
+function overdueUrgency(days) {
+  if (days >= 7) return 'critical';
+  if (days >= 3) return 'high';
+  if (days >= 1) return 'medium';
+  return 'low';
+}
+function priorityClass(p) {
+  const l = (p || '').toLowerCase();
+  if (l.includes('urgent')) return 'urgent';
+  if (l.includes('high'))   return 'high';
+  if (l.includes('med'))    return 'medium';
+  return 'low';
+}
+
+function TaskCard({ task, isToday = false }) {
+  const isActive = /(pending|in.?progress|working|in.?review)/i.test(task.status || '');
+  const late     = !isToday ? daysLate(task.dueDate) : 0;
+  return (
+    <a
+      className={`sc-task-card${isToday ? ' today' : ''}${isActive ? ' pending' : ''}`}
+      href={task.link}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <div className="sc-task-body">
+        {isActive && (
+          <div className="sc-task-working-banner">
+            <span className="sc-task-working-banner-icon">⚡</span>
+            <span className="sc-task-working-banner-label">{task.status || 'In Progress'}</span>
+            <span className="sc-task-working-banner-sep">·</span>
+            {task.assignee ? (
+              <>
+                <span className="sc-task-working-avatar">{task.assignee[0].toUpperCase()}</span>
+                <span className="sc-task-working-banner-name">{task.assignee}</span>
+              </>
+            ) : (
+              <span className="sc-task-unassigned">Unassigned</span>
+            )}
+          </div>
+        )}
+        <div className="sc-task-top-row">
+          {task.accountName && <span className="sc-task-account">{task.accountName}</span>}
+          <span className="sc-task-name" title={task.name}>{task.name}</span>
+        </div>
+        {task.description && <div className="sc-task-desc">{task.description}</div>}
+        <div className="sc-task-meta-row">
+          {task.taskType && <div className="sc-task-pill type">{task.taskType}</div>}
+          {task.priority  && <div className={`sc-task-pill ${priorityClass(task.priority)}`}>{task.priority}</div>}
+          {!isActive && task.status && <div className="sc-task-pill status">{task.status}</div>}
+          {isToday && <div className="sc-task-due today">{task.dueTime ? `Due ${task.dueTime} EST` : 'Due today'}</div>}
+          {!isToday && task.dueTime && <div className="sc-task-due muted">⏰ {task.dueTime} EST</div>}
+          {task.assignee && !isActive && (
+            <div className="sc-task-assignee">
+              <span className="sc-task-assignee-dot">{task.assignee[0].toUpperCase()}</span>
+              {task.assignee}
+            </div>
+          )}
+        </div>
+      </div>
+      {!isToday && (
+        <div className={`sc-task-overdue-badge ${late === 0 ? 'today' : overdueUrgency(late)}`}>
+          {late === 0 ? (
+            <div className="sc-task-overdue-unit">Today</div>
+          ) : (
+            <>
+              <div className="sc-task-overdue-num">{late}</div>
+              <div className="sc-task-overdue-unit">day{late !== 1 ? 's' : ''} late</div>
+            </>
+          )}
+        </div>
+      )}
+      <div className="sc-task-arrow">↗</div>
+    </a>
+  );
+}
+
 export default function TechCenter() {
   const { status, hubspotDids } = useApp();
   const { user } = useAuth();
@@ -291,17 +374,20 @@ export default function TechCenter() {
   const [csat,        setCsat]        = useState({ ratings: [], unconfigured: false });
   const [leaderboard, setLeaderboard] = useState({ sections: null, support: [], unconfigured: false, csatGood: 0, csatBad: 0 });
   const [queue,       setQueue]       = useState({ new: 0, open: 0, pending: 0, onHold: 0, unconfigured: false, zdSubdomain: null, zdGroupFilter: null });
+  const [tasks,       setTasks]       = useState([]);
+  const [upcoming,    setUpcoming]    = useState([]);
   const [period,      setPeriod]      = useState('this-week');
   const [staleHours,  setStaleHours]  = useState(24);
 
   const fetchAll = useCallback(async (p, sh) => {
     setRefreshing(true);
     try {
-      const [staleRes, csatRes, lbRes, queueRes] = await Promise.allSettled([
+      const [staleRes, csatRes, lbRes, queueRes, tasksRes] = await Promise.allSettled([
         api.get('/api/zendesk/stale-tickets', { params: { hours: sh, team: 'tech' } }),
         api.get('/api/zendesk/csat',          { params: { period: p, team: 'tech' } }),
         api.get('/api/zendesk/leaderboard',   { params: { period: p, team: 'tech' } }),
         api.get('/api/zendesk/queue-stats',   { params: { team: 'tech' } }),
+        api.get('/api/monday/support-tasks'),
       ]);
       if (staleRes.status === 'fulfilled') setStale(staleRes.value.data);
       if (csatRes.status  === 'fulfilled') setCsat(csatRes.value.data);
@@ -309,7 +395,11 @@ export default function TechCenter() {
         const d = lbRes.value.data;
         setLeaderboard({ sections: d.sections || null, support: d.support || [], unconfigured: !!d.unconfigured, csatGood: d.csatGood || 0, csatBad: d.csatBad || 0 });
       }
-      if (queueRes.status === 'fulfilled') setQueue(queueRes.value.data);
+      if (queueRes.status  === 'fulfilled') setQueue(queueRes.value.data);
+      if (tasksRes.status  === 'fulfilled') {
+        setTasks(tasksRes.value.data?.tasks    || []);
+        setUpcoming(tasksRes.value.data?.upcoming || []);
+      }
       setLastSync(new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST');
     } finally {
       setLoading(false);
@@ -449,6 +539,33 @@ export default function TechCenter() {
                 title={`${staleCount ?? '?'} open tickets with no agent reply for ${staleHours}+ business hours`}
               />
             </div>
+          </div>
+
+          {/* ── Monday Overdue Tasks ── */}
+          <div className="sc-tasks-section" id="overdue-section" style={{ marginBottom: 16 }}>
+            <div className="sc-section-bar">
+              <div className="sc-section-title">Overdue Tasks</div>
+              <div className={`sc-badge${tasks.length === 0 ? ' clear' : ''}`}>
+                {tasks.length === 0 ? 'All clear' : `${tasks.length} overdue`}
+              </div>
+            </div>
+            {tasks.length === 0 && <div className="sc-empty"><div className="sc-empty-icon">✅</div><div className="sc-empty-text">No overdue tasks — great work!</div></div>}
+            {tasks.length > 0 && (
+              <div className="sc-task-list">
+                {tasks.map(task => <TaskCard key={task.id} task={task} />)}
+              </div>
+            )}
+            {upcoming.length > 0 && (
+              <>
+                <div className="sc-section-bar" style={{ marginTop: 12 }}>
+                  <div className="sc-section-title">Due Today</div>
+                  <div className="sc-badge today">{upcoming.length} task{upcoming.length !== 1 ? 's' : ''}</div>
+                </div>
+                <div className="sc-task-list">
+                  {upcoming.map(task => <TaskCard key={task.id} task={task} isToday />)}
+                </div>
+              </>
+            )}
           </div>
 
           {/* ── Panels ── */}

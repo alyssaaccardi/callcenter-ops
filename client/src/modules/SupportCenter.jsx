@@ -64,22 +64,28 @@ function priorityClass(p) {
 }
 
 function TaskCard({ task, isToday = false }) {
-  const isPending = /(pending|in.?progress|working|in.?review)/i.test(task.status || '');
-  const late      = !isToday ? daysLate(task.dueDate) : 0;
+  const isActive = /(pending|in.?progress|working|in.?review)/i.test(task.status || '');
+  const late     = !isToday ? daysLate(task.dueDate) : 0;
   return (
     <a
-      className={`sc-task-card${isToday ? ' today' : ''}${isPending ? ' pending' : ''}`}
+      className={`sc-task-card${isToday ? ' today' : ''}${isActive ? ' pending' : ''}`}
       href={task.link}
       target="_blank"
       rel="noopener noreferrer"
     >
       <div className="sc-task-body">
-        {isPending && (
+        {isActive && (
           <div className="sc-task-working-banner">
-            <span className="sc-task-working-banner-icon">⚙️</span>
-            <span className="sc-task-working-banner-label">Being worked on</span>
-            {task.assignee && (
-              <span className="sc-task-working-banner-name">{task.assignee}</span>
+            <span className="sc-task-working-banner-icon">⚡</span>
+            <span className="sc-task-working-banner-label">{task.status || 'In Progress'}</span>
+            <span className="sc-task-working-banner-sep">·</span>
+            {task.assignee ? (
+              <>
+                <span className="sc-task-working-avatar">{task.assignee[0].toUpperCase()}</span>
+                <span className="sc-task-working-banner-name">{task.assignee}</span>
+              </>
+            ) : (
+              <span className="sc-task-unassigned">Unassigned</span>
             )}
           </div>
         )}
@@ -93,16 +99,16 @@ function TaskCard({ task, isToday = false }) {
         <div className="sc-task-meta-row">
           {task.taskType && <div className="sc-task-pill type">{task.taskType}</div>}
           {task.priority  && <div className={`sc-task-pill ${priorityClass(task.priority)}`}>{task.priority}</div>}
-          {!isPending && task.status && <div className="sc-task-pill status">{task.status}</div>}
+          {!isActive && task.status && <div className="sc-task-pill status">{task.status}</div>}
           {isToday && (
             <div className="sc-task-due today">{task.dueTime ? `Due ${task.dueTime} EST` : 'Due today'}</div>
           )}
           {!isToday && task.dueTime && (
             <div className="sc-task-due muted">⏰ {task.dueTime} EST</div>
           )}
-          {task.assignee && !isPending && (
+          {task.assignee && !isActive && (
             <div className="sc-task-assignee">
-              <span className="sc-task-assignee-dot" style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(168,85,247,0.2)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 800, color: 'var(--purple)', flexShrink: 0 }}>
+              <span className="sc-task-assignee-dot">
                 {task.assignee[0].toUpperCase()}
               </span>
               {task.assignee}
