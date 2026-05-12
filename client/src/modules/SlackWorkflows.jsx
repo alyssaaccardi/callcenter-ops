@@ -174,48 +174,59 @@ export default function SlackWorkflows() {
       <div className="page-header">
         <div>
           <div className="page-title">Slack Workflows</div>
-          <div className="page-sub">
-            {isSuperAdmin ? 'Manage and fire status notification workflows' : 'Fire status notification workflows'}
-          </div>
+          <div className="page-sub">Fire status notification workflows to your team</div>
         </div>
-        {isSuperAdmin && (
-          <button className="btn btn-primary btn-sm" onClick={() => setModalWf({})}>
-            + Add Workflow
-          </button>
-        )}
       </div>
 
-      <div className="mb-20">
-        {loading && (
-          <div style={{ padding: '32px 0', textAlign: 'center' }}>
-            <span className="spinner" />
-          </div>
-        )}
-        {!loading && workflows.map(wf => (
-          <div key={wf.id} className="workflow-card">
-            <div className="workflow-card-header">
-              <span style={{ fontSize: 20 }}>{wf.icon}</span>
-              <span className="workflow-name">{wf.name}</span>
-              {wf.scope && <span className="workflow-scope">{wf.scope}</span>}
-              {wf.builtin && <span className="wf-builtin-badge">built-in</span>}
-            </div>
-            {wf.description && <div className="wf-description">{wf.description}</div>}
-            {isSuperAdmin && (
-              <div className="workflow-url-display">{maskUrl(wf.url)}</div>
-            )}
-            <div className="workflow-actions">
+      {/* ── Workflow tile grid (all roles) ── */}
+      {loading ? (
+        <div style={{ padding: '40px 0', textAlign: 'center' }}>
+          <span className="spinner" />
+        </div>
+      ) : (
+        <div className="wf-grid mb-20">
+          {workflows.map(wf => (
+            <div key={wf.id} className="wf-tile">
+              <div className="wf-tile-icon">{wf.icon}</div>
+              <div className="wf-tile-name">{wf.name}</div>
+              {wf.scope && <div className="wf-tile-scope">{wf.scope}</div>}
+              {wf.description && <div className="wf-tile-desc">{wf.description}</div>}
               <button
-                className="btn btn-primary btn-sm"
+                className="btn btn-primary wf-tile-fire"
                 onClick={() => fireWorkflow(wf)}
                 disabled={firing === wf.id}
               >
-                {firing === wf.id ? <span className="spinner" /> : '⚡'} Fire
+                {firing === wf.id ? <span className="spinner" style={{ width: 14, height: 14 }} /> : '⚡'} Fire
               </button>
-              {isSuperAdmin && (
-                <>
-                  <button className="btn btn-secondary btn-sm" onClick={() => setModalWf(wf)}>
-                    ✏️ Edit
-                  </button>
+              {lastTriggered[wf.id] && (
+                <div className="wf-tile-last">Last fired: {lastTriggered[wf.id]}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Webhook Management (super_admin only) ── */}
+      {isSuperAdmin && !loading && (
+        <div className="card mb-20">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <div className="card-title" style={{ marginBottom: 0 }}>Webhook Management</div>
+            <button className="btn btn-primary btn-sm" onClick={() => setModalWf({})}>+ Add Workflow</button>
+          </div>
+          <div className="wf-mgmt-list">
+            {workflows.map(wf => (
+              <div key={wf.id} className="wf-mgmt-row">
+                <span className="wf-mgmt-icon">{wf.icon}</span>
+                <div className="wf-mgmt-info">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="wf-mgmt-name">{wf.name}</span>
+                    {wf.scope && <span className="wf-mgmt-scope">{wf.scope}</span>}
+                    {wf.builtin && <span className="wf-builtin-badge">built-in</span>}
+                  </div>
+                  <span className="wf-mgmt-url">{maskUrl(wf.url)}</span>
+                </div>
+                <div className="wf-mgmt-actions">
+                  <button className="btn btn-secondary btn-sm" onClick={() => setModalWf(wf)}>Edit</button>
                   <button
                     className="btn btn-ghost btn-sm"
                     style={{ color: wf.builtin ? 'var(--muted)' : 'var(--danger)', opacity: wf.builtin ? 0.4 : 1 }}
@@ -223,18 +234,16 @@ export default function SlackWorkflows() {
                     title={wf.builtin ? 'Built-in workflows cannot be deleted' : 'Delete workflow'}
                     disabled={!!wf.builtin}
                   >
-                    🗑️ Delete
+                    Delete
                   </button>
-                </>
-              )}
-              {lastTriggered[wf.id] && (
-                <span className="last-triggered">Last fired: {lastTriggered[wf.id]}</span>
-              )}
-            </div>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      )}
 
+      {/* ── Audit Log ── */}
       <div className="card">
         <div className="card-title">Audit Log</div>
         <div className="log-feed">
