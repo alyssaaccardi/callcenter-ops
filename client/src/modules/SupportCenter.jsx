@@ -264,7 +264,7 @@ function CsatPanel({ ratings, unconfigured }) {
   );
 }
 
-function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad, zdUrl, periodLabel }) {
+function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad, zdUrl, periodLabel, lbLoading }) {
   const rankCls     = i => i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
   const totalAgents = (support?.length ?? 0) + (escalation?.length ?? 0);
   const supportReplies = (support || []).reduce((s, a) => s + a.replies, 0);
@@ -355,32 +355,38 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
       </div>
 
       <div className="sc-panel-body">
-        {unconfigured && <Empty icon="🔗" text="Add Zendesk credentials in .env" />}
-        {!unconfigured && totalAgents === 0 && <Empty icon="👥" text="No agents with activity" />}
+        {lbLoading && (
+          <div className="sc-lb-loading">
+            <div className="sc-spinner" />
+            <div className="sc-lb-loading-text">Pulling agent stats from Zendesk…</div>
+          </div>
+        )}
+        {!lbLoading && unconfigured && <Empty icon="🔗" text="Add Zendesk credentials in .env" />}
+        {!lbLoading && !unconfigured && totalAgents === 0 && <Empty icon="👥" text="No agents with activity" />}
 
-        {!unconfigured && support?.length > 0 && (
+        {!lbLoading && !unconfigured && support?.length > 0 && (
           <div className="sc-lb-section">
             Trial Account Team
             {supportReplies > 0 && <span className="sc-lb-section-stat">{supportReplies} replied</span>}
             {supportSolved  > 0 && <span className="sc-lb-section-stat solved">{supportSolved} solved</span>}
           </div>
         )}
-        {!unconfigured && support?.map((a, i) => (
+        {!lbLoading && !unconfigured && support?.map((a, i) => (
           <AgentRow key={a.id} agent={a} rank={i} />
         ))}
 
-        {!unconfigured && escalation?.length > 0 && (
+        {!lbLoading && !unconfigured && escalation?.length > 0 && (
           <div className="sc-lb-section escalation">
             Escalation Station
             <span className="sc-lb-section-hint">dual-role — also in trial team above</span>
           </div>
         )}
-        {!unconfigured && escalation?.map((a, i) => (
+        {!lbLoading && !unconfigured && escalation?.map((a, i) => (
           <AgentRow key={`esc-${a.id}`} agent={a} rank={i} />
         ))}
       </div>
 
-      {!unconfigured && csatTotal > 0 && (
+      {!lbLoading && !unconfigured && csatTotal > 0 && (
         <div className="sc-lb-footer">
           <span className="sc-lb-footer-label">CSAT · {periodLabel}</span>
           <span className="sc-lb-csat-good" title={`${csatGood} positive ratings`}>👍 {csatGood}</span>
@@ -452,6 +458,7 @@ export default function SupportCenter() {
   const { user } = useAuth();
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
+  const [lbLoading,   setLbLoading]   = useState(true);
   const [lastSync,    setLastSync]    = useState(null);
   const [tasks,          setTasks]          = useState([]);
   const [upcoming,       setUpcoming]       = useState([]);
@@ -467,14 +474,18 @@ export default function SupportCenter() {
   const fetchAll = useCallback(async (p, sh) => {
     setRefreshing(true);
     try {
-      const [tasksRes, statsRes, staleRes, csatRes, lbRes, queueRes] = await Promise.allSettled([
+      // Fire fast requests and leaderboard in parallel, but don't block page on leaderboard
+      const fastPromise = Promise.allSettled([
         api.get('/api/monday/support-tasks'),
         api.get('/api/monday/support-stats'),
         api.get('/api/zendesk/stale-tickets', { params: { hours: sh, team: 'support' } }),
         api.get('/api/zendesk/csat',          { params: { period: p, team: 'support' } }),
-        api.get('/api/zendesk/leaderboard',   { params: { period: p, team: 'support' } }),
         api.get('/api/zendesk/queue-stats',   { params: { team: 'support' } }),
       ]);
+      const lbPromise = api.get('/api/zendesk/leaderboard', { params: { period: p, team: 'support' } });
+
+      // Unblock the page as soon as fast data arrives
+      const [tasksRes, statsRes, staleRes, csatRes, queueRes] = await fastPromise;
       if (tasksRes.status === 'fulfilled') {
         setTasks(tasksRes.value.data?.tasks || []);
         setUpcoming(tasksRes.value.data?.upcoming || []);
@@ -483,15 +494,22 @@ export default function SupportCenter() {
       if (statsRes.status === 'fulfilled') setStats(statsRes.value.data);
       if (staleRes.status === 'fulfilled') setStale(staleRes.value.data);
       if (csatRes.status  === 'fulfilled') setCsat(csatRes.value.data);
-      if (lbRes.status    === 'fulfilled') {
-        const d = lbRes.value.data;
-        setLeaderboard({ support: d.support || [], escalation: d.escalation || [], unconfigured: !!d.unconfigured, csatGood: d.csatGood || 0, csatBad: d.csatBad || 0 });
-      }
       if (queueRes.status === 'fulfilled') setQueue(queueRes.value.data);
       setLastSync(new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST');
-    } finally {
       setLoading(false);
       setRefreshing(false);
+
+      // Leaderboard resolves separately — panel shows its own loading state
+      try {
+        const lbRes = await lbPromise;
+        const d = lbRes.data;
+        setLeaderboard({ support: d.support || [], escalation: d.escalation || [], unconfigured: !!d.unconfigured, csatGood: d.csatGood || 0, csatBad: d.csatBad || 0 });
+      } catch { /* leaderboard stays in last known state */ }
+      setLbLoading(false);
+    } catch {
+      setLoading(false);
+      setRefreshing(false);
+      setLbLoading(false);
     }
   }, []);
 
@@ -655,6 +673,7 @@ export default function SupportCenter() {
               csatBad={leaderboard.csatBad}
               zdUrl={zdUrl}
               periodLabel={PERIOD_OPTIONS.find(o => o.key === period)?.label ?? period}
+              lbLoading={lbLoading}
             />
           </div>
 
