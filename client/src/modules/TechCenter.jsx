@@ -281,6 +281,15 @@ function SystemStatusStrip({ status, hubspotDids }) {
   );
 }
 
+function fmt12hr(timeStr) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return timeStr;
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 || 12;
+  return `${hour}:${String(m).padStart(2, '0')} ${period}`;
+}
+
 function daysLate(str) {
   if (!str) return 0;
   const due = new Date(str); if (isNaN(due)) return 0;
@@ -303,7 +312,7 @@ function priorityClass(p) {
 }
 
 function TaskCard({ task, isToday = false }) {
-  const isActive = /(pending|in.?progress|working|in.?review)/i.test(task.status || '');
+  const isActive = /(pending|in.?progress|working|in.?review)/i.test(task.status || '') || !!task.worker;
   const late     = !isToday ? daysLate(task.dueDate) : 0;
   return (
     <a
@@ -337,8 +346,8 @@ function TaskCard({ task, isToday = false }) {
           {task.taskType && <div className="sc-task-pill type">{task.taskType}</div>}
           {task.priority  && <div className={`sc-task-pill ${priorityClass(task.priority)}`}>{task.priority}</div>}
           {!isActive && task.status && <div className="sc-task-pill status">{task.status}</div>}
-          {isToday && <div className="sc-task-due today">{task.dueTime ? `Due ${task.dueTime} EST` : 'Due today'}</div>}
-          {!isToday && task.dueTime && <div className="sc-task-due muted">⏰ {task.dueTime} EST</div>}
+          {isToday && <div className="sc-task-due today">{task.dueTime ? `Due ${fmt12hr(task.dueTime)} EST` : 'Due today'}</div>}
+          {!isToday && task.dueTime && <div className="sc-task-due muted">⏰ {fmt12hr(task.dueTime)} EST</div>}
           {task.assignee && !isActive && (
             <div className="sc-task-assignee">
               <span className="sc-task-assignee-dot">{task.assignee[0].toUpperCase()}</span>

@@ -41,6 +41,15 @@ function daysOverdue(str) {
   return d === 1 ? '1 day overdue' : `${d} days overdue`;
 }
 
+function fmt12hr(timeStr) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return timeStr;
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 || 12;
+  return `${hour}:${String(m).padStart(2, '0')} ${period}`;
+}
+
 function priorityClass(p = '') {
   const l = p.toLowerCase();
   if (l.includes('urgent')) return 'urgent';
@@ -152,10 +161,12 @@ export default function SupportTVPage() {
   if (loading)   return <div className="stv-loading"><div className="stv-spinner" /><span>Dialing in...</span></div>;
 
   const overdueCount  = tasks.length;
+  const dueCount      = upcoming.length;
   const agents        = leaderboard.support.filter(a => a.replies > 0);
   const repliesToday  = agents.reduce((s, a) => s + a.replies, 0);
 
   const overdueClass  = overdueCount > 0 ? 'red' : 'green';
+  const dueClass      = dueCount > 0 ? 'amber' : 'green';
   const staleClass    = staleCount !== null && staleCount > 0 ? 'amber' : staleCount === 0 ? 'green' : 'muted';
   const solvedClass   = repliesToday > 0 ? 'green' : 'muted';
   const maxReplies = Math.max(...agents.map(a => a.replies), 1);
@@ -223,6 +234,11 @@ export default function SupportTVPage() {
             label="Overdue Tasks" colorClass={overdueClass}
             value={overdueCount}
             sub={overdueCount === 0 ? 'All clear!' : `${overdueCount} need attention`}
+          />
+          <StatCard
+            label="Due Today" colorClass={dueClass}
+            value={dueCount}
+            sub={dueCount === 0 ? 'Nothing due' : `${dueCount} task${dueCount !== 1 ? 's' : ''} due`}
           />
           <StatCard
             label="Stale Tickets" colorClass={staleClass}
@@ -300,7 +316,7 @@ export default function SupportTVPage() {
                 </div>
               ) : (
                 tasks.map(task => {
-                  const isPending = /(pending|in.?progress|working|in.?review)/i.test(task.status || '');
+                  const isPending = /(pending|in.?progress|working|in.?review)/i.test(task.status || '') || !!task.worker;
                   return (
                     <a
                       key={task.id}
@@ -311,8 +327,8 @@ export default function SupportTVPage() {
                     >
                       <div className="stv-task-main">
                         <div className="stv-task-name" title={task.name}>{task.name}</div>
-                        {isPending && task.assignee && (
-                          <div className="stv-task-working">⚙️ {task.assignee}</div>
+                        {isPending && (task.worker || task.assignee) && (
+                          <div className="stv-task-working">⚙️ {task.worker || task.assignee}</div>
                         )}
                       </div>
                       {isPending
@@ -332,22 +348,33 @@ export default function SupportTVPage() {
               {upcoming.length > 0 && (
                 <>
                   <div className="stv-sub-section-label">Due Today · {upcoming.length}</div>
-                  {upcoming.map(task => (
-                    <a
-                      key={task.id}
-                      className="stv-task-card today"
-                      href={`https://answeringlegal-unit.monday.com/boards/${BOARD_ID}/pulses/${task.id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <div className="stv-task-name" title={task.name}>{task.name}</div>
-                      {task.priority && (
-                        <div className={`stv-task-pill ${priorityClass(task.priority)}`}>{task.priority}</div>
-                      )}
-                      <div className="stv-task-due today">Today</div>
-                      <div className="stv-task-arrow">↗</div>
-                    </a>
-                  ))}
+                  {upcoming.map(task => {
+                    const isActive = /(pending|in.?progress|working|in.?review)/i.test(task.status || '') || !!task.worker;
+                    return (
+                      <a
+                        key={task.id}
+                        className={`stv-task-card today${isActive ? ' pending' : ''}`}
+                        href={`https://answeringlegal-unit.monday.com/boards/${BOARD_ID}/pulses/${task.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <div className="stv-task-main">
+                          <div className="stv-task-name" title={task.name}>{task.name}</div>
+                          {isActive && (task.worker || task.assignee) && (
+                            <div className="stv-task-working">⚙️ {task.worker || task.assignee}</div>
+                          )}
+                        </div>
+                        {isActive
+                          ? <div className="stv-task-pill working">Being Worked On</div>
+                          : task.priority && <div className={`stv-task-pill ${priorityClass(task.priority)}`}>{task.priority}</div>
+                        }
+                        <div className="stv-task-due today">
+                          {task.dueTime ? `${fmt12hr(task.dueTime)} EST` : 'Today'}
+                        </div>
+                        <div className="stv-task-arrow">↗</div>
+                      </a>
+                    );
+                  })}
                 </>
               )}
             </div>

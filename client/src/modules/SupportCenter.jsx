@@ -55,6 +55,15 @@ function overdueUrgency(days) {
   return 'low';
 }
 
+function fmt12hr(timeStr) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return timeStr;
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 || 12;
+  return `${hour}:${String(m).padStart(2, '0')} ${period}`;
+}
+
 function priorityClass(p) {
   const l = (p || '').toLowerCase();
   if (l.includes('urgent')) return 'urgent';
@@ -101,7 +110,7 @@ function CompletedCard({ task }) {
 }
 
 function TaskCard({ task, isToday = false }) {
-  const isActive = /(pending|in.?progress|working|in.?review)/i.test(task.status || '');
+  const isActive = /(pending|in.?progress|working|in.?review)/i.test(task.status || '') || !!task.worker;
   const late     = !isToday ? daysLate(task.dueDate) : 0;
   return (
     <a
@@ -116,10 +125,10 @@ function TaskCard({ task, isToday = false }) {
             <span className="sc-task-working-banner-icon">⚡</span>
             <span className="sc-task-working-banner-label">{task.status || 'In Progress'}</span>
             <span className="sc-task-working-banner-sep">·</span>
-            {task.assignee ? (
+            {(task.worker || task.assignee) ? (
               <>
-                <span className="sc-task-working-avatar">{task.assignee[0].toUpperCase()}</span>
-                <span className="sc-task-working-banner-name">{task.assignee}</span>
+                <span className="sc-task-working-avatar">{(task.worker || task.assignee)[0].toUpperCase()}</span>
+                <span className="sc-task-working-banner-name">{task.worker || task.assignee}</span>
               </>
             ) : (
               <span className="sc-task-unassigned">Unassigned</span>
@@ -138,10 +147,10 @@ function TaskCard({ task, isToday = false }) {
           {task.priority  && <div className={`sc-task-pill ${priorityClass(task.priority)}`}>{task.priority}</div>}
           {!isActive && task.status && <div className="sc-task-pill status">{task.status}</div>}
           {isToday && (
-            <div className="sc-task-due today">{task.dueTime ? `Due ${task.dueTime} EST` : 'Due today'}</div>
+            <div className="sc-task-due today">{task.dueTime ? `Due ${fmt12hr(task.dueTime)} EST` : 'Due today'}</div>
           )}
           {!isToday && task.dueTime && (
-            <div className="sc-task-due muted">⏰ {task.dueTime} EST</div>
+            <div className="sc-task-due muted">⏰ {fmt12hr(task.dueTime)} EST</div>
           )}
           {task.assignee && !isActive && (
             <div className="sc-task-assignee">

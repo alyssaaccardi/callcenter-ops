@@ -947,7 +947,7 @@ app.get('/api/monday/support-tasks', async (req, res) => {
   if (!apiKey) return res.status(500).json({ error: 'Monday.com credentials not configured' });
 
   const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
-  const itemFields = `id name updated_at column_values(ids: ["color_mkxwxqsx", "status", "date_mkx5zfsz", "dropdown_mkzc9hm", "text_mkx5ca0q", "text_mkx5cpnb", "dropdown_mkxjmeyh", "multiple_person_mkx5smfv"]) { id text value }`;
+  const itemFields = `id name updated_at column_values(ids: ["color_mkxwxqsx", "status", "date_mkx5zfsz", "dropdown_mkzc9hm", "text_mkx5ca0q", "text_mkx5cpnb", "dropdown_mkxjmeyh", "multiple_person_mkx5smfv", "multiple_person_mm38yn50"]) { id text value }`;
 
   try {
     const allItems = [];
@@ -983,11 +983,17 @@ app.get('/api/monday/support-tasks', async (req, res) => {
       const accountCol  = item.column_values?.find(c => c.id === 'text_mkx5ca0q');
       const descCol     = item.column_values?.find(c => c.id === 'text_mkx5cpnb');
       const assigneeCol = item.column_values?.find(c => c.id === 'multiple_person_mkx5smfv');
+      const workerCol   = item.column_values?.find(c => c.id === 'multiple_person_mm38yn50');
 
       let dueTime = '';
       try {
         const raw = dateCol?.value ? JSON.parse(dateCol.value) : null;
-        if (raw?.time) dueTime = raw.time.slice(0, 5);
+        if (raw?.time) {
+          // dateCol.text is "YYYY-MM-DD HH:MM" in workspace timezone (EST).
+          // Use the time portion from text instead of raw.time which is UTC.
+          const textParts = (dateCol?.text || '').split(' ');
+          dueTime = textParts.length === 2 ? textParts[1] : raw.time.slice(0, 5);
+        }
       } catch { /* ignore */ }
 
       return {
@@ -1001,6 +1007,7 @@ app.get('/api/monday/support-tasks', async (req, res) => {
         accountName: accountCol?.text  || '',
         description: descCol?.text     || '',
         assignee:    assigneeCol?.text  || '',
+        worker:      workerCol?.text    || '',
         lastUpdate:  item.updated_at,
         link:        `https://answeringlegal-unit.monday.com/boards/${boardId}/pulses/${item.id}`,
       };
@@ -1028,6 +1035,8 @@ app.get('/api/monday/support-tasks', async (req, res) => {
     });
 
     const upcoming = mapped.filter(task => {
+      const statusLow = (task.status || '').toLowerCase();
+      if (statusLow === 'due') return true;
       if (!task.dueDate) return false;
       const due = new Date(task.dueDate); due.setHours(0, 0, 0, 0);
       return !isNaN(due) && due >= today && due < tomorrow;
