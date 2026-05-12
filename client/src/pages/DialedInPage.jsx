@@ -137,17 +137,22 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
         {queueStats?.queues?.length > 0 && (
           <div className={`tv-mitel-stats${queueStats.updatedAt && Date.now() - new Date(queueStats.updatedAt).getTime() > 60000 ? ' stale' : ''}`}>
             <div className="tv-mitel-stats-header">
-              <span className="tv-mitel-stats-title">Today's Calls</span>
+              <span className="tv-mitel-stats-title">Live Queues</span>
               <span className="tv-mitel-stats-cols">
-                <span>Answered</span><span>Longest Wait</span>
+                <span>Holding</span><span>Wait</span><span>Ans</span>
               </span>
             </div>
             {queueStats.queues.map(q => (
-              <div key={q.id} className="tv-mitel-stats-row">
+              <div key={q.id} className={`tv-mitel-stats-row${q.waiting > 0 ? ' tv-queue-active' : ''}`}>
                 <span className="tv-mitel-stats-queue">{q.name}</span>
                 <span className="tv-mitel-stats-cols">
-                  <span className="tv-mitel-answered">{q.answered.toLocaleString()}</span>
-                  <span className="tv-mitel-wait">{q.recentMaxWait != null ? fmtSeconds(q.recentMaxWait) : '—'}</span>
+                  <span className={`tv-mitel-waiting${q.waiting > 0 ? ' has-waiting' : ''}`}>
+                    {q.waiting != null ? q.waiting : '—'}
+                  </span>
+                  <span className="tv-mitel-wait">
+                    {q.longestWait != null ? fmtSeconds(q.longestWait) : (q.recentMaxWait != null ? fmtSeconds(q.recentMaxWait) : '—')}
+                  </span>
+                  <span className="tv-mitel-answered">{q.answered != null ? q.answered.toLocaleString() : '—'}</span>
                 </span>
               </div>
             ))}
