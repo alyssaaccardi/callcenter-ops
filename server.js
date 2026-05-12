@@ -1426,23 +1426,31 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
     const pad    = n => String(n).padStart(2, '0');
     const zdDate = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00Z`;
 
-    // Count unique tickets where an agent made at least one public comment.
-    // Zendesk search `type:ticket_comment` returns public comments only (not internal notes).
-    // We paginate to collect unique ticket IDs from each comment's URL.
-    async function countPublicReplyTickets(agentId, commentFilter, maxPages = 15) {
+    // Count unique tickets where an agent publicly replied.
+    // Uses incremental ticket_events for bounded periods (today/this-week/etc) to filter
+    // public:true comments only, falling back to commenter: search for longer periods.
+    async function countPublicReplyTickets(agentId, startTs, endTs) {
+      if (!startTs) {
+        // "all" period — use commenter search (includes internal notes, best available)
+        const res = await axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket commenter:${agentId}` } });
+        return res.data?.count || 0;
+      }
+      // Use incremental ticket_events to get public comments only
       const ticketIds = new Set();
-      let url = `${base}/search.json?query=${encodeURIComponent(`type:ticket_comment author:${agentId}${commentFilter}`)}&per_page=100`;
-      let pages = 0;
-      while (url && pages < maxPages) {
+      let url = `${base}/incremental/ticket_events.json?start_time=${Math.floor(startTs / 1000)}&include=comment_events`;
+      while (url) {
         const res = await axios.get(url, { headers });
-        const results = res.data?.results || [];
-        for (const c of results) {
-          const m = (c.url || '').match(/\/tickets\/(\d+)\//);
-          if (m) ticketIds.add(m[1]);
+        const events = res.data?.ticket_events || [];
+        for (const ev of events) {
+          if (endTs && new Date(ev.created_at) > endTs) continue;
+          for (const child of (ev.child_events || [])) {
+            if (child.event_type === 'Comment' && child.public === true && String(child.author_id) === String(agentId)) {
+              ticketIds.add(ev.ticket_id);
+            }
+          }
         }
-        url = res.data?.next_page || null;
-        pages++;
-        if (!results.length) break;
+        const end = res.data?.end_of_stream;
+        url = end ? null : (res.data?.next_page || null);
       }
       return ticketIds.size;
     }
@@ -1451,6 +1459,7 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
     let commentFilter = '';
     let replyFilter   = '';
     let periodStart   = null;
+    let periodEnd     = null;
     if (period !== 'all') {
       let start, end;
       if      (period === 'today')     { start = new Date(now); start.setUTCHours(0, 0, 0, 0); }
@@ -1478,6 +1487,7 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
       }
       if (start) {
         periodStart   = start;
+        periodEnd     = end || null;
         solvedFilter  = ` solved>${zdDate(start)}`;
         if (end) solvedFilter  += ` solved<${zdDate(end)}`;
         commentFilter = ` created>${zdDate(start)}`;
@@ -1492,7 +1502,7 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
         const [openRes, solvedRes, replies] = await Promise.all([
           axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id} status:open status:new` } }),
           axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id} status:solved${solvedFilter}` } }),
-          countPublicReplyTickets(u.id, commentFilter),
+          countPublicReplyTickets(u.id, periodStart, periodEnd),
         ]);
         return { id: u.id, name: u.name, open: openRes.data?.count || 0, replies, solved: solvedRes.data?.count || 0, _u: u };
       } catch {
