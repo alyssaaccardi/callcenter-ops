@@ -137,12 +137,12 @@
   display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 9px;
   letter-spacing: 0.15em; text-transform: uppercase; color: #00c9b1;
   background: rgba(0,201,177,0.08); padding: 2px 7px; border-radius: 3px;
-  border: 1px solid rgba(0,201,177,0.2); margin-bottom: 10px;
+  border: 1px solid rgba(0,201,177,0.2); margin-bottom: 6px;
 }
-.tv-panel-name { font-family: 'Bebas Neue', sans-serif; font-size: clamp(38px, 4.5vw, 60px); line-height: 0.9; letter-spacing: 0.04em; color: #f0f4ff; margin-bottom: 8px; }
+.tv-panel-name { font-family: 'Bebas Neue', sans-serif; font-size: clamp(28px, 3.2vw, 48px); line-height: 0.9; letter-spacing: 0.04em; color: #f0f4ff; margin-bottom: 6px; }
 
 /* ── ORB ── */
-.tv-orb-row { display: flex; align-items: center; gap: 16px; margin-bottom: 8px; }
+.tv-orb-row { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
 .tv-orb { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; position: relative; }
 .tv-orb::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; opacity: 0.3; }
 .tv-orb.tv-up   { background: #22c55e; box-shadow: 0 0 16px rgba(34,197,94,0.8); animation: tv-breathe-green 3s ease-in-out infinite; }
@@ -155,33 +155,33 @@
 @keyframes tv-pulse-red          { 0%,100%{box-shadow:0 0 10px rgba(239,68,68,0.7)} 50%{box-shadow:0 0 30px rgba(239,68,68,1)} }
 @keyframes tv-pulse-red-ring     { 0%,100%{opacity:0.2;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.4)} }
 
-.tv-status-word { font-family: 'Bebas Neue', sans-serif; font-size: clamp(28px, 3.5vw, 46px); letter-spacing: 0.08em; transition: color 0.5s; }
+.tv-status-word { font-family: 'Bebas Neue', sans-serif; font-size: clamp(22px, 2.8vw, 38px); letter-spacing: 0.08em; transition: color 0.5s; }
 .tv-status-word.tv-up   { color: #22c55e; }
 .tv-status-word.tv-down { color: #ef4444; }
 
 /* ── DID COUNT ── */
-.tv-did-block { margin-bottom: 6px; }
+.tv-did-block { margin-bottom: 4px; }
 .tv-did-label { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 0.25em; text-transform: uppercase; color: #4a5a7a; margin-bottom: 2px; }
-.tv-did-number { font-family: 'Bebas Neue', sans-serif; font-size: clamp(42px, 5vw, 72px); line-height: 0.85; letter-spacing: -0.02em; transition: color 0.5s, transform 0.3s; }
+.tv-did-number { font-family: 'Bebas Neue', sans-serif; font-size: clamp(34px, 4vw, 58px); line-height: 0.85; letter-spacing: -0.02em; transition: color 0.5s, transform 0.3s; }
 .tv-did-number.tv-up   { color: #00c9b1; }
 .tv-did-number.tv-down { color: #f59e0b; }
 .tv-did-number.tv-pop  { animation: tv-did-pop 0.4s ease; }
 
 @keyframes tv-did-pop { 0%{transform:scale(1)} 40%{transform:scale(1.06)} 100%{transform:scale(1)} }
 
-.tv-panel-message { font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 400; color: rgba(255,255,255,0.5); line-height: 1.3; }
-.tv-panel-attribution { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #4a5a7a; margin-top: 6px; letter-spacing: 0.06em; }
+.tv-panel-message { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(13px, 1.3vw, 16px); font-weight: 400; color: rgba(255,255,255,0.5); line-height: 1.2; }
+.tv-panel-attribution { font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #4a5a7a; margin-top: 4px; letter-spacing: 0.06em; }
 
 /* ── AGENT STATS ── */
-.tv-agent-stats-block { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.07); flex-shrink: 0; }
+.tv-agent-stats-block { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.07); flex-shrink: 1; }
 .tv-agent-stats-row { display: flex; gap: 16px; }
 .tv-agent-stat { flex: 1; }
 .tv-standby-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #4a5a7a; margin-bottom: 2px; }
-.tv-here-count    { font-family: 'Bebas Neue', sans-serif; font-size: 44px; line-height: 1; color: #22c55e; transition: color 0.4s; }
+.tv-here-count    { font-family: 'Bebas Neue', sans-serif; font-size: clamp(28px, 3vw, 44px); line-height: 1; color: #22c55e; transition: color 0.4s; }
 .tv-here-count.tv-none    { color: #4a5a7a; }
-.tv-standby-count { font-family: 'Bebas Neue', sans-serif; font-size: 44px; line-height: 1; color: #f59e0b; transition: color 0.4s; }
+.tv-standby-count { font-family: 'Bebas Neue', sans-serif; font-size: clamp(28px, 3vw, 44px); line-height: 1; color: #f59e0b; transition: color 0.4s; }
 .tv-standby-count.tv-none { color: #4a5a7a; }
-.tv-standby-names { margin-top: 4px; font-size: 11px; color: rgba(240,244,255,0.45); line-height: 1.4; font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.03em; }
+.tv-standby-names { margin-top: 3px; font-size: 11px; color: rgba(240,244,255,0.45); line-height: 1.3; font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── SYSTEMS BAR ── */
 .tv-systems-bar { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; flex-shrink: 0; padding-bottom: 10px; }
@@ -298,7 +298,7 @@
 }
 
 /* Mitel today's-calls table */
-.tv-mitel-stats { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 4px; }
+.tv-mitel-stats { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; }
 .tv-mitel-stats-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
 .tv-mitel-stats-title { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(9px, 1vw, 12px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.1em; text-transform: uppercase; }
 .tv-mitel-stats-header .tv-mitel-stats-cols { display: flex; gap: 0; }
