@@ -1512,7 +1512,7 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
     if (periodStart) {
       try {
         publicReplyMap = await getPublicReplyMap(Math.floor(periodStart / 1000), periodEnd);
-      } catch { /* fall through — replies will show 0 */ }
+      } catch (e) { console.error('getPublicReplyMap error:', e.response?.data || e.message); }
     }
 
     const agentStats = await Promise.all(users.map(async u => {
@@ -1525,7 +1525,8 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
           ? (publicReplyMap.get(String(u.id))?.size ?? 0)
           : (await axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket commenter:${u.id}` } })).data?.count || 0;
         return { id: u.id, name: u.name, open: openRes.data?.count || 0, replies, solved: solvedRes.data?.count || 0, _u: u };
-      } catch {
+      } catch (e) {
+        console.error(`Leaderboard agent stats error [${u.name}]:`, e.response?.data || e.message);
         return { id: u.id, name: u.name, open: 0, replies: 0, solved: 0, _u: u };
       }
     }));
