@@ -1579,8 +1579,12 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
         .map(({ _u, ...rest }) => rest);
       escalation = [];
     } else {
-      support    = agentStats.filter(a => hasActivity(a)).sort(byActivity).map(({ _u, ...rest }) => rest);
-      escalation = agentStats.filter(a => isEscalation(a._u) && hasActivity(a)).sort(byActivity).map(({ _u, ...rest }) => rest);
+      // For "today" always show all agents in the group — it's a daily view and agents start
+      // with 0 replied/solved; filtering by hasActivity would hide everyone until they work a ticket.
+      // For all other periods, filter to agents with at least some activity.
+      const showAll = period === 'today';
+      support    = agentStats.filter(a => showAll || hasActivity(a)).sort(byActivity).map(({ _u, ...rest }) => rest);
+      escalation = agentStats.filter(a => isEscalation(a._u) && (showAll || hasActivity(a))).sort(byActivity).map(({ _u, ...rest }) => rest);
     }
 
     // Fetch team-scoped CSAT counts via group filter on ticket search
