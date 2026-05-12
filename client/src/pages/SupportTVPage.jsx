@@ -167,11 +167,9 @@ export default function SupportTVPage() {
   const mobileWord      = mobileOk ? 'Online' : !mobileServiceUp ? 'Down' : 'Messages Disrupted';
   const mobileAlert     = mobileOk ? null : !mobileServiceUp ? null : 'App up · messages not routing';
 
-  const integrServiceUp = sysStatus?.integrations?.state        !== 'DOWN';
-  const integrTextsUp   = sysStatus?.integrations?.messagesDown !== true;
-  const integrOk        = integrServiceUp && integrTextsUp;
-  const integrWord      = integrOk ? 'Routing' : !integrServiceUp ? 'Down' : 'Not Routing';
-  const integrAlert     = integrOk ? null : !integrServiceUp ? null : 'Service up · not hitting CRMs';
+  const integrOk    = sysStatus?.integrations?.messagesDown !== true;
+  const integrWord  = integrOk ? 'Routing' : 'Not Routing';
+  const integrAlert = integrOk ? null : 'Service up · not hitting CRMs';
 
   const didsUp = sysStatus?.didStatus !== 'DOWN';
   const allOk  = mobileOk && integrOk;
