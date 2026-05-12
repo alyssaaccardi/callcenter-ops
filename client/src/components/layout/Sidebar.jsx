@@ -108,7 +108,7 @@ export default function Sidebar({ activeModule, onModuleChange }) {
     return acc;
   }, {});
 
-  const sidebarWidth = collapsed ? 56 : 240;
+  const sidebarWidth = collapsed ? 96 : 240;
 
   return (
     <aside className={`sidebar${collapsed ? ' sidebar--collapsed' : ''}`}>
@@ -116,7 +116,7 @@ export default function Sidebar({ activeModule, onModuleChange }) {
         <div className="sidebar-brand">
           <img
             src="/dialedin-logo-dark.png"
-            alt="CCOB"
+            alt="Dialed In Dash"
             onError={e => { e.target.style.display = 'none'; }}
           />
           {!collapsed && <div className="sidebar-brand-name">DIALED IN DASH</div>}
@@ -177,7 +177,10 @@ export default function Sidebar({ activeModule, onModuleChange }) {
 
       <div className="sidebar-footer">
         <div className="user-info">
-          <div className="user-avatar">{initial}</div>
+          {user?.picture
+            ? <img src={user.picture} alt={displayName} className="user-avatar user-avatar--photo" referrerPolicy="no-referrer" />
+            : <div className="user-avatar">{initial}</div>
+          }
           {!collapsed && (
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="user-name">{displayName}</div>

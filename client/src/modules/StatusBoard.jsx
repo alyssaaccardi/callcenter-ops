@@ -359,7 +359,15 @@ function ActivityLog() {
         {activityLog.map((entry, i) => (
           <div key={`${entry.time}-${i}`} className="log-entry">
             <span className="log-time">{entry.time}</span>
-            {entry.user && <span className="log-user">{entry.user}</span>}
+            {entry.user && (
+              <span className="log-user">
+                {entry.userPicture
+                  ? <img src={entry.userPicture} alt={entry.user} className="log-user-photo" referrerPolicy="no-referrer" />
+                  : null
+                }
+                {entry.user}
+              </span>
+            )}
             <span className={`log-msg ${entry.type}`}>{entry.msg}</span>
           </div>
         ))}

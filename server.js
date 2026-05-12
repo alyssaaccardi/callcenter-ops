@@ -278,6 +278,7 @@ app.post('/api/activity-log', requireAuth, (req, res) => {
   const entry = {
     time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' }),
     user: user || req.user?.name || '',
+    userPicture: req.user?.picture || '',
     msg,
     type: type || 'info',
   };
@@ -360,10 +361,11 @@ function saveWorkflows(wfs) {
   fs.writeFileSync(WORKFLOWS_FILE, JSON.stringify(wfs));
 }
 
-function auditWorkflow(msg, userName) {
+function auditWorkflow(msg, userName, userPicture) {
   const entry = {
     time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' }),
     user: userName || '',
+    userPicture: userPicture || '',
     msg,
     type: 'info',
   };
@@ -391,7 +393,7 @@ app.post('/api/slack/workflows', requireAuth, (req, res) => {
   };
   wfs.push(wf);
   saveWorkflows(wfs);
-  auditWorkflow(`Added Slack workflow: "${wf.name}"`, req.user?.name);
+  auditWorkflow(`Added Slack workflow: "${wf.name}"`, req.user?.name, req.user?.picture);
   res.json(wf);
 });
 
@@ -412,7 +414,7 @@ app.put('/api/slack/workflows/:id', requireAuth, (req, res) => {
   };
   saveWorkflows(wfs);
   const label = name && name.trim() !== prev ? `"${prev}" → "${name.trim()}"` : `"${prev}"`;
-  auditWorkflow(`Updated Slack workflow: ${label}`, req.user?.name);
+  auditWorkflow(`Updated Slack workflow: ${label}`, req.user?.name, req.user?.picture);
   res.json(wfs[idx]);
 });
 
@@ -422,7 +424,7 @@ app.delete('/api/slack/workflows/:id', requireAuth, (req, res) => {
   if (!target) return res.status(404).json({ error: 'Workflow not found' });
   if (target.builtin) return res.status(403).json({ error: 'Built-in workflows cannot be deleted' });
   saveWorkflows(wfs.filter(w => w.id !== req.params.id));
-  auditWorkflow(`Deleted Slack workflow: "${target.name}"`, req.user?.name);
+  auditWorkflow(`Deleted Slack workflow: "${target.name}"`, req.user?.name, req.user?.picture);
   res.json({ ok: true });
 });
 

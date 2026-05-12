@@ -32,7 +32,13 @@ if (process.env.GOOGLE_CLIENT_ID) {
     const record = users[email];
     if (!record) return done(null, false, { message: 'unauthorized' });
 
-    done(null, { email, name: record.name || profile.displayName, role: record.role });
+    const picture = profile.photos?.[0]?.value || '';
+    if (picture && users[email].picture !== picture) {
+      users[email].picture = picture;
+      saveUsers(users);
+    }
+
+    done(null, { email, name: record.name || profile.displayName, role: record.role, picture });
   }));
 }
 
@@ -42,7 +48,7 @@ passport.deserializeUser((email, done) => {
   const users = loadUsers();
   const record = users[email];
   if (!record) return done(null, false);
-  done(null, { email, name: record.name, role: record.role });
+  done(null, { email, name: record.name, role: record.role, picture: record.picture || '' });
 });
 
 const DEV_USER = { email: 'dev@local', name: 'Dev User', role: 'super_admin' };
