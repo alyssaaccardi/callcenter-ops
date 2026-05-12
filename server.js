@@ -1465,19 +1465,20 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
 
     const agentStats = await Promise.all(users.map(async u => {
       try {
-        const [openRes, repliesRes, touchedRes] = await Promise.all([
+        const [openRes, repliesRes, touchedRes, solvedRes] = await Promise.all([
           axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id} status:open status:new` } }),
           axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket commenter:${u.id}${replyFilter}` } }),
           axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id}${replyFilter}` } }),
+          axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id} status:solved${solvedFilter}` } }),
         ]);
-        return { id: u.id, name: u.name, open: openRes.data?.count || 0, replies: repliesRes.data?.count || 0, touched: touchedRes.data?.count || 0, _u: u };
+        return { id: u.id, name: u.name, open: openRes.data?.count || 0, replies: repliesRes.data?.count || 0, touched: touchedRes.data?.count || 0, solved: solvedRes.data?.count || 0, _u: u };
       } catch {
-        return { id: u.id, name: u.name, open: 0, replies: 0, touched: 0, _u: u };
+        return { id: u.id, name: u.name, open: 0, replies: 0, touched: 0, solved: 0, _u: u };
       }
     }));
 
-    const hasActivity = a => a.replies > 0 || a.touched > 0 || a.open > 0;
-    const byActivity  = (a, b) => b.replies - a.replies || b.touched - a.touched || a.open - b.open;
+    const hasActivity = a => a.replies > 0 || a.solved > 0 || a.touched > 0 || a.open > 0;
+    const byActivity  = (a, b) => b.replies - a.replies || b.solved - a.solved || b.touched - a.touched || a.open - b.open;
 
     let sections = null;
     let support, escalation;

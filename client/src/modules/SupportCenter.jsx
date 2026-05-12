@@ -265,32 +265,45 @@ function CsatPanel({ ratings, unconfigured }) {
 }
 
 function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad, zdUrl, periodLabel }) {
-  const rankCls   = i => i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+  const rankCls     = i => i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
   const totalAgents = (support?.length ?? 0) + (escalation?.length ?? 0);
   const supportReplies = (support || []).reduce((s, a) => s + a.replies, 0);
+  const supportSolved  = (support || []).reduce((s, a) => s + (a.solved || 0), 0);
   const csatTotal  = (csatGood || 0) + (csatBad || 0);
   const csatPct    = csatTotal > 0 ? Math.round(((csatGood || 0) / csatTotal) * 100) : null;
 
-  function chipHref(a, type) {
-    if (!zdUrl) return null;
-    if (type === 'replied') return zdUrl(`type:ticket commenter:${a.id}`);
-    return zdUrl(`type:ticket assignee_id:${a.id} status:open status:new`);
-  }
-
   function AgentChip({ agent, type }) {
-    const href  = chipHref(agent, type);
-    const label = type === 'replied' ? `${agent.replies} replied` : `${agent.open} open`;
-    const title = type === 'replied'
-      ? `${agent.replies} tickets with a public reply from ${agent.name} in the selected period — click to open in Zendesk`
-      : `${agent.open} tickets currently assigned & open/new for ${agent.name} — click to open in Zendesk`;
-    const cls   = `sc-lb-chip ${type}${href ? ' linked' : ''}`;
-    if (href) return <a className={cls} href={href} target="_blank" rel="noopener noreferrer" title={title}>{label}</a>;
-    return <span className={cls} title={title}>{label}</span>;
+    if (!zdUrl) {
+      const label = type === 'replied' ? `${agent.replies} replied`
+                  : type === 'solved'  ? `${agent.solved ?? 0} solved`
+                  : `${agent.open} open`;
+      return <span className={`sc-lb-chip ${type}`}>{label}</span>;
+    }
+    let href, label, title;
+    if (type === 'replied') {
+      href  = zdUrl(`type:ticket commenter:${agent.id}`);
+      label = `${agent.replies} replied`;
+      title = `${agent.replies} tickets with a public reply from ${agent.name} in the ${periodLabel} period`;
+    } else if (type === 'solved') {
+      href  = zdUrl(`type:ticket assignee_id:${agent.id} status:solved`);
+      label = `${agent.solved ?? 0} solved`;
+      title = `${agent.solved ?? 0} tickets solved by ${agent.name} in the ${periodLabel} period`;
+    } else {
+      href  = zdUrl(`type:ticket assignee_id:${agent.id} status:open status:new`);
+      label = `${agent.open} open`;
+      title = `${agent.open} tickets currently assigned & open/new for ${agent.name}`;
+    }
+    return (
+      <a className={`sc-lb-chip ${type} linked`} href={href} target="_blank" rel="noopener noreferrer" title={title}>
+        {label}
+      </a>
+    );
   }
 
   function AgentRow({ agent, rank }) {
-    const total   = agent.replies + agent.open;
-    const ratePct = total > 0 ? Math.round((agent.replies / total) * 100) : null;
+    const solved   = agent.solved ?? 0;
+    const total    = agent.replies + agent.open;
+    const ratePct  = total > 0 ? Math.round((agent.replies / total) * 100) : null;
     return (
       <div className="sc-lb-row">
         <div className={`sc-lb-rank ${rankCls(rank)}`}>{rank + 1}</div>
@@ -299,13 +312,14 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
         {ratePct !== null && (
           <span
             className={`sc-lb-rate ${ratePct >= 70 ? 'green' : ratePct >= 40 ? 'amber' : 'red'}`}
-            title={`${ratePct}% of this agent's ticket workload is resolved (replied ÷ replied+open)`}
+            title={`${ratePct}% of this agent's ticket workload replied (replied ÷ replied+open)`}
           >
             {ratePct}%
           </span>
         )}
         <div className="sc-lb-chips">
           <AgentChip agent={agent} type="replied" />
+          {solved > 0 && <AgentChip agent={agent} type="solved" />}
           <AgentChip agent={agent} type="open" />
         </div>
       </div>
@@ -318,7 +332,7 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
         <div>
           <div className="sc-panel-title">Agent Leaderboard</div>
           <div className="sc-lb-source">
-            Zendesk · replied in period · open = all-time assigned · ranked by replies desc
+            Zendesk · replied &amp; solved in period · open = all-time assigned · click chips → Zendesk
           </div>
         </div>
         <div className="sc-lb-header-right">
@@ -337,7 +351,7 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
       </div>
 
       <div className="sc-panel-criteria">
-        REPLIED = tickets with public reply in {periodLabel} period · OPEN = active queue (all time) · % = replied÷(replied+open) · click chips → Zendesk
+        REPLIED = public reply in {periodLabel} · SOLVED = closed in {periodLabel} · OPEN = active queue · % = replied÷(replied+open)
       </div>
 
       <div className="sc-panel-body">
@@ -347,9 +361,8 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
         {!unconfigured && support?.length > 0 && (
           <div className="sc-lb-section">
             Trial Account Team
-            {supportReplies > 0 && (
-              <span className="sc-lb-section-stat">{supportReplies} replied</span>
-            )}
+            {supportReplies > 0 && <span className="sc-lb-section-stat">{supportReplies} replied</span>}
+            {supportSolved  > 0 && <span className="sc-lb-section-stat solved">{supportSolved} solved</span>}
           </div>
         )}
         {!unconfigured && support?.map((a, i) => (
