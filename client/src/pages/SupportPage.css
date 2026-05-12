@@ -100,7 +100,7 @@
 /* ── Stat strip ── */
 .sc-stat-strip {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
   gap: 12px;
 }
 
@@ -145,6 +145,15 @@ body.dark .sc-stat-label { color: #64748b; }
   font-variant-numeric: tabular-nums;
 }
 body.dark .sc-stat-value { color: #e2e8f0; }
+
+.sc-stat-sub {
+  font-size: 10px;
+  font-weight: 500;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
+  margin-top: 2px;
+}
+body.dark .sc-stat-sub { color: #475569; }
 
 .sc-stat-card.accent-red   .sc-stat-value { color: #dc2626; }
 .sc-stat-card.accent-amber .sc-stat-value { color: #d97706; }

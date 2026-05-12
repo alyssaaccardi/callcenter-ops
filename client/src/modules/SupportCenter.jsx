@@ -179,12 +179,13 @@ function TaskCard({ task, isToday = false }) {
   );
 }
 
-function StatCard({ label, value, className = '', href, title }) {
+function StatCard({ label, value, sub, className = '', href, title }) {
   const cls = `sc-stat-card${className ? ' ' + className : ''}`;
   const body = (
     <>
       <div className="sc-stat-label">{label}</div>
       <div className="sc-stat-value">{value}</div>
+      {sub && <div className="sc-stat-sub">{sub}</div>}
     </>
   );
   if (href) {
@@ -495,9 +496,11 @@ export default function SupportCenter() {
     } catch { /* ignore */ }
   }
 
-  const doneCount    = stats?.byStatus?.find(s => s.label?.toLowerCase() === 'done')?.count ?? 0;
-  const overdueCount = tasks.length;
-  const staleCount   = stale.unconfigured ? null : (stale.tickets?.length ?? 0);
+  const doneCount     = stats?.byStatus?.find(s => s.label?.toLowerCase() === 'done')?.count ?? 0;
+  const overdueCount  = tasks.length;
+  const workingCount  = tasks.filter(t => t.worker || /(pending|in.?progress|working|in.?review)/i.test(t.status || '')).length;
+  const dueCount      = upcoming.length;
+  const staleCount    = stale.unconfigured ? null : (stale.tickets?.length ?? 0);
 
   const mondayUrl  = `https://answeringlegal-unit.monday.com/boards/${BOARD_ID}`;
   const zdSub      = queue.zdSubdomain;
@@ -580,12 +583,15 @@ export default function SupportCenter() {
                 label="Overdue" value={overdueCount}
                 className={overdueCount > 0 ? 'accent-red' : ''}
                 href="#overdue-section"
-                title={`${overdueCount} task${overdueCount !== 1 ? 's' : ''} past their due date — click to jump to list`}
+                sub={workingCount > 0 ? `${workingCount} being worked on` : undefined}
+                title={`${overdueCount} task${overdueCount !== 1 ? 's' : ''} past their due date (${workingCount} being worked on) — click to jump to list`}
               />
               <StatCard
-                label="Due Today" value={stats?.dueToday ?? '—'}
+                label="Due Today" value={dueCount}
+                className={dueCount > 0 ? 'accent-amber' : ''}
                 href="#today-section"
-                title={`${stats?.dueToday ?? '?'} tasks due today — click to jump to list`}
+                sub={dueCount === 0 ? 'All clear' : undefined}
+                title={`${dueCount} task${dueCount !== 1 ? 's' : ''} due today — click to jump to list`}
               />
               <StatCard
                 label="Done" value={doneCount}
