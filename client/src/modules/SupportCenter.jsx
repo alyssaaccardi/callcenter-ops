@@ -283,7 +283,7 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
     if (type === 'replied') {
       href  = zdUrl(`type:ticket commenter:${agent.id}`);
       label = `${agent.replies} replied`;
-      title = `${agent.replies} tickets with a public reply from ${agent.name} in the ${periodLabel} period`;
+      title = `${agent.replies} unique tickets where ${agent.name} made at least one public reply in the ${periodLabel} period (excludes internal notes)`;
     } else if (type === 'solved') {
       href  = zdUrl(`type:ticket assignee_id:${agent.id} status:solved`);
       label = `${agent.solved ?? 0} solved`;
@@ -351,7 +351,7 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
       </div>
 
       <div className="sc-panel-criteria">
-        REPLIED = public reply in {periodLabel} · SOLVED = closed in {periodLabel} · OPEN = active queue · % = replied÷(replied+open)
+        REPLIED = unique tickets publicly replied to in {periodLabel} (no internal notes) · SOLVED = closed in {periodLabel} · OPEN = active queue · % = replied÷(replied+open)
       </div>
 
       <div className="sc-panel-body">

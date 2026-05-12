@@ -1426,9 +1426,31 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
     const pad    = n => String(n).padStart(2, '0');
     const zdDate = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00Z`;
 
-    let solvedFilter = '';
-    let replyFilter  = '';
-    let periodStart  = null;
+    // Count unique tickets where an agent made at least one public comment.
+    // Zendesk search `type:ticket_comment` returns public comments only (not internal notes).
+    // We paginate to collect unique ticket IDs from each comment's URL.
+    async function countPublicReplyTickets(agentId, commentFilter, maxPages = 15) {
+      const ticketIds = new Set();
+      let url = `${base}/search.json?query=${encodeURIComponent(`type:ticket_comment author:${agentId}${commentFilter}`)}&per_page=100`;
+      let pages = 0;
+      while (url && pages < maxPages) {
+        const res = await axios.get(url, { headers });
+        const results = res.data?.results || [];
+        for (const c of results) {
+          const m = (c.url || '').match(/\/tickets\/(\d+)\//);
+          if (m) ticketIds.add(m[1]);
+        }
+        url = res.data?.next_page || null;
+        pages++;
+        if (!results.length) break;
+      }
+      return ticketIds.size;
+    }
+
+    let solvedFilter  = '';
+    let commentFilter = '';
+    let replyFilter   = '';
+    let periodStart   = null;
     if (period !== 'all') {
       let start, end;
       if      (period === 'today')     { start = new Date(now); start.setUTCHours(0, 0, 0, 0); }
@@ -1455,30 +1477,31 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
         end   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23, 59, 0, 0));
       }
       if (start) {
-        periodStart  = start;
-        solvedFilter = ` solved>${zdDate(start)}`;
-        if (end) solvedFilter += ` solved<${zdDate(end)}`;
-        replyFilter  = ` updated>${zdDate(start)}`;
-        if (end) replyFilter += ` updated<${zdDate(end)}`;
+        periodStart   = start;
+        solvedFilter  = ` solved>${zdDate(start)}`;
+        if (end) solvedFilter  += ` solved<${zdDate(end)}`;
+        commentFilter = ` created>${zdDate(start)}`;
+        if (end) commentFilter += ` created<${zdDate(end)}`;
+        replyFilter   = ` updated>${zdDate(start)}`;
+        if (end) replyFilter   += ` updated<${zdDate(end)}`;
       }
     }
 
     const agentStats = await Promise.all(users.map(async u => {
       try {
-        const [openRes, repliesRes, touchedRes, solvedRes] = await Promise.all([
+        const [openRes, solvedRes, replies] = await Promise.all([
           axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id} status:open status:new` } }),
-          axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket commenter:${u.id}${replyFilter}` } }),
-          axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id}${replyFilter}` } }),
           axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id} status:solved${solvedFilter}` } }),
+          countPublicReplyTickets(u.id, commentFilter),
         ]);
-        return { id: u.id, name: u.name, open: openRes.data?.count || 0, replies: repliesRes.data?.count || 0, touched: touchedRes.data?.count || 0, solved: solvedRes.data?.count || 0, _u: u };
+        return { id: u.id, name: u.name, open: openRes.data?.count || 0, replies, solved: solvedRes.data?.count || 0, _u: u };
       } catch {
-        return { id: u.id, name: u.name, open: 0, replies: 0, touched: 0, solved: 0, _u: u };
+        return { id: u.id, name: u.name, open: 0, replies: 0, solved: 0, _u: u };
       }
     }));
 
-    const hasActivity = a => a.replies > 0 || a.solved > 0 || a.touched > 0 || a.open > 0;
-    const byActivity  = (a, b) => b.replies - a.replies || b.solved - a.solved || b.touched - a.touched || a.open - b.open;
+    const hasActivity = a => a.replies > 0 || a.solved > 0 || a.open > 0;
+    const byActivity  = (a, b) => b.replies - a.replies || b.solved - a.solved || a.open - b.open;
 
     let sections = null;
     let support, escalation;
