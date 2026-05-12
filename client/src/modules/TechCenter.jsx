@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import UserBadge from '../components/UserBadge';
 import '../pages/SupportPage.css';
 import './TechCenter.css';
 
@@ -110,24 +112,23 @@ function CsatPanel({ ratings, unconfigured }) {
   );
 }
 
-function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad, zdUrl, periodLabel }) {
-  const rankCls    = i => i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+function LeaderboardPanel({ sections, support, unconfigured, csatGood, csatBad, zdUrl, periodLabel }) {
+  const rankCls   = i => i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
   const totalAgents = (support?.length ?? 0);
-  const supportSolved = (support || []).reduce((s, a) => s + a.solved, 0);
-  const csatTotal  = (csatGood || 0) + (csatBad || 0);
-  const csatPct    = csatTotal > 0 ? Math.round(((csatGood || 0) / csatTotal) * 100) : null;
+  const csatTotal = (csatGood || 0) + (csatBad || 0);
+  const csatPct   = csatTotal > 0 ? Math.round(((csatGood || 0) / csatTotal) * 100) : null;
 
   function chipHref(a, type) {
     if (!zdUrl) return null;
-    if (type === 'solved') return zdUrl(`type:ticket assignee_id:${a.id} status:solved`);
+    if (type === 'replied') return zdUrl(`type:ticket commenter:${a.id}`);
     return zdUrl(`type:ticket assignee_id:${a.id} status:open status:new`);
   }
 
   function AgentChip({ agent, type }) {
     const href  = chipHref(agent, type);
-    const label = type === 'solved' ? `${agent.solved} solved` : `${agent.open} open`;
-    const title = type === 'solved'
-      ? `${agent.solved} tickets resolved by ${agent.name} in the selected period — click to open in Zendesk`
+    const label = type === 'replied' ? `${agent.replies} replied` : `${agent.open} open`;
+    const title = type === 'replied'
+      ? `${agent.replies} tickets with a public reply from ${agent.name} in the selected period — click to open in Zendesk`
       : `${agent.open} tickets currently assigned & open/new for ${agent.name} — click to open in Zendesk`;
     const cls   = `sc-lb-chip ${type}${href ? ' linked' : ''}`;
     if (href) return <a className={cls} href={href} target="_blank" rel="noopener noreferrer" title={title}>{label}</a>;
@@ -135,22 +136,23 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
   }
 
   function AgentRow({ agent, rank }) {
-    const total   = agent.solved + agent.open;
-    const ratePct = total > 0 ? Math.round((agent.solved / total) * 100) : null;
+    const total   = agent.replies + agent.open;
+    const ratePct = total > 0 ? Math.round((agent.replies / total) * 100) : null;
     return (
       <div className="sc-lb-row">
         <div className={`sc-lb-rank ${rankCls(rank)}`}>{rank + 1}</div>
+        <div className="sc-lb-avatar">{(agent.name || '?')[0].toUpperCase()}</div>
         <div className="sc-lb-name" title={agent.name}>{agent.name}</div>
         {ratePct !== null && (
           <span
             className={`sc-lb-rate ${ratePct >= 70 ? 'green' : ratePct >= 40 ? 'amber' : 'red'}`}
-            title={`${ratePct}% of this agent's ticket workload is resolved (solved ÷ solved+open)`}
+            title={`${ratePct}% of this agent's ticket workload is resolved (replied ÷ replied+open)`}
           >
             {ratePct}%
           </span>
         )}
         <div className="sc-lb-chips">
-          <AgentChip agent={agent} type="solved" />
+          <AgentChip agent={agent} type="replied" />
           <AgentChip agent={agent} type="open" />
         </div>
       </div>
@@ -163,7 +165,7 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
         <div>
           <div className="sc-panel-title">Tech Team Leaderboard</div>
           <div className="sc-lb-source">
-            Zendesk · solved in period · open = all-time assigned · ranked by solved desc
+            Zendesk · replied in period · open = all-time assigned · ranked by replies desc
           </div>
         </div>
         <div className="sc-lb-header-right">
@@ -182,24 +184,34 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
       </div>
 
       <div className="sc-panel-criteria">
-        SOLVED = tickets closed in {periodLabel} period · OPEN = active queue (all time) · % = solved÷(solved+open) · click chips → Zendesk
+        REPLIED = tickets with public reply in {periodLabel} period · OPEN = active queue (all time) · % = replied÷(replied+open) · click chips → Zendesk
       </div>
 
       <div className="sc-panel-body">
         {unconfigured && <Empty icon="🔗" text="Add Zendesk credentials in .env" />}
         {!unconfigured && totalAgents === 0 && <Empty icon="👥" text="No agents with activity" />}
 
-        {!unconfigured && support?.length > 0 && (
-          <div className="sc-lb-section">
-            Tech Team
-            {supportSolved > 0 && (
-              <span className="sc-lb-section-stat">{supportSolved} tickets solved</span>
-            )}
-          </div>
+        {!unconfigured && sections?.length > 0 ? (
+          sections.map(section => (
+            <React.Fragment key={section.name}>
+              <div className="sc-lb-section">
+                {section.name}
+                {section.agents.reduce((s, a) => s + (a.replies || 0), 0) > 0 && (
+                  <span className="sc-lb-section-stat">
+                    {section.agents.reduce((s, a) => s + (a.replies || 0), 0)} replied
+                  </span>
+                )}
+              </div>
+              {section.agents.map((a, i) => (
+                <AgentRow key={a.id} agent={a} rank={i} />
+              ))}
+            </React.Fragment>
+          ))
+        ) : (
+          !unconfigured && support?.map((a, i) => (
+            <AgentRow key={a.id} agent={a} rank={i} />
+          ))
         )}
-        {!unconfigured && support?.map((a, i) => (
-          <AgentRow key={a.id} agent={a} rank={i} />
-        ))}
       </div>
 
       {!unconfigured && csatTotal > 0 && (
@@ -271,13 +283,14 @@ function SystemStatusStrip({ status, hubspotDids }) {
 
 export default function TechCenter() {
   const { status, hubspotDids } = useApp();
+  const { user } = useAuth();
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
   const [lastSync,    setLastSync]    = useState(null);
   const [stale,       setStale]       = useState({ tickets: [], unconfigured: false });
   const [csat,        setCsat]        = useState({ ratings: [], unconfigured: false });
-  const [leaderboard, setLeaderboard] = useState({ support: [], escalation: [], unconfigured: false, csatGood: 0, csatBad: 0 });
-  const [queue,       setQueue]       = useState({ new: 0, open: 0, pending: 0, onHold: 0, unconfigured: false, zdSubdomain: null });
+  const [leaderboard, setLeaderboard] = useState({ sections: null, support: [], unconfigured: false, csatGood: 0, csatBad: 0 });
+  const [queue,       setQueue]       = useState({ new: 0, open: 0, pending: 0, onHold: 0, unconfigured: false, zdSubdomain: null, zdGroupFilter: null });
   const [period,      setPeriod]      = useState('this-week');
   const [staleHours,  setStaleHours]  = useState(24);
 
@@ -294,10 +307,10 @@ export default function TechCenter() {
       if (csatRes.status  === 'fulfilled') setCsat(csatRes.value.data);
       if (lbRes.status    === 'fulfilled') {
         const d = lbRes.value.data;
-        setLeaderboard({ support: d.support || [], escalation: d.escalation || [], unconfigured: !!d.unconfigured, csatGood: d.csatGood || 0, csatBad: d.csatBad || 0 });
+        setLeaderboard({ sections: d.sections || null, support: d.support || [], unconfigured: !!d.unconfigured, csatGood: d.csatGood || 0, csatBad: d.csatBad || 0 });
       }
       if (queueRes.status === 'fulfilled') setQueue(queueRes.value.data);
-      setLastSync(new Date().toLocaleTimeString());
+      setLastSync(new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -312,8 +325,11 @@ export default function TechCenter() {
 
   const staleCount = stale.unconfigured ? null : (stale.tickets?.length ?? 0);
 
-  const zdSub  = queue.zdSubdomain;
-  const zdUrl  = zdSub ? (q) => `https://${zdSub}.zendesk.com/agent/search/1?q=${encodeURIComponent(q)}` : null;
+  const zdSub      = queue.zdSubdomain;
+  const zdUrl      = zdSub ? (q) => `https://${zdSub}.zendesk.com/agent/search/1?q=${encodeURIComponent(q)}` : null;
+  const zdGroupUrl = zdUrl && queue.zdGroupFilter
+    ? (q) => zdUrl(`${q} ${queue.zdGroupFilter}`)
+    : zdUrl;
 
   return (
     <div>
@@ -328,6 +344,7 @@ export default function TechCenter() {
               Synced {lastSync}
             </span>
           )}
+          <UserBadge user={user} />
           <button className="btn btn-secondary btn-sm" onClick={async () => {
             try {
               const res = await api.post('/api/tv-session');
@@ -407,23 +424,23 @@ export default function TechCenter() {
               <StatCard
                 label="New" value={queue.unconfigured ? '—' : queue.new}
                 className={!queue.unconfigured && queue.new > 0 ? 'accent-purple' : ''}
-                href={zdUrl ? zdUrl('type:ticket status:new') : null}
+                href={zdGroupUrl ? zdGroupUrl('type:ticket status:new') : null}
                 title={`${queue.new} new tickets awaiting first response — click to view in Zendesk`}
               />
               <StatCard
                 label="Open" value={queue.unconfigured ? '—' : queue.open}
                 className={!queue.unconfigured && queue.open > 0 ? 'accent-amber' : ''}
-                href={zdUrl ? zdUrl('type:ticket status:open') : null}
+                href={zdGroupUrl ? zdGroupUrl('type:ticket status:open') : null}
                 title={`${queue.open} open tickets actively being worked — click to view in Zendesk`}
               />
               <StatCard
                 label="Pending" value={queue.unconfigured ? '—' : queue.pending}
-                href={zdUrl ? zdUrl('type:ticket status:pending') : null}
+                href={zdGroupUrl ? zdGroupUrl('type:ticket status:pending') : null}
                 title={`${queue.pending} tickets awaiting customer response`}
               />
               <StatCard
                 label="On Hold" value={queue.unconfigured ? '—' : queue.onHold}
-                href={zdUrl ? zdUrl('type:ticket status:hold') : null}
+                href={zdGroupUrl ? zdGroupUrl('type:ticket status:hold') : null}
                 title={`${queue.onHold} tickets on hold`}
               />
               <StatCard
@@ -439,8 +456,8 @@ export default function TechCenter() {
             <StalePanel tickets={stale.tickets} unconfigured={stale.unconfigured} hours={staleHours} />
             <CsatPanel  ratings={csat.ratings}  unconfigured={csat.unconfigured} />
             <LeaderboardPanel
+              sections={leaderboard.sections}
               support={leaderboard.support}
-              escalation={leaderboard.escalation}
               unconfigured={leaderboard.unconfigured}
               csatGood={leaderboard.csatGood}
               csatBad={leaderboard.csatBad}

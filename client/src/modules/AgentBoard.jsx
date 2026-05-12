@@ -1,17 +1,20 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import UserBadge from '../components/UserBadge';
 import api from '../api';
 
 function fmtTime(ts) {
   if (!ts) return '—';
   const d = new Date(ts);
-  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' });
 }
 
 export default function AgentBoard() {
   const { toast, addLog } = useApp();
+  const { user } = useAuth();
   const [agents, setAgents] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
   const [activeTab, setActiveTab] = useState('here');
   const [selected, setSelected] = useState(new Set());
@@ -21,11 +24,14 @@ export default function AgentBoard() {
   const [agentLog, setAgentLog] = useState([]);
   const [movingId, setMovingId] = useState(null);
 
+  useEffect(() => { fetchAgents(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { if (autoInterval) clearInterval(autoInterval); }, [autoInterval]);
 
   function addAgentLog(msg, type = 'ok') {
     const entry = {
-      time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' }),
+      user: user?.name || '',
+      userPicture: user?.picture || '',
       msg, type,
     };
     setAgentLog(prev => [entry, ...prev].slice(0, 50));
@@ -38,7 +44,7 @@ export default function AgentBoard() {
     try {
       const res = await api.get('/api/monday/agents');
       setAgents(res.data?.agents || []);
-      setLastUpdated(new Date().toLocaleTimeString());
+      setLastUpdated(new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST');
       setSelected(new Set());
     } catch (e) {
       setFetchError(true);
@@ -121,6 +127,7 @@ export default function AgentBoard() {
           <div className="page-sub">Monday.com · View and move agents between statuses</div>
         </div>
         <div className="flex" style={{ gap: 10, flexWrap: 'wrap' }}>
+          <UserBadge user={user} />
           <div className="ab-stat-strip">
             <div className="ab-stat-chip">
               <span className="ab-chip-label">Savvy Here</span>
@@ -287,6 +294,15 @@ export default function AgentBoard() {
           {agentLog.map((e, i) => (
             <div key={i} className="log-entry">
               <span className="log-time">{e.time}</span>
+              {e.user && (
+                <span className="log-user">
+                  {e.userPicture
+                    ? <img src={e.userPicture} alt={e.user} className="log-user-photo" referrerPolicy="no-referrer" />
+                    : null
+                  }
+                  {e.user}
+                </span>
+              )}
               <span className={`log-msg ${e.type}`}>{e.msg}</span>
             </div>
           ))}

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import UserBadge from '../components/UserBadge';
 import '../pages/SupportPage.css';
 
 const POLL_MS  = 15000;
@@ -37,12 +39,92 @@ function daysOverdue(str) {
   return d === 1 ? '1d overdue' : `${d}d overdue`;
 }
 
+function daysLate(str) {
+  if (!str) return 0;
+  const due = new Date(str);
+  if (isNaN(due)) return 0;
+  due.setHours(0, 0, 0, 0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.round((today - due) / 86400000));
+}
+
+function overdueUrgency(days) {
+  if (days >= 7) return 'critical';
+  if (days >= 3) return 'high';
+  if (days >= 1) return 'medium';
+  return 'low';
+}
+
 function priorityClass(p) {
   const l = (p || '').toLowerCase();
   if (l.includes('urgent')) return 'urgent';
   if (l.includes('high'))   return 'high';
   if (l.includes('med'))    return 'medium';
   return 'low';
+}
+
+function TaskCard({ task, isToday = false }) {
+  const isPending = (task.status || '').toLowerCase().includes('pending');
+  const late      = !isToday ? daysLate(task.dueDate) : 0;
+  return (
+    <a
+      className={`sc-task-card${isToday ? ' today' : ''}${isPending ? ' pending' : ''}`}
+      href={task.link}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <div className="sc-task-body">
+        {isPending && (
+          <div className="sc-task-working-banner">
+            <span className="sc-task-working-banner-icon">⚙️</span>
+            <span className="sc-task-working-banner-label">Being worked on</span>
+            {task.assignee && (
+              <span className="sc-task-working-banner-name">{task.assignee}</span>
+            )}
+          </div>
+        )}
+        <div className="sc-task-top-row">
+          {task.accountName && <span className="sc-task-account">{task.accountName}</span>}
+          <span className="sc-task-name" title={task.name}>{task.name}</span>
+        </div>
+        {task.description && (
+          <div className="sc-task-desc">{task.description}</div>
+        )}
+        <div className="sc-task-meta-row">
+          {task.taskType && <div className="sc-task-pill type">{task.taskType}</div>}
+          {task.priority  && <div className={`sc-task-pill ${priorityClass(task.priority)}`}>{task.priority}</div>}
+          {!isPending && task.status && <div className="sc-task-pill status">{task.status}</div>}
+          {isToday && (
+            <div className="sc-task-due today">{task.dueTime ? `Due ${task.dueTime} EST` : 'Due today'}</div>
+          )}
+          {!isToday && task.dueTime && (
+            <div className="sc-task-due muted">⏰ {task.dueTime} EST</div>
+          )}
+          {task.assignee && !isPending && (
+            <div className="sc-task-assignee">
+              <span className="sc-task-assignee-dot" style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(168,85,247,0.2)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 800, color: 'var(--purple)', flexShrink: 0 }}>
+                {task.assignee[0].toUpperCase()}
+              </span>
+              {task.assignee}
+            </div>
+          )}
+        </div>
+      </div>
+      {!isToday && (
+        <div className={`sc-task-overdue-badge ${late === 0 ? 'today' : overdueUrgency(late)}`}>
+          {late === 0 ? (
+            <div className="sc-task-overdue-unit">Today</div>
+          ) : (
+            <>
+              <div className="sc-task-overdue-num">{late}</div>
+              <div className="sc-task-overdue-unit">day{late !== 1 ? 's' : ''} late</div>
+            </>
+          )}
+        </div>
+      )}
+      <div className="sc-task-arrow">↗</div>
+    </a>
+  );
 }
 
 function StatCard({ label, value, className = '', href, title }) {
@@ -54,7 +136,8 @@ function StatCard({ label, value, className = '', href, title }) {
     </>
   );
   if (href) {
-    return <a className={cls} href={href} target="_blank" rel="noopener noreferrer" title={title}>{body}</a>;
+    const isAnchor = href.startsWith('#');
+    return <a className={cls} href={href} {...(!isAnchor && { target: '_blank', rel: 'noopener noreferrer' })} title={title}>{body}</a>;
   }
   return <div className={cls} title={title}>{body}</div>;
 }
@@ -131,21 +214,21 @@ function CsatPanel({ ratings, unconfigured }) {
 function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad, zdUrl, periodLabel }) {
   const rankCls   = i => i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
   const totalAgents = (support?.length ?? 0) + (escalation?.length ?? 0);
-  const supportSolved = (support || []).reduce((s, a) => s + a.solved, 0);
+  const supportReplies = (support || []).reduce((s, a) => s + a.replies, 0);
   const csatTotal  = (csatGood || 0) + (csatBad || 0);
   const csatPct    = csatTotal > 0 ? Math.round(((csatGood || 0) / csatTotal) * 100) : null;
 
   function chipHref(a, type) {
     if (!zdUrl) return null;
-    if (type === 'solved') return zdUrl(`type:ticket assignee_id:${a.id} status:solved`);
+    if (type === 'replied') return zdUrl(`type:ticket commenter:${a.id}`);
     return zdUrl(`type:ticket assignee_id:${a.id} status:open status:new`);
   }
 
   function AgentChip({ agent, type }) {
     const href  = chipHref(agent, type);
-    const label = type === 'solved' ? `${agent.solved} solved` : `${agent.open} open`;
-    const title = type === 'solved'
-      ? `${agent.solved} tickets resolved by ${agent.name} in the selected period — click to open in Zendesk`
+    const label = type === 'replied' ? `${agent.replies} replied` : `${agent.open} open`;
+    const title = type === 'replied'
+      ? `${agent.replies} tickets with a public reply from ${agent.name} in the selected period — click to open in Zendesk`
       : `${agent.open} tickets currently assigned & open/new for ${agent.name} — click to open in Zendesk`;
     const cls   = `sc-lb-chip ${type}${href ? ' linked' : ''}`;
     if (href) return <a className={cls} href={href} target="_blank" rel="noopener noreferrer" title={title}>{label}</a>;
@@ -153,22 +236,23 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
   }
 
   function AgentRow({ agent, rank }) {
-    const total   = agent.solved + agent.open;
-    const ratePct = total > 0 ? Math.round((agent.solved / total) * 100) : null;
+    const total   = agent.replies + agent.open;
+    const ratePct = total > 0 ? Math.round((agent.replies / total) * 100) : null;
     return (
       <div className="sc-lb-row">
         <div className={`sc-lb-rank ${rankCls(rank)}`}>{rank + 1}</div>
+        <div className="sc-lb-avatar">{(agent.name || '?')[0].toUpperCase()}</div>
         <div className="sc-lb-name" title={agent.name}>{agent.name}</div>
         {ratePct !== null && (
           <span
             className={`sc-lb-rate ${ratePct >= 70 ? 'green' : ratePct >= 40 ? 'amber' : 'red'}`}
-            title={`${ratePct}% of this agent's ticket workload is resolved (solved ÷ solved+open)`}
+            title={`${ratePct}% of this agent's ticket workload is resolved (replied ÷ replied+open)`}
           >
             {ratePct}%
           </span>
         )}
         <div className="sc-lb-chips">
-          <AgentChip agent={agent} type="solved" />
+          <AgentChip agent={agent} type="replied" />
           <AgentChip agent={agent} type="open" />
         </div>
       </div>
@@ -181,7 +265,7 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
         <div>
           <div className="sc-panel-title">Agent Leaderboard</div>
           <div className="sc-lb-source">
-            Zendesk · solved in period · open = all-time assigned · ranked by solved desc
+            Zendesk · replied in period · open = all-time assigned · ranked by replies desc
           </div>
         </div>
         <div className="sc-lb-header-right">
@@ -200,7 +284,7 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
       </div>
 
       <div className="sc-panel-criteria">
-        SOLVED = tickets closed in {periodLabel} period · OPEN = active queue (all time) · % = solved÷(solved+open) · click chips → Zendesk
+        REPLIED = tickets with public reply in {periodLabel} period · OPEN = active queue (all time) · % = replied÷(replied+open) · click chips → Zendesk
       </div>
 
       <div className="sc-panel-body">
@@ -210,8 +294,8 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
         {!unconfigured && support?.length > 0 && (
           <div className="sc-lb-section">
             Trial Account Team
-            {supportSolved > 0 && (
-              <span className="sc-lb-section-stat">{supportSolved} tickets solved</span>
+            {supportReplies > 0 && (
+              <span className="sc-lb-section-stat">{supportReplies} replied</span>
             )}
           </div>
         )}
@@ -299,15 +383,17 @@ function SystemStatusStrip({ status, hubspotDids }) {
 
 export default function SupportCenter() {
   const { status, hubspotDids } = useApp();
+  const { user } = useAuth();
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
   const [lastSync,    setLastSync]    = useState(null);
   const [tasks,       setTasks]       = useState([]);
+  const [upcoming,    setUpcoming]    = useState([]);
   const [stats,       setStats]       = useState(null);
   const [stale,       setStale]       = useState({ tickets: [], unconfigured: false });
   const [csat,        setCsat]        = useState({ ratings: [], unconfigured: false });
   const [leaderboard, setLeaderboard] = useState({ support: [], escalation: [], unconfigured: false, csatGood: 0, csatBad: 0 });
-  const [queue,       setQueue]       = useState({ new: 0, open: 0, pending: 0, onHold: 0, unconfigured: false, zdSubdomain: null });
+  const [queue,       setQueue]       = useState({ new: 0, open: 0, pending: 0, onHold: 0, unconfigured: false, zdSubdomain: null, zdGroupFilter: null });
   const [period,      setPeriod]      = useState('this-week');
   const [staleHours,  setStaleHours]  = useState(24);
 
@@ -322,8 +408,10 @@ export default function SupportCenter() {
         api.get('/api/zendesk/leaderboard',   { params: { period: p, team: 'support' } }),
         api.get('/api/zendesk/queue-stats',   { params: { team: 'support' } }),
       ]);
-      if (tasksRes.status === 'fulfilled') setTasks(tasksRes.value.data?.tasks || []);
-      else setTasks([]);
+      if (tasksRes.status === 'fulfilled') {
+        setTasks(tasksRes.value.data?.tasks || []);
+        setUpcoming(tasksRes.value.data?.upcoming || []);
+      } else { setTasks([]); setUpcoming([]); }
       if (statsRes.status === 'fulfilled') setStats(statsRes.value.data);
       if (staleRes.status === 'fulfilled') setStale(staleRes.value.data);
       if (csatRes.status  === 'fulfilled') setCsat(csatRes.value.data);
@@ -332,7 +420,7 @@ export default function SupportCenter() {
         setLeaderboard({ support: d.support || [], escalation: d.escalation || [], unconfigured: !!d.unconfigured, csatGood: d.csatGood || 0, csatBad: d.csatBad || 0 });
       }
       if (queueRes.status === 'fulfilled') setQueue(queueRes.value.data);
-      setLastSync(new Date().toLocaleTimeString());
+      setLastSync(new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -357,9 +445,12 @@ export default function SupportCenter() {
   const overdueCount = tasks.length;
   const staleCount   = stale.unconfigured ? null : (stale.tickets?.length ?? 0);
 
-  const mondayUrl = `https://answeringlegal-unit.monday.com/boards/${BOARD_ID}`;
-  const zdSub     = queue.zdSubdomain;
-  const zdUrl     = zdSub ? (q) => `https://${zdSub}.zendesk.com/agent/search/1?q=${encodeURIComponent(q)}` : null;
+  const mondayUrl  = `https://answeringlegal-unit.monday.com/boards/${BOARD_ID}`;
+  const zdSub      = queue.zdSubdomain;
+  const zdUrl      = zdSub ? (q) => `https://${zdSub}.zendesk.com/agent/search/1?q=${encodeURIComponent(q)}` : null;
+  const zdGroupUrl = zdUrl && queue.zdGroupFilter
+    ? (q) => zdUrl(`${q} ${queue.zdGroupFilter}`)
+    : zdUrl;
 
   return (
     <div>
@@ -374,6 +465,7 @@ export default function SupportCenter() {
               Synced {lastSync}
             </span>
           )}
+          <UserBadge user={user} />
           <button className="btn btn-secondary btn-sm" onClick={launchTVDisplay}>
             🖥 TV Display
           </button>
@@ -433,13 +525,13 @@ export default function SupportCenter() {
               <StatCard
                 label="Overdue" value={overdueCount}
                 className={overdueCount > 0 ? 'accent-red' : ''}
-                href={mondayUrl}
-                title={`${overdueCount} task${overdueCount !== 1 ? 's' : ''} past their due date`}
+                href="#overdue-section"
+                title={`${overdueCount} task${overdueCount !== 1 ? 's' : ''} past their due date — click to jump to list`}
               />
               <StatCard
                 label="Due Today" value={stats?.dueToday ?? '—'}
-                href={mondayUrl}
-                title={`${stats?.dueToday ?? '?'} tasks due today`}
+                href="#today-section"
+                title={`${stats?.dueToday ?? '?'} tasks due today — click to jump to list`}
               />
               <StatCard
                 label="Done" value={doneCount}
@@ -456,23 +548,23 @@ export default function SupportCenter() {
               <StatCard
                 label="New" value={queue.unconfigured ? '—' : queue.new}
                 className={!queue.unconfigured && queue.new > 0 ? 'accent-purple' : ''}
-                href={zdUrl ? zdUrl('type:ticket status:new') : null}
+                href={zdGroupUrl ? zdGroupUrl('type:ticket status:new') : null}
                 title={`${queue.new} new ticket${queue.new !== 1 ? 's' : ''} awaiting first response — click to view in Zendesk`}
               />
               <StatCard
                 label="Open" value={queue.unconfigured ? '—' : queue.open}
                 className={!queue.unconfigured && queue.open > 0 ? 'accent-amber' : ''}
-                href={zdUrl ? zdUrl('type:ticket status:open') : null}
+                href={zdGroupUrl ? zdGroupUrl('type:ticket status:open') : null}
                 title={`${queue.open} open ticket${queue.open !== 1 ? 's' : ''} actively being worked — click to view in Zendesk`}
               />
               <StatCard
                 label="Pending" value={queue.unconfigured ? '—' : queue.pending}
-                href={zdUrl ? zdUrl('type:ticket status:pending') : null}
+                href={zdGroupUrl ? zdGroupUrl('type:ticket status:pending') : null}
                 title={`${queue.pending} ticket${queue.pending !== 1 ? 's' : ''} awaiting customer response`}
               />
               <StatCard
                 label="On Hold" value={queue.unconfigured ? '—' : queue.onHold}
-                href={zdUrl ? zdUrl('type:ticket status:hold') : null}
+                href={zdGroupUrl ? zdGroupUrl('type:ticket status:hold') : null}
                 title={`${queue.onHold} ticket${queue.onHold !== 1 ? 's' : ''} on hold`}
               />
               <StatCard
@@ -499,7 +591,7 @@ export default function SupportCenter() {
           </div>
 
           {/* ── Overdue Tasks ── */}
-          <div className="sc-tasks-section">
+          <div className="sc-tasks-section" id="overdue-section">
             <div className="sc-section-bar">
               <div className="sc-section-title">Overdue Tasks</div>
               <div className={`sc-badge${overdueCount === 0 ? ' clear' : ''}`}>
@@ -509,27 +601,23 @@ export default function SupportCenter() {
             {overdueCount === 0 && <Empty icon="✅" text="No overdue tasks — great work!" />}
             {overdueCount > 0 && (
               <div className="sc-task-list">
-                {tasks.map(task => (
-                  <a
-                    key={task.id}
-                    className="sc-task-card"
-                    href={`https://answeringlegal-unit.monday.com/boards/${BOARD_ID}/pulses/${task.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <div className="sc-task-name" title={task.name}>{task.name}</div>
-                    {task.priority && (
-                      <div className={`sc-task-pill ${priorityClass(task.priority)}`}>{task.priority}</div>
-                    )}
-                    {task.status && (
-                      <div className="sc-task-pill status">{task.status}</div>
-                    )}
-                    {task.dueDate && (
-                      <div className="sc-task-due">{daysOverdue(task.dueDate)}</div>
-                    )}
-                    <div className="sc-task-arrow">↗</div>
-                  </a>
-                ))}
+                {tasks.map(task => <TaskCard key={task.id} task={task} />)}
+              </div>
+            )}
+          </div>
+
+          {/* ── Due Today ── */}
+          <div className="sc-tasks-section" id="today-section">
+            <div className="sc-section-bar">
+              <div className="sc-section-title">Due Today</div>
+              <div className={`sc-badge${upcoming.length === 0 ? ' clear' : ' today'}`}>
+                {upcoming.length === 0 ? 'Nothing due' : `${upcoming.length} task${upcoming.length !== 1 ? 's' : ''}`}
+              </div>
+            </div>
+            {upcoming.length === 0 && <Empty icon="📅" text="No tasks due today" />}
+            {upcoming.length > 0 && (
+              <div className="sc-task-list">
+                {upcoming.map(task => <TaskCard key={task.id} task={task} isToday />)}
               </div>
             )}
           </div>
