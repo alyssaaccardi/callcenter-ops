@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import api from '../api';
 
 function maskUrl(url) {
@@ -90,6 +91,8 @@ function DeleteConfirm({ workflow, onConfirm, onClose }) {
 
 export default function SlackWorkflows() {
   const { toast, addLog } = useApp();
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
   const [workflows,     setWorkflows]     = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [firing,        setFiring]        = useState(null);
@@ -119,10 +122,9 @@ export default function SlackWorkflows() {
   }
 
   async function fireWorkflow(wf) {
-    if (!wf.url) { toast('No URL configured for this workflow', 'warn'); return; }
     setFiring(wf.id);
     try {
-      const res = await api.post('/api/slack/notify', { url: wf.url });
+      const res = await api.post(`/api/slack/workflows/${wf.id}/fire`);
       if (res.data?.openUrl) window.open(res.data.openUrl, '_blank');
       setLastTriggered(prev => ({ ...prev, [wf.id]: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST' }));
       toast(`Fired: ${wf.name}`, 'success');
@@ -172,11 +174,15 @@ export default function SlackWorkflows() {
       <div className="page-header">
         <div>
           <div className="page-title">Slack Workflows</div>
-          <div className="page-sub">Manage and fire status notification workflows</div>
+          <div className="page-sub">
+            {isSuperAdmin ? 'Manage and fire status notification workflows' : 'Fire status notification workflows'}
+          </div>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={() => setModalWf({})}>
-          + Add Workflow
-        </button>
+        {isSuperAdmin && (
+          <button className="btn btn-primary btn-sm" onClick={() => setModalWf({})}>
+            + Add Workflow
+          </button>
+        )}
       </div>
 
       <div className="mb-20">
@@ -194,27 +200,33 @@ export default function SlackWorkflows() {
               {wf.builtin && <span className="wf-builtin-badge">built-in</span>}
             </div>
             {wf.description && <div className="wf-description">{wf.description}</div>}
-            <div className="workflow-url-display">{maskUrl(wf.url)}</div>
+            {isSuperAdmin && (
+              <div className="workflow-url-display">{maskUrl(wf.url)}</div>
+            )}
             <div className="workflow-actions">
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => fireWorkflow(wf)}
-                disabled={firing === wf.id || !wf.url}
+                disabled={firing === wf.id}
               >
                 {firing === wf.id ? <span className="spinner" /> : '⚡'} Fire
               </button>
-              <button className="btn btn-secondary btn-sm" onClick={() => setModalWf(wf)}>
-                ✏️ Edit
-              </button>
-              <button
-                className="btn btn-ghost btn-sm"
-                style={{ color: wf.builtin ? 'var(--muted)' : 'var(--danger)', opacity: wf.builtin ? 0.4 : 1 }}
-                onClick={() => !wf.builtin && setDeleteWf(wf)}
-                title={wf.builtin ? 'Built-in workflows cannot be deleted' : 'Delete workflow'}
-                disabled={!!wf.builtin}
-              >
-                🗑️ Delete
-              </button>
+              {isSuperAdmin && (
+                <>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setModalWf(wf)}>
+                    ✏️ Edit
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ color: wf.builtin ? 'var(--muted)' : 'var(--danger)', opacity: wf.builtin ? 0.4 : 1 }}
+                    onClick={() => !wf.builtin && setDeleteWf(wf)}
+                    title={wf.builtin ? 'Built-in workflows cannot be deleted' : 'Delete workflow'}
+                    disabled={!!wf.builtin}
+                  >
+                    🗑️ Delete
+                  </button>
+                </>
+              )}
               {lastTriggered[wf.id] && (
                 <span className="last-triggered">Last fired: {lastTriggered[wf.id]}</span>
               )}

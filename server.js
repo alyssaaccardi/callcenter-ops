@@ -421,10 +421,32 @@ function auditWorkflow(msg, userName, userPicture) {
 }
 
 app.get('/api/slack/workflows', requireAuth, (req, res) => {
-  res.json(loadWorkflows());
+  const wfs = loadWorkflows();
+  if (req.user?.role !== 'super_admin') {
+    return res.json(wfs.map(({ url, ...rest }) => rest));
+  }
+  res.json(wfs);
 });
 
-app.post('/api/slack/workflows', requireAuth, (req, res) => {
+app.post('/api/slack/workflows/:id/fire', requireRole('super_admin', 'call_center_ops'), async (req, res) => {
+  const wfs = loadWorkflows();
+  const wf  = wfs.find(w => w.id === req.params.id);
+  if (!wf)      return res.status(404).json({ error: 'Workflow not found' });
+  if (!wf.url)  return res.status(400).json({ error: 'No URL configured for this workflow' });
+  if (wf.url.includes('slack.com/shortcuts/')) {
+    auditWorkflow(`Fired workflow: "${wf.name}"`, req.user?.name, req.user?.picture);
+    return res.json({ success: true, openUrl: wf.url });
+  }
+  try {
+    await axios.post(wf.url, {});
+    auditWorkflow(`Fired workflow: "${wf.name}"`, req.user?.name, req.user?.picture);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fire workflow', details: err.message });
+  }
+});
+
+app.post('/api/slack/workflows', requireRole('super_admin'), (req, res) => {
   const { name, scope, icon, url, description } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const wfs = loadWorkflows();
@@ -444,7 +466,7 @@ app.post('/api/slack/workflows', requireAuth, (req, res) => {
   res.json(wf);
 });
 
-app.put('/api/slack/workflows/:id', requireAuth, (req, res) => {
+app.put('/api/slack/workflows/:id', requireRole('super_admin'), (req, res) => {
   const wfs = loadWorkflows();
   const idx = wfs.findIndex(w => w.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Workflow not found' });
@@ -465,7 +487,7 @@ app.put('/api/slack/workflows/:id', requireAuth, (req, res) => {
   res.json(wfs[idx]);
 });
 
-app.delete('/api/slack/workflows/:id', requireAuth, (req, res) => {
+app.delete('/api/slack/workflows/:id', requireRole('super_admin'), (req, res) => {
   const wfs = loadWorkflows();
   const target = wfs.find(w => w.id === req.params.id);
   if (!target) return res.status(404).json({ error: 'Workflow not found' });

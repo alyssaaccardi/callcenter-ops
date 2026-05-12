@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import api from '../api';
 
 const ALL_SETTINGS_TABS = [
-  { id: 'general',    label: 'Call Centers',     roles: ['super_admin', 'call_center_ops'] },
+  { id: 'general',    label: 'Call Centers',     roles: ['super_admin'] },
   { id: 'alert-cfg',  label: 'Alert Templates',  roles: ['super_admin', 'call_center_ops'] },
   { id: 'canned-cfg', label: 'Canned Responses', roles: ['super_admin', 'call_center_ops'] },
   { id: 'portal',     label: 'Employee Portal',  roles: ['super_admin', 'call_center_ops'] },
