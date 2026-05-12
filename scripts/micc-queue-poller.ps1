@@ -1,76 +1,46 @@
 # ============================================================
 #  MiCC → Dialed In Dash  |  Real-Time Queue Stats Poller
-#  Run on the office PC (must be on same network as MICCSQL01).
-#  Queries CCMData every 5s and pushes to JSONBin so the dash
-#  updates in ~10s.
+#  Calls the MiCC Contact Center REST API every 5s and pushes
+#  live queue stats to the dashboard.
 #
 #  Setup:
-#    1. Save this file on the office PC (e.g. C:\Scripts\micc-queue-poller.ps1)
-#    2. Test: powershell -ExecutionPolicy Bypass -File C:\Scripts\micc-queue-poller.ps1
-#    3. Auto-start: run the Register-ScheduledTask block at the bottom (as Admin)
+#    1. Save this file on the office PC (Desktop\Scripts\)
+#    2. Test: & "C:\Users\micro\Desktop\Scripts\micc-queue-poller.ps1"
+#    3. Keep the window open — closing it stops the poller
 # ============================================================
 
 # ─── CONFIGURATION ───────────────────────────────────────────
-$SqlServer   = "MICCSQL01\MSSQLSERVER"
-$Database    = "CCMData"
-$SqlUser     = "CommandCenterSA"
-$SqlPass     = 'T}9]5kqe1!gF'
+$MiccServer   = "http://192.168.1.242"
+$MiccUser     = "DianaRicottone"
+$MiccPass     = "Savvy1!"
 
 $ServerUrl    = "https://ops.answeringlegal.com/api/mitel/queue-stats"
 $PollerSecret = "DialedIn-Mitel-2026-XQ7"
 $PollSeconds  = 5
 
-# Queue code → display name mapping
-$QueueNames = @{
-    P862 = "8262"
-    P861 = "8261"
-    P803 = "8203"
-}
-$QueueList = ($QueueNames.Keys | ForEach-Object { "'$_'" }) -join ","
+$QueueNames = @{ P862 = "8262"; P861 = "8261"; P803 = "8203" }
 # ─────────────────────────────────────────────────────────────
 
-$ConnString = "Server=$SqlServer;Database=$Database;User Id=$SqlUser;Password=$SqlPass;Connect Timeout=5;"
+# Skip SSL cert validation for internal server
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
-# Two queries run together:
-#  1. Today's totals — answered count + avg wait for answered calls (historical)
-#  2. Currently waiting — calls that have NOT been answered yet, started in
-#     the last 15 minutes (proxy for "in queue right now")
-$QueryTotals = @"
-SELECT
-    Queue,
-    SUM(CASE WHEN TimeToAnswer IS NOT NULL THEN 1 ELSE 0 END)                      AS answered,
-    AVG(CASE WHEN TimeToAnswer > 0 THEN CAST(TimeToAnswer AS float) END)            AS avgWait
-FROM [dbo].[tblData_LC_Trace]
-WHERE Queue IN ($QueueList)
-  AND PegCount = 1
-  AND CallStartTime >= CAST(GETDATE() AS DATE)
-GROUP BY Queue
-"@
+$script:Token       = $null
+$script:TokenExpiry = [DateTime]::MinValue
 
-$QueryWaiting = @"
-SELECT
-    Queue,
-    COUNT(*)                                                                         AS waiting,
-    MAX(DATEDIFF(SECOND, CallStartTime, GETDATE()))                                  AS longestWait
-FROM [dbo].[tblData_LC_Trace]
-WHERE Queue IN ($QueueList)
-  AND PegCount = 1
-  AND TimeToAnswer IS NULL
-  AND CallStartTime >= DATEADD(MINUTE, -15, GETDATE())
-GROUP BY Queue
-"@
+function Get-MiccToken {
+    $body    = "grant_type=password&username=$([Uri]::EscapeDataString($MiccUser))&password=$([Uri]::EscapeDataString($MiccPass))"
+    $headers = @{ 'Content-Type' = 'application/x-www-form-urlencoded' }
+    $r = Invoke-RestMethod -Uri "$MiccServer/authorizationserver/token" -Method Post -Headers $headers -Body $body -ErrorAction Stop
+    $script:Token       = $r.access_token
+    $script:TokenExpiry = (Get-Date).AddSeconds([int]$r.expires_in - 30)
+    Write-Host "$(Get-Date -Format 'HH:mm:ss')  Token acquired (expires in $([int]$r.expires_in)s)" -ForegroundColor DarkCyan
+}
 
-function Invoke-SqlQuery($query) {
-    $conn = New-Object System.Data.SqlClient.SqlConnection $ConnString
-    $conn.Open()
-    $cmd             = $conn.CreateCommand()
-    $cmd.CommandText = $query
-    $cmd.CommandTimeout = 5
-    $adapter         = New-Object System.Data.SqlClient.SqlDataAdapter $cmd
-    $table           = New-Object System.Data.DataTable
-    $adapter.Fill($table) | Out-Null
-    $conn.Close()
-    return $table
+function Get-QueueState($queueId) {
+    if ((Get-Date) -ge $script:TokenExpiry) { Get-MiccToken }
+    $headers = @{ 'Authorization' = "Bearer $($script:Token)" }
+    return Invoke-RestMethod -Uri "$MiccServer/miccsdk/api/v1/queues/$queueId/state" -Method Get -Headers $headers -ErrorAction Stop
 }
 
 function Push-ToServer($json) {
@@ -78,28 +48,28 @@ function Push-ToServer($json) {
     Invoke-RestMethod -Uri $ServerUrl -Method Post -Headers $headers -Body $json -ErrorAction Stop | Out-Null
 }
 
-Write-Host "MiCC queue poller started — polling every ${PollSeconds}s.  Ctrl+C to stop." -ForegroundColor Cyan
+Write-Host "MiCC API poller started — polling every ${PollSeconds}s.  Ctrl+C to stop." -ForegroundColor Cyan
+
+# Get initial token
+Get-MiccToken
 
 while ($true) {
     try {
-        $totals  = Invoke-SqlQuery $QueryTotals
-        $waiting = Invoke-SqlQuery $QueryWaiting
-
-        # Index waiting data by queue code for easy lookup
-        $waitIdx = @{}
-        foreach ($row in $waiting.Rows) { $waitIdx[$row["Queue"]] = $row }
-
         $queues = foreach ($code in $QueueNames.Keys) {
-            $tot = $totals.Rows | Where-Object { $_["Queue"] -eq $code } | Select-Object -First 1
-            $wt  = $waitIdx[$code]
+            $state = Get-QueueState $code
+
+            $waiting     = if ($null -ne $state.waitingConversations)               { [int]$state.waitingConversations }               else { 0 }
+            $longestWait = if ($state.longestWaitingConversationDuration -gt 0)     { [int]$state.longestWaitingConversationDuration }  else { $null }
+            $answered    = if ($null -ne $state.answeredConversationsToday)         { [int]$state.answeredConversationsToday }          else { 0 }
+            $avgWait     = if ($state.estimatedWaitTimeForNewConversations -gt 0)   { [int]$state.estimatedWaitTimeForNewConversations } else { $null }
 
             [PSCustomObject]@{
                 id          = $code
                 name        = $QueueNames[$code]
-                waiting     = if ($wt)  { [int]$wt["waiting"] }     else { 0 }
-                longestWait = if ($wt -and $wt["longestWait"] -isnot [DBNull]) { [int]$wt["longestWait"] } else { $null }
-                answered    = if ($tot -and $tot["answered"]  -isnot [DBNull]) { [int]$tot["answered"]   } else { 0 }
-                avgWait     = if ($tot -and $tot["avgWait"]   -isnot [DBNull]) { [int]$tot["avgWait"]    } else { $null }
+                waiting     = $waiting
+                longestWait = $longestWait
+                answered    = $answered
+                avgWait     = $avgWait
             }
         }
 
@@ -111,38 +81,14 @@ while ($true) {
         Push-ToServer $payload
 
         $summary = ($queues | Sort-Object name | ForEach-Object {
-            "$($_.name): $($_.waiting) waiting / $(if($_.longestWait){"$($_.longestWait)s"}else{'—'}) hold / $($_.answered) ans"
+            "$($_.name): $($_.waiting) waiting / $(if($_.longestWait){"$($_.longestWait)s"}else{'--'}) hold / $($_.answered) ans"
         }) -join "  |  "
         Write-Host "$(Get-Date -Format 'HH:mm:ss')  $summary" -ForegroundColor Green
     }
-    catch [System.Data.SqlClient.SqlException] {
-        Write-Warning "$(Get-Date -Format 'HH:mm:ss')  SQL error: $($_.Exception.Message)"
-        Start-Sleep -Seconds 15
-    }
     catch {
         Write-Warning "$(Get-Date -Format 'HH:mm:ss')  Error: $($_.Exception.Message)"
+        $script:TokenExpiry = [DateTime]::MinValue
     }
 
     Start-Sleep -Seconds $PollSeconds
 }
-
-# ============================================================
-#  AUTO-START (run once as Administrator)
-# ============================================================
-<#
-$scriptPath = "C:\Scripts\micc-queue-poller.ps1"
-
-$action   = New-ScheduledTaskAction -Execute "powershell.exe" `
-                -Argument "-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`""
-$trigger  = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet -RestartCount 5 `
-                -RestartInterval (New-TimeSpan -Minutes 1) `
-                -ExecutionTimeLimit ([TimeSpan]::Zero)
-
-Register-ScheduledTask -TaskName "MiCC Queue Poller" `
-    -Action $action -Trigger $trigger -Settings $settings `
-    -Description "Pushes MiCC real-time queue hold times to Dialed In Dash" `
-    -RunLevel Highest -Force
-
-Write-Host "Task registered — runs automatically at next login." -ForegroundColor Green
-#>
