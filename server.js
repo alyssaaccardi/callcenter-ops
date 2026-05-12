@@ -21,8 +21,9 @@ let mitelQueueCache = null;
 const mitelSseClients = new Set();
 
 // Cache for Zendesk incremental public-reply maps (avoids hammering the 10 req/min limit)
-const zdPublicReplyCache = new Map(); // key -> { map: Map<agentId,Set<ticketId>>, expires }
-function zdCacheKey(team, period) { return `${team}:${period}`; }
+// Key is start timestamp so "today" and "this-week" share the same entry on Monday.
+const zdPublicReplyCache   = new Map(); // startTs -> { map, expires }
+const zdPublicReplyInflight = new Map(); // startTs -> Promise (dedup concurrent fetches)
 
 // ─── Tutorial helpers ─────────────────────────────────────────────────────────
 const TUTORIALS_FILE = path.join(__dirname, 'tutorials.json');
@@ -1431,38 +1432,44 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
     const zdDate = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00Z`;
 
     // Fetch all public reply data ONCE for the period, then look up per-agent.
-    // Zendesk incremental/ticket_events is rate-limited to 10 req/min, so we:
-    //   (a) fetch once for all agents instead of once per agent
-    //   (b) cache the result for 3 minutes
+    // Cache key = startTs so "today" and "this-week" share an entry when they have the same start.
+    // In-flight dedup prevents concurrent requests from hitting the API simultaneously.
     async function getPublicReplyMap(startTs, endTs) {
-      const cacheKey = zdCacheKey(team, period);
-      const cached = zdPublicReplyCache.get(cacheKey);
+      const cached = zdPublicReplyCache.get(startTs);
       if (cached && cached.expires > Date.now()) return cached.map;
 
-      const agentTickets = new Map(); // agentId -> Set<ticketId>
-      let url = `${base}/incremental/ticket_events.json?start_time=${startTs}&include=comment_events`;
-      let pages = 0;
-      while (url && pages < 100) {
-        const res = await axios.get(url, { headers, timeout: 15000 });
-        if (res.data?.errors) break;
-        const events = res.data?.ticket_events || [];
-        for (const ev of events) {
-          if (endTs && new Date(ev.created_at) > endTs) continue;
-          for (const child of (ev.child_events || [])) {
-            if (child.event_type === 'Comment' && child.public === true) {
-              const aid = String(child.author_id);
-              if (!agentTickets.has(aid)) agentTickets.set(aid, new Set());
-              agentTickets.get(aid).add(ev.ticket_id);
+      // If another request is already fetching this, wait for it
+      if (zdPublicReplyInflight.has(startTs)) return zdPublicReplyInflight.get(startTs);
+
+      const fetchPromise = (async () => {
+        const agentTickets = new Map(); // agentId -> Set<ticketId>
+        let url = `${base}/incremental/ticket_events.json?start_time=${startTs}&include=comment_events`;
+        let pages = 0;
+        while (url && pages < 100) {
+          const res = await axios.get(url, { headers, timeout: 15000 });
+          if (res.data?.errors) break;
+          const events = res.data?.ticket_events || [];
+          for (const ev of events) {
+            if (endTs && new Date(ev.created_at) > endTs) continue;
+            for (const child of (ev.child_events || [])) {
+              if (child.event_type === 'Comment' && child.public === true) {
+                const aid = String(child.author_id);
+                if (!agentTickets.has(aid)) agentTickets.set(aid, new Set());
+                agentTickets.get(aid).add(ev.ticket_id);
+              }
             }
           }
+          url = res.data.end_of_stream ? null : (res.data.next_page || null);
+          pages++;
+          if (!events.length) break;
         }
-        url = res.data.end_of_stream ? null : (res.data.next_page || null);
-        pages++;
-        if (!events.length) break;
-      }
+        zdPublicReplyCache.set(startTs, { map: agentTickets, expires: Date.now() + 3 * 60 * 1000 });
+        zdPublicReplyInflight.delete(startTs);
+        return agentTickets;
+      })();
 
-      zdPublicReplyCache.set(cacheKey, { map: agentTickets, expires: Date.now() + 3 * 60 * 1000 });
-      return agentTickets;
+      zdPublicReplyInflight.set(startTs, fetchPromise);
+      return fetchPromise;
     }
 
     let solvedFilter  = '';
@@ -1573,7 +1580,6 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
       csatBad  = cbRes.data?.count || 0;
     } catch { /* non-fatal */ }
 
-    console.log(`[LB] team=${team} period=${period} support=${support?.length} escalation=${escalation?.length} publicReplyMap=${publicReplyMap?.size}`);
     res.json({ sections, agents: [...support, ...escalation], support, escalation, groupName: null, csatGood, csatBad, zdSubdomain: process.env.ZENDESK_SUBDOMAIN || null });
   } catch (err) {
     if (err.message === 'Zendesk not configured') return res.json({ agents: [], unconfigured: true });
