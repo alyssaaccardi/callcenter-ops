@@ -20,6 +20,10 @@ const PORT = process.env.PORT || 3001;
 let mitelQueueCache = null;
 const mitelSseClients = new Set();
 
+// Cache for Zendesk incremental public-reply maps (avoids hammering the 10 req/min limit)
+const zdPublicReplyCache = new Map(); // key -> { map: Map<agentId,Set<ticketId>>, expires }
+function zdCacheKey(team, period) { return `${team}:${period}`; }
+
 // ─── Tutorial helpers ─────────────────────────────────────────────────────────
 const TUTORIALS_FILE = path.join(__dirname, 'tutorials.json');
 const USERS_FILE     = path.join(__dirname, 'users.json');
@@ -1426,33 +1430,39 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
     const pad    = n => String(n).padStart(2, '0');
     const zdDate = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00Z`;
 
-    // Count unique tickets where an agent publicly replied.
-    // Uses incremental ticket_events for bounded periods (today/this-week/etc) to filter
-    // public:true comments only, falling back to commenter: search for longer periods.
-    async function countPublicReplyTickets(agentId, startTs, endTs) {
-      if (!startTs) {
-        // "all" period — use commenter search (includes internal notes, best available)
-        const res = await axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket commenter:${agentId}` } });
-        return res.data?.count || 0;
-      }
-      // Use incremental ticket_events to get public comments only
-      const ticketIds = new Set();
-      let url = `${base}/incremental/ticket_events.json?start_time=${Math.floor(startTs / 1000)}&include=comment_events`;
-      while (url) {
-        const res = await axios.get(url, { headers });
+    // Fetch all public reply data ONCE for the period, then look up per-agent.
+    // Zendesk incremental/ticket_events is rate-limited to 10 req/min, so we:
+    //   (a) fetch once for all agents instead of once per agent
+    //   (b) cache the result for 3 minutes
+    async function getPublicReplyMap(startTs, endTs) {
+      const cacheKey = zdCacheKey(team, period);
+      const cached = zdPublicReplyCache.get(cacheKey);
+      if (cached && cached.expires > Date.now()) return cached.map;
+
+      const agentTickets = new Map(); // agentId -> Set<ticketId>
+      let url = `${base}/incremental/ticket_events.json?start_time=${startTs}&include=comment_events`;
+      let pages = 0;
+      while (url && pages < 100) {
+        const res = await axios.get(url, { headers, timeout: 15000 });
+        if (res.data?.errors) break;
         const events = res.data?.ticket_events || [];
         for (const ev of events) {
           if (endTs && new Date(ev.created_at) > endTs) continue;
           for (const child of (ev.child_events || [])) {
-            if (child.event_type === 'Comment' && child.public === true && String(child.author_id) === String(agentId)) {
-              ticketIds.add(ev.ticket_id);
+            if (child.event_type === 'Comment' && child.public === true) {
+              const aid = String(child.author_id);
+              if (!agentTickets.has(aid)) agentTickets.set(aid, new Set());
+              agentTickets.get(aid).add(ev.ticket_id);
             }
           }
         }
-        const end = res.data?.end_of_stream;
-        url = end ? null : (res.data?.next_page || null);
+        url = res.data.end_of_stream ? null : (res.data.next_page || null);
+        pages++;
+        if (!events.length) break;
       }
-      return ticketIds.size;
+
+      zdPublicReplyCache.set(cacheKey, { map: agentTickets, expires: Date.now() + 3 * 60 * 1000 });
+      return agentTickets;
     }
 
     let solvedFilter  = '';
@@ -1497,13 +1507,23 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
       }
     }
 
+    // Fetch public reply map once for all agents (single incremental API call + cache)
+    let publicReplyMap = new Map();
+    if (periodStart) {
+      try {
+        publicReplyMap = await getPublicReplyMap(Math.floor(periodStart / 1000), periodEnd);
+      } catch { /* fall through — replies will show 0 */ }
+    }
+
     const agentStats = await Promise.all(users.map(async u => {
       try {
-        const [openRes, solvedRes, replies] = await Promise.all([
+        const [openRes, solvedRes] = await Promise.all([
           axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id} status:open status:new` } }),
           axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket assignee_id:${u.id} status:solved${solvedFilter}` } }),
-          countPublicReplyTickets(u.id, periodStart, periodEnd),
         ]);
+        const replies = periodStart
+          ? (publicReplyMap.get(String(u.id))?.size ?? 0)
+          : (await axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket commenter:${u.id}` } })).data?.count || 0;
         return { id: u.id, name: u.name, open: openRes.data?.count || 0, replies, solved: solvedRes.data?.count || 0, _u: u };
       } catch {
         return { id: u.id, name: u.name, open: 0, replies: 0, solved: 0, _u: u };
