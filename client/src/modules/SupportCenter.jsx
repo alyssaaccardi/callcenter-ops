@@ -63,6 +63,43 @@ function priorityClass(p) {
   return 'low';
 }
 
+function CompletedCard({ task }) {
+  const completedTime = task.lastUpdate
+    ? new Date(task.lastUpdate).toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST'
+    : null;
+  return (
+    <a
+      className="sc-task-card done"
+      href={task.link}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <div className="sc-task-body">
+        <div className="sc-task-top-row">
+          {task.accountName && <span className="sc-task-account">{task.accountName}</span>}
+          <span className="sc-task-name" title={task.name}>{task.name}</span>
+        </div>
+        <div className="sc-task-meta-row">
+          {task.taskType && <div className="sc-task-pill type">{task.taskType}</div>}
+          {task.priority  && <div className={`sc-task-pill ${priorityClass(task.priority)}`}>{task.priority}</div>}
+          {task.assignee && (
+            <div className="sc-task-assignee">
+              <span className="sc-task-assignee-dot">{task.assignee[0].toUpperCase()}</span>
+              {task.assignee}
+            </div>
+          )}
+          {completedTime && <div className="sc-task-done-time">✓ {completedTime}</div>}
+        </div>
+      </div>
+      <div className="sc-task-done-badge">
+        <div className="sc-task-done-check">✓</div>
+        <div className="sc-task-done-label">Done</div>
+      </div>
+      <div className="sc-task-arrow">↗</div>
+    </a>
+  );
+}
+
 function TaskCard({ task, isToday = false }) {
   const isActive = /(pending|in.?progress|working|in.?review)/i.test(task.status || '');
   const late     = !isToday ? daysLate(task.dueDate) : 0;
@@ -393,8 +430,9 @@ export default function SupportCenter() {
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
   const [lastSync,    setLastSync]    = useState(null);
-  const [tasks,       setTasks]       = useState([]);
-  const [upcoming,    setUpcoming]    = useState([]);
+  const [tasks,          setTasks]          = useState([]);
+  const [upcoming,       setUpcoming]       = useState([]);
+  const [completedToday, setCompletedToday] = useState([]);
   const [stats,       setStats]       = useState(null);
   const [stale,       setStale]       = useState({ tickets: [], unconfigured: false });
   const [csat,        setCsat]        = useState({ ratings: [], unconfigured: false });
@@ -417,7 +455,8 @@ export default function SupportCenter() {
       if (tasksRes.status === 'fulfilled') {
         setTasks(tasksRes.value.data?.tasks || []);
         setUpcoming(tasksRes.value.data?.upcoming || []);
-      } else { setTasks([]); setUpcoming([]); }
+        setCompletedToday(tasksRes.value.data?.completedToday || []);
+      } else { setTasks([]); setUpcoming([]); setCompletedToday([]); }
       if (statsRes.status === 'fulfilled') setStats(statsRes.value.data);
       if (staleRes.status === 'fulfilled') setStale(staleRes.value.data);
       if (csatRes.status  === 'fulfilled') setCsat(csatRes.value.data);
@@ -596,22 +635,6 @@ export default function SupportCenter() {
             />
           </div>
 
-          {/* ── Overdue Tasks ── */}
-          <div className="sc-tasks-section" id="overdue-section">
-            <div className="sc-section-bar">
-              <div className="sc-section-title">Overdue Tasks</div>
-              <div className={`sc-badge${overdueCount === 0 ? ' clear' : ''}`}>
-                {overdueCount === 0 ? 'All clear' : `${overdueCount} overdue`}
-              </div>
-            </div>
-            {overdueCount === 0 && <Empty icon="✅" text="No overdue tasks — great work!" />}
-            {overdueCount > 0 && (
-              <div className="sc-task-list">
-                {tasks.map(task => <TaskCard key={task.id} task={task} />)}
-              </div>
-            )}
-          </div>
-
           {/* ── Due Today ── */}
           <div className="sc-tasks-section" id="today-section">
             <div className="sc-section-bar">
@@ -624,6 +647,38 @@ export default function SupportCenter() {
             {upcoming.length > 0 && (
               <div className="sc-task-list">
                 {upcoming.map(task => <TaskCard key={task.id} task={task} isToday />)}
+              </div>
+            )}
+          </div>
+
+          {/* ── Overdue Tasks ── */}
+          <div className="sc-tasks-section" id="overdue-section">
+            <div className="sc-section-bar">
+              <div className="sc-section-title">Overdue</div>
+              <div className={`sc-badge${overdueCount === 0 ? ' clear' : ''}`}>
+                {overdueCount === 0 ? 'All clear' : `${overdueCount} overdue`}
+              </div>
+            </div>
+            {overdueCount === 0 && <Empty icon="✅" text="No overdue tasks — great work!" />}
+            {overdueCount > 0 && (
+              <div className="sc-task-list">
+                {tasks.map(task => <TaskCard key={task.id} task={task} />)}
+              </div>
+            )}
+          </div>
+
+          {/* ── Completed Today ── */}
+          <div className="sc-tasks-section" id="completed-section">
+            <div className="sc-section-bar">
+              <div className="sc-section-title">Completed Today</div>
+              <div className={`sc-badge${completedToday.length === 0 ? ' clear' : ' done'}`}>
+                {completedToday.length === 0 ? 'None yet' : `${completedToday.length} done`}
+              </div>
+            </div>
+            {completedToday.length === 0 && <Empty icon="🏁" text="Nothing completed yet today" />}
+            {completedToday.length > 0 && (
+              <div className="sc-task-list">
+                {completedToday.map(task => <CompletedCard key={task.id} task={task} />)}
               </div>
             )}
           </div>

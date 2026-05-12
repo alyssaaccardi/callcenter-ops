@@ -972,9 +972,10 @@ app.get('/api/monday/support-tasks', async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+    const todayEST = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
     const DONE_PHRASES = ['done', 'complete', 'closed', "won't fix", 'cancelled', 'resolved'];
 
-    const mapped = allItems.map(item => {
+    const allMapped = allItems.map(item => {
       const statusCol   = item.column_values?.find(c => c.id === 'color_mkxwxqsx');
       const priorityCol = item.column_values?.find(c => c.id === 'status');
       const dateCol     = item.column_values?.find(c => c.id === 'date_mkx5zfsz');
@@ -983,11 +984,10 @@ app.get('/api/monday/support-tasks', async (req, res) => {
       const descCol     = item.column_values?.find(c => c.id === 'text_mkx5cpnb');
       const assigneeCol = item.column_values?.find(c => c.id === 'multiple_person_mkx5smfv');
 
-      // Extract time from date column raw value: {"date":"2024-01-15","time":"14:30:00"}
       let dueTime = '';
       try {
         const raw = dateCol?.value ? JSON.parse(dateCol.value) : null;
-        if (raw?.time) dueTime = raw.time.slice(0, 5); // "HH:MM"
+        if (raw?.time) dueTime = raw.time.slice(0, 5);
       } catch { /* ignore */ }
 
       return {
@@ -1004,7 +1004,17 @@ app.get('/api/monday/support-tasks', async (req, res) => {
         lastUpdate:  item.updated_at,
         link:        `https://answeringlegal-unit.monday.com/boards/${boardId}/pulses/${item.id}`,
       };
-    }).filter(task => {
+    });
+
+    const completedToday = allMapped.filter(task => {
+      const statusLow = (task.status || '').toLowerCase();
+      if (!DONE_PHRASES.some(p => statusLow.includes(p))) return false;
+      if (!task.lastUpdate) return false;
+      const updateDate = new Date(task.lastUpdate).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      return updateDate === todayEST;
+    });
+
+    const mapped = allMapped.filter(task => {
       const statusLow = (task.status || '').toLowerCase();
       return !DONE_PHRASES.some(p => statusLow.includes(p));
     });
@@ -1023,7 +1033,7 @@ app.get('/api/monday/support-tasks', async (req, res) => {
       return !isNaN(due) && due >= today && due < tomorrow;
     });
 
-    res.json({ tasks: overdue, overdue, upcoming });
+    res.json({ tasks: overdue, overdue, upcoming, completedToday });
   } catch (err) {
     console.error('Monday support tasks error:', err.response?.data || err.message);
     res.status(500).json({ error: 'Failed to fetch support tasks', details: err.message });
