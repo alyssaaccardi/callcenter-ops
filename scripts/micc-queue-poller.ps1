@@ -16,9 +16,9 @@ $Database    = "CCMData"
 $SqlUser     = "CommandCenterSA"
 $SqlPass     = 'T}9]5kqe1!gF'
 
-$JsonBinKey  = '$2a$10$FGPByEJ4blWG1s4Yd7xbbeLrLw0N1LEHuLehI9C/bNChGCV6839Wa'
-$JsonBinId   = '6a024774250b1311c336ef6d'
-$PollSeconds = 5
+$ServerUrl    = "https://ops.answeringlegal.com/api/mitel/queue-stats"
+$PollerSecret = "DialedIn-Mitel-2026-XQ7"
+$PollSeconds  = 5
 
 # Queue code → display name mapping
 $QueueNames = @{
@@ -73,10 +73,9 @@ function Invoke-SqlQuery($query) {
     return $table
 }
 
-function Push-ToJsonBin($json) {
-    $uri     = "https://api.jsonbin.io/v3/b/$JsonBinId"
-    $headers = @{ 'X-Master-Key' = $JsonBinKey; 'Content-Type' = 'application/json' }
-    Invoke-RestMethod -Uri $uri -Method Put -Headers $headers -Body $json -ErrorAction Stop | Out-Null
+function Push-ToServer($json) {
+    $headers = @{ 'X-Poller-Secret' = $PollerSecret; 'Content-Type' = 'application/json' }
+    Invoke-RestMethod -Uri $ServerUrl -Method Post -Headers $headers -Body $json -ErrorAction Stop | Out-Null
 }
 
 Write-Host "MiCC queue poller started — polling every ${PollSeconds}s.  Ctrl+C to stop." -ForegroundColor Cyan
@@ -109,7 +108,7 @@ while ($true) {
             queues    = @($queues | Sort-Object name)
         } | ConvertTo-Json -Depth 3 -Compress
 
-        Push-ToJsonBin $payload
+        Push-ToServer $payload
 
         $summary = ($queues | Sort-Object name | ForEach-Object {
             "$($_.name): $($_.waiting) waiting / $(if($_.longestWait){"$($_.longestWait)s"}else{'—'}) hold / $($_.answered) ans"

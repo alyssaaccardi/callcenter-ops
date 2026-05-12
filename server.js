@@ -1852,27 +1852,23 @@ app.get('/api/xcally/queue', async (req, res) => {
   }
 });
 
-async function pollMitelQueues() {
-  const binId  = process.env.JSONBIN_MITEL_QUEUES_BIN_ID;
-  const apiKey = process.env.JSONBIN_API_KEY;
-  if (!binId || !apiKey) return;
-  try {
-    const r = await axios.get(`https://api.jsonbin.io/v3/b/${binId}/latest`, {
-      headers: { 'X-Master-Key': apiKey },
-      timeout: 5000,
-    });
-    const data = r.data.record;
-    if (!mitelQueueCache || data.updatedAt !== mitelQueueCache.updatedAt) {
-      mitelQueueCache = data;
-      const payload = `data: ${JSON.stringify(data)}\n\n`;
-      for (const client of mitelSseClients) client.write(payload);
-    }
-  } catch (err) {
-    console.error('[mitel] background poll error:', err.message);
+// Mitel queue stats — inbound push from office PC poller (replaces JSONBin pull)
+app.post('/api/mitel/queue-stats', (req, res) => {
+  const secret = process.env.MITEL_POLLER_SECRET;
+  if (!secret || req.headers['x-poller-secret'] !== secret) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
-}
+  const data = req.body;
+  if (!data || !Array.isArray(data.queues)) {
+    return res.status(400).json({ error: 'Invalid payload' });
+  }
+  mitelQueueCache = data;
+  const payload = `data: ${JSON.stringify(data)}\n\n`;
+  for (const client of mitelSseClients) client.write(payload);
+  res.json({ ok: true });
+});
 
-// Mitel queue stats — returns from in-memory cache (updated every 5s by background poller)
+// Mitel queue stats — returns from in-memory cache (updated by office PC push)
 app.get('/api/mitel/queue-stats', (req, res) => {
   const token = req.query.t;
   if (token) {
@@ -1881,7 +1877,7 @@ app.get('/api/mitel/queue-stats', (req, res) => {
   } else if (!req.isAuthenticated()) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  if (!process.env.JSONBIN_MITEL_QUEUES_BIN_ID || !process.env.JSONBIN_API_KEY) return res.json({ unconfigured: true });
+  if (!process.env.MITEL_POLLER_SECRET) return res.json({ unconfigured: true });
   if (mitelQueueCache) return res.json(mitelQueueCache);
   res.status(503).json({ error: 'Mitel stats not yet available' });
 });
@@ -1917,8 +1913,6 @@ app.get('*', (req, res) => {
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-pollMitelQueues();
-setInterval(pollMitelQueues, 5000);
 
 app.listen(PORT, () => {
   console.log(`✅ Call Center Ops Backend running on port ${PORT}`);
