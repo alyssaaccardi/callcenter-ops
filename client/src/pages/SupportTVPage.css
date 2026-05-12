@@ -353,6 +353,11 @@
 
 .stv-task-arrow { font-size: 11px; color: #334155; flex-shrink: 0; }
 
+.stv-sub-section-label.done { color: #22c55e; border-bottom-color: rgba(34,197,94,0.12); }
+.stv-task-card.done { border-left: 2px solid rgba(34,197,94,0.4); opacity: 0.75; }
+.stv-task-card.done:hover { opacity: 1; }
+.stv-task-pill.done { background: rgba(34,197,94,0.18); color: #22c55e; }
+
 /* ── Top performer spotlight ── */
 .stv-top-performer {
   display: flex; align-items: center; gap: 14px;

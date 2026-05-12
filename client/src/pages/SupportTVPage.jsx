@@ -97,8 +97,9 @@ export default function SupportTVPage() {
   const [loading,   setLoading]   = useState(true);
   const [lastSync,  setLastSync]  = useState(null);
 
-  const [tasks,       setTasks]       = useState([]);
-  const [upcoming,    setUpcoming]    = useState([]);
+  const [tasks,          setTasks]          = useState([]);
+  const [upcoming,       setUpcoming]       = useState([]);
+  const [completedToday, setCompletedToday] = useState([]);
   const [staleCount,  setStaleCount]  = useState(null);
   const [sysStatus,   setSysStatus]   = useState(null);
   const [hubspotDids, setHubspotDids] = useState(null);
@@ -135,6 +136,7 @@ export default function SupportTVPage() {
     if (tasksRes.status === 'fulfilled') {
       setTasks(tasksRes.value.data?.tasks || []);
       setUpcoming(tasksRes.value.data?.upcoming || []);
+      setCompletedToday(tasksRes.value.data?.completedToday || []);
     }
     if (staleRes.status === 'fulfilled') {
       const d = staleRes.value.data;
@@ -371,6 +373,32 @@ export default function SupportTVPage() {
                         <div className="stv-task-due today">
                           {task.dueTime ? `${fmt12hr(task.dueTime)} EST` : 'Today'}
                         </div>
+                        <div className="stv-task-arrow">↗</div>
+                      </a>
+                    );
+                  })}
+                </>
+              )}
+
+              {/* Completed Today sub-section */}
+              {completedToday.length > 0 && (
+                <>
+                  <div className="stv-sub-section-label done">Completed Today · {completedToday.length}</div>
+                  {completedToday.map(task => {
+                    const solver = task.solvedBy || task.assignee;
+                    return (
+                      <a
+                        key={task.id}
+                        className="stv-task-card done"
+                        href={`https://answeringlegal-unit.monday.com/boards/${BOARD_ID}/pulses/${task.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <div className="stv-task-main">
+                          <div className="stv-task-name" title={task.name}>{task.name}</div>
+                          {solver && <div className="stv-task-working">✓ {solver}</div>}
+                        </div>
+                        <div className="stv-task-pill done">Done</div>
                         <div className="stv-task-arrow">↗</div>
                       </a>
                     );
