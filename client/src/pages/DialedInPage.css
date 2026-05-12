@@ -81,11 +81,10 @@
   flex-shrink: 0;
 }
 .tv-header-left { display: flex; align-items: center; gap: 14px; }
-.tv-header-logo { width: 100px; height: 100px; border-radius: 50%; border: 2px solid #00c9b1; object-fit: contain; flex-shrink: 0; background: rgba(255,255,255,0.04); }
+.tv-header-logo { height: 56px; width: auto; flex-shrink: 0; object-fit: contain; filter: invert(1); mix-blend-mode: screen; }
 .tv-header-brand { font-family: 'Bebas Neue', sans-serif; font-size: 28px; letter-spacing: 0.12em; color: #f0f4ff; line-height: 1; }
 .tv-header-sub { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #00c9b1; letter-spacing: 0.2em; text-transform: uppercase; margin-top: 2px; }
-.tv-header-center { text-align: center; }
-.tv-header-title { font-family: 'Bebas Neue', sans-serif; font-size: 36px; letter-spacing: 0.2em; color: rgba(255,255,255,0.4); text-transform: uppercase; }
+.tv-header-center { text-align: center; display: flex; align-items: center; justify-content: center; }
 .tv-header-right { text-align: right; }
 .tv-dual-clock { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
 .tv-clock-entry { display: flex; align-items: baseline; gap: 5px; }
@@ -95,9 +94,9 @@
 .tv-date  { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #4a5a7a; margin-top: 2px; letter-spacing: 0.1em; text-transform: uppercase; }
 
 .tv-did-status-pill {
-  display: inline-block; margin-top: 8px; padding: 5px 20px;
+  display: inline-block; padding: 7px 28px;
   border-radius: 24px; font-family: 'Barlow Condensed', sans-serif;
-  font-size: 18px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
+  font-size: 22px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
   border: 1px solid transparent; transition: background 0.4s, color 0.4s, border-color 0.4s;
 }
 .tv-did-status-pill.tv-up   { background: rgba(20,184,166,0.14); color: #00c9b1; border-color: rgba(20,184,166,0.35); }

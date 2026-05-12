@@ -119,7 +119,7 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
           </div>
           {counts.standbyNames && <div className="tv-standby-names">{counts.standbyNames}</div>}
         </div>
-        {xcally != null && (
+        {xcally != null && !xcally.unconfigured && !xcally.error && (
           <div className="tv-queue-stats">
             <div className="tv-queue-stat">
               <div className="tv-queue-stat-label">Callers Waiting</div>
@@ -135,7 +135,7 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
           </div>
         )}
         {queueStats?.queues?.length > 0 && (
-          <div className={`tv-mitel-stats${queueStats.updatedAt && Date.now() - new Date(queueStats.updatedAt).getTime() > 30000 ? ' stale' : ''}`}>
+          <div className={`tv-mitel-stats${queueStats.updatedAt && Date.now() - new Date(queueStats.updatedAt).getTime() > 60000 ? ' stale' : ''}`}>
             <div className="tv-mitel-stats-header">
               <span className="tv-mitel-stats-title">Today's Calls</span>
               <span className="tv-mitel-stats-cols">
@@ -368,7 +368,6 @@ export default function DialedInPage() {
             </div>
           </div>
           <div className="tv-header-center">
-            <div className="tv-header-title">Dialed In Dash</div>
             <div className={`tv-did-status-pill ${didUp ? 'tv-up' : 'tv-down'}`}>
               {didUp ? 'DIDs Available' : 'DIDs Unavailable'}
             </div>
