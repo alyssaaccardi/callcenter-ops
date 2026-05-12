@@ -70,8 +70,9 @@
 .stv-header-left { display: flex; align-items: center; gap: 14px; }
 
 .stv-logo {
-  height: 44px; width: 44px; border-radius: 50%;
-  border: 2px solid #00c9b1; object-fit: cover; flex-shrink: 0;
+  height: 48px; width: 48px; border-radius: 50%;
+  border: 2px solid #00c9b1; object-fit: contain; flex-shrink: 0;
+  background: rgba(255,255,255,0.04);
 }
 
 .stv-header-brand {
@@ -317,18 +318,83 @@
   font-size: 9px; font-weight: 700; letter-spacing: 0.06em;
   padding: 2px 8px; border-radius: 99px; flex-shrink: 0;
 }
-.stv-task-pill.urgent { background: rgba(239,68,68,0.15); color: #f87171; }
-.stv-task-pill.high   { background: rgba(245,158,11,0.15); color: #fbbf24; }
-.stv-task-pill.medium { background: rgba(100,116,139,0.15); color: #94a3b8; }
-.stv-task-pill.low    { background: rgba(71,85,105,0.12); color: #64748b; }
+.stv-task-pill.urgent  { background: rgba(239,68,68,0.15);  color: #f87171; }
+.stv-task-pill.high    { background: rgba(245,158,11,0.15);  color: #fbbf24; }
+.stv-task-pill.medium  { background: rgba(100,116,139,0.15); color: #94a3b8; }
+.stv-task-pill.low     { background: rgba(71,85,105,0.12);   color: #64748b; }
+.stv-task-pill.working { background: rgba(245,158,11,0.18);  color: #f59e0b; }
+
+.stv-task-card.pending { border-left: 2px solid rgba(245,158,11,0.6); background: rgba(245,158,11,0.03); }
+
+.stv-task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+
+.stv-task-working {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; font-weight: 600; color: #f59e0b;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 .stv-task-due {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px; font-weight: 600; color: #ef4444;
   white-space: nowrap; flex-shrink: 0;
 }
+.stv-task-due.today { color: #00c9b1; }
+.stv-task-card.today { border-left: 2px solid rgba(0,201,177,0.4); }
+
+.stv-sub-section-label {
+  padding: 6px 16px 4px 20px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.14em;
+  text-transform: uppercase; color: #00c9b1;
+  border-bottom: 1px solid rgba(0,201,177,0.12);
+  flex-shrink: 0;
+}
 
 .stv-task-arrow { font-size: 11px; color: #334155; flex-shrink: 0; }
+
+/* ── Top performer spotlight ── */
+.stv-top-performer {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 16px 12px 20px;
+  background: linear-gradient(90deg, rgba(251,191,36,0.08), rgba(251,191,36,0.02));
+  border-bottom: 1px solid rgba(251,191,36,0.15);
+  flex-shrink: 0;
+}
+
+.stv-tp-crown { font-size: 22px; flex-shrink: 0; }
+
+.stv-tp-body { flex: 1; min-width: 0; }
+
+.stv-tp-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.18em;
+  text-transform: uppercase; color: #f59e0b; margin-bottom: 2px;
+}
+
+.stv-tp-name {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: clamp(20px, 2.4vw, 30px); letter-spacing: 0.06em;
+  color: #fbbf24; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.stv-tp-stats { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+
+.stv-tp-stat { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+
+.stv-tp-num {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: clamp(24px, 2.8vw, 36px); color: #fbbf24; line-height: 1;
+  letter-spacing: 0.03em;
+}
+.stv-tp-placeholder { color: rgba(251,191,36,0.3); }
+
+.stv-tp-unit {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; color: #92400e; letter-spacing: 0.1em; text-transform: uppercase;
+}
+
+.stv-tp-divider { width: 1px; height: 28px; background: rgba(251,191,36,0.2); }
 
 /* ── Leaderboard rows ── */
 .stv-lb-row {
@@ -356,6 +422,20 @@
   font-family: 'Bebas Neue', sans-serif; font-size: 30px; color: #00c9b1; line-height: 1;
 }
 .stv-lb-solved-label {
+  font-family: 'IBM Plex Mono', monospace; font-size: 9px;
+  color: #334155; text-transform: uppercase; letter-spacing: 0.08em;
+}
+
+.stv-lb-calls {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+  flex-shrink: 0; margin-left: 14px;
+  padding-left: 14px; border-left: 1px solid rgba(255,255,255,0.06);
+}
+.stv-lb-calls-num {
+  font-family: 'Bebas Neue', sans-serif; font-size: 30px;
+  color: rgba(139,92,246,0.5); line-height: 1; letter-spacing: 0.02em;
+}
+.stv-lb-calls-label {
   font-family: 'IBM Plex Mono', monospace; font-size: 9px;
   color: #334155; text-transform: uppercase; letter-spacing: 0.08em;
 }

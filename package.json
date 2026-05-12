@@ -17,6 +17,7 @@
     "express-rate-limit": "^8.4.1",
     "express-session": "^1.19.0",
     "helmet": "^8.1.0",
+    "mssql": "^12.5.2",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0"
   },
