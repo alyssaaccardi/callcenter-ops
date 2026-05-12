@@ -15,9 +15,11 @@ export default function StatusBoard() {
 
   const [activeTab, setActiveTab] = useState('savvy');
   const [saving, setSaving] = useState(null);
-  const [cannedResponses, setCannedResponses] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('ccob_canned') || '[]'); } catch { return []; }
-  });
+  const [cannedResponses, setCannedResponses] = useState([]);
+
+  useEffect(() => {
+    api.get('/api/canned-responses').then(r => setCannedResponses(r.data || [])).catch(() => {});
+  }, []);
 
   // Local form state mirrors status
   const [savvyOn, setSavvyOn] = useState(true);

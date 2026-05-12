@@ -287,6 +287,48 @@ app.post('/api/activity-log', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── Canned Responses ─────────────────────────────────────────────────────────
+const CANNED_FILE = path.join(__dirname, 'canned-responses.json');
+
+function loadCanned() {
+  try { return JSON.parse(fs.readFileSync(CANNED_FILE, 'utf8')); } catch { return []; }
+}
+function saveCanned(arr) {
+  fs.writeFileSync(CANNED_FILE, JSON.stringify(arr, null, 2));
+}
+
+app.get('/api/canned-responses', requireAuth, (req, res) => {
+  res.json(loadCanned());
+});
+
+app.post('/api/canned-responses', requireRole('super_admin', 'call_center_ops'), (req, res) => {
+  const { label = '', msg = '' } = req.body;
+  const arr = loadCanned();
+  const entry = { id: Date.now().toString(), label, msg };
+  arr.push(entry);
+  saveCanned(arr);
+  res.json(entry);
+});
+
+app.put('/api/canned-responses/:id', requireRole('super_admin', 'call_center_ops'), (req, res) => {
+  const arr = loadCanned();
+  const idx = arr.findIndex(c => c.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'not found' });
+  const { label, msg } = req.body;
+  if (label !== undefined) arr[idx].label = label;
+  if (msg !== undefined) arr[idx].msg = msg;
+  saveCanned(arr);
+  res.json(arr[idx]);
+});
+
+app.delete('/api/canned-responses/:id', requireRole('super_admin', 'call_center_ops'), (req, res) => {
+  const arr = loadCanned();
+  const next = arr.filter(c => c.id !== req.params.id);
+  if (next.length === arr.length) return res.status(404).json({ error: 'not found' });
+  saveCanned(next);
+  res.json({ ok: true });
+});
+
 function loadStatusStore() {
   try {
     return JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8'));

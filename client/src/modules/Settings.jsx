@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import api from '../api';
 
 const ALL_SETTINGS_TABS = [
   { id: 'general',    label: 'Call Centers',     roles: ['super_admin', 'call_center_ops'] },
@@ -36,8 +37,15 @@ export default function Settings() {
     { label: 'Maintenance', msg: 'Scheduled maintenance in progress.' },
   ]);
 
-  // Canned responses
-  const [cannedResponses, setCannedResponses] = useLocalSetting('ccob_canned', []);
+  // Canned responses — server-side
+  const [cannedResponses, setCannedResponses] = useState([]);
+  const [cannedLoaded, setCannedLoaded] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === 'canned-cfg' && !cannedLoaded) {
+      api.get('/api/canned-responses').then(r => { setCannedResponses(r.data || []); setCannedLoaded(true); }).catch(() => {});
+    }
+  }, [activeTab, cannedLoaded]);
 
 
   function addAlertType() {
@@ -51,15 +59,25 @@ export default function Settings() {
     setAlertTypes(alertTypes.filter((_, idx) => idx !== i));
   }
 
-  function addCannedRow() {
-    setCannedResponses([...cannedResponses, { label: '', msg: '' }]);
+  async function addCannedRow() {
+    try {
+      const r = await api.post('/api/canned-responses', { label: '', msg: '' });
+      setCannedResponses(prev => [...prev, r.data]);
+    } catch {}
   }
-  function updateCanned(i, field, val) {
-    const next = cannedResponses.map((c, idx) => idx === i ? { ...c, [field]: val } : c);
-    setCannedResponses(next);
+
+  async function saveCanned(id, label, msg) {
+    try {
+      const r = await api.put(`/api/canned-responses/${id}`, { label, msg });
+      setCannedResponses(prev => prev.map(c => c.id === id ? r.data : c));
+    } catch {}
   }
-  function removeCanned(i) {
-    setCannedResponses(cannedResponses.filter((_, idx) => idx !== i));
+
+  async function removeCanned(id) {
+    try {
+      await api.delete(`/api/canned-responses/${id}`);
+      setCannedResponses(prev => prev.filter(c => c.id !== id));
+    } catch {}
   }
 
   return (
@@ -154,29 +172,11 @@ export default function Settings() {
       {activeTab === 'canned-cfg' && (
         <div className="settings-card">
           <h3>Canned Responses</h3>
-          {cannedResponses.map((c, i) => (
-            <div key={i} className="alert-type-row">
-              <div className="settings-grid mb-8">
-                <div className="form-row" style={{ marginBottom: 0 }}>
-                  <label className="field-label">Label</label>
-                  <input type="text" value={c.label} onChange={e => updateCanned(i, 'label', e.target.value)} />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => removeCanned(i)} style={{ color: 'var(--danger)' }}>
-                    Remove
-                  </button>
-                </div>
-              </div>
-              <div className="form-row" style={{ marginBottom: 0 }}>
-                <label className="field-label">Message</label>
-                <textarea
-                  rows={2}
-                  value={c.msg}
-                  onChange={e => updateCanned(i, 'msg', e.target.value)}
-                  style={{ minHeight: 60 }}
-                />
-              </div>
-            </div>
+          <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
+            Shared across all operators. Pick one on the Status Board to instantly fill a message — it appears in the Employee Portal widget in real time.
+          </p>
+          {cannedResponses.map(c => (
+            <CannedRow key={c.id} entry={c} onSave={saveCanned} onRemove={removeCanned} />
           ))}
           <button className="btn btn-secondary btn-sm" onClick={addCannedRow}>+ Add Response</button>
         </div>
@@ -184,6 +184,50 @@ export default function Settings() {
 
       {/* Employee Portal */}
       {activeTab === 'portal' && <PortalWidgets />}
+    </div>
+  );
+}
+
+function CannedRow({ entry, onSave, onRemove }) {
+  const [label, setLabel] = useState(entry.label);
+  const [msg, setMsg] = useState(entry.msg);
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const dirty = label !== entry.label || msg !== entry.msg;
+
+  async function handleSave() {
+    setSaving(true);
+    await onSave(entry.id, label, msg);
+    setSaving(false);
+  }
+
+  async function handleRemove() {
+    setRemoving(true);
+    await onRemove(entry.id);
+  }
+
+  return (
+    <div className="alert-type-row">
+      <div className="settings-grid mb-8">
+        <div className="form-row" style={{ marginBottom: 0 }}>
+          <label className="field-label">Label</label>
+          <input type="text" value={label} onChange={e => setLabel(e.target.value)} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+          {dirty && (
+            <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          )}
+          <button className="btn btn-ghost btn-sm" onClick={handleRemove} disabled={removing} style={{ color: 'var(--danger)' }}>
+            {removing ? '…' : 'Remove'}
+          </button>
+        </div>
+      </div>
+      <div className="form-row" style={{ marginBottom: 0 }}>
+        <label className="field-label">Message</label>
+        <textarea rows={2} value={msg} onChange={e => setMsg(e.target.value)} style={{ minHeight: 60 }} />
+      </div>
     </div>
   );
 }
@@ -217,8 +261,11 @@ function PortalWidgets() {
     <>
       <div className="settings-card">
         <h3>Employee Portal Widgets</h3>
-        <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 0 }}>
+        <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
           Embeddable status widgets for the Answering Legal staff site. Add each as an HTML iframe in Wix via Insert → Embed → HTML iFrame.
+        </p>
+        <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 0 }}>
+          Status messages set on the <strong style={{ color: 'var(--text)' }}>Status Board</strong> — including canned responses — appear inside these widgets in real time.
         </p>
       </div>
       {widgets.map(w => (

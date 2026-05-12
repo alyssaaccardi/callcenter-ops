@@ -73,13 +73,13 @@ const TUTORIAL_CONTENT = {
   'canned-responses': {
     icon: '💬',
     title: 'Canned Responses',
-    subtitle: 'Pre-written status messages, ready to go',
+    subtitle: 'Pre-written status messages for the whole team',
     steps: [
       {
         heading: 'What are they?',
         body: (
           <>
-            <p>Canned responses are saved message templates you can instantly drop into a call center's status update — no retyping the same message every time.</p>
+            <p>Canned responses are shared message templates the whole ops team can instantly drop into a call center's status update — no retyping the same message every time.</p>
             <p>They live in <strong>Settings</strong> and appear as a dropdown on the <strong>Status Board</strong> wherever you write a status message.</p>
             <div className="wn-callout">
               <span className="wn-callout-icon">💡</span>
@@ -95,7 +95,7 @@ const TUTORIAL_CONTENT = {
             <PointedRow num={1} text={<>Click <strong>Status Board</strong> in the sidebar</>} visual={<UiSidebarItem icon="📊" label="Status Board" />} />
             <PointedRow num={2} text={<>Select the <strong>Savvy Phone</strong> or <strong>Mitel Classic</strong> tab</>} visual={<UiTabs tabs={['Savvy Phone', 'Mitel Classic', 'Systems']} active="Savvy Phone" />} />
             <PointedRow num={3} text={<>Open this dropdown under <strong>Status Message</strong></>} visual={<UiSelect label="— Select Canned Response —" />} />
-            <PointedRow num={4} text={<>Pick your template, then hit <strong>Save Message</strong></>} visual={<UiButton label="Save Message" />} last />
+            <PointedRow num={4} text={<>Pick your template, then hit <strong>Save Message</strong> — it goes live immediately</>} visual={<UiButton label="Save Message" />} last />
           </div>
         ),
       },
@@ -105,14 +105,27 @@ const TUTORIAL_CONTENT = {
           <div className="wn-pointed-steps">
             <PointedRow num={1} text={<>Click <strong>⚙️ Settings</strong> in the sidebar <span className="wn-muted">(scroll down)</span></>} visual={<UiSidebarItem icon="⚙️" label="Settings" />} />
             <PointedRow num={2} text={<>Click the <strong>Canned Responses</strong> tab</>} visual={<UiSettingsTabs active="Canned Responses" />} />
-            <PointedRow num={3} text={<>Click <strong>+ Add Response</strong> and fill in a label and message</>} visual={<UiFormRow />} />
-            <PointedRow num={4} text="Saves automatically — shows up on the Status Board immediately" visual={
+            <PointedRow num={3} text={<>Click <strong>+ Add Response</strong>, fill in a label and message, then <strong>Save</strong></>} visual={<UiFormRow />} />
+            <PointedRow num={4} text="Saved for the whole team — everyone sees the same library on the Status Board" visual={
               <div className="wn-callout" style={{ marginTop: 6 }}>
-                <span className="wn-callout-icon">📌</span>
-                Stored per-browser, so each user builds their own library.
+                <span className="wn-callout-icon">👥</span>
+                Shared across all ops users. One person adds it, everyone can use it.
               </div>
             } last />
           </div>
+        ),
+      },
+      {
+        heading: 'It flows to the Employee Portal',
+        body: (
+          <>
+            <p>When you pick a canned response and save it as the status message, that text appears <strong>in real time</strong> inside the Employee Portal widgets on the staff site.</p>
+            <div className="wn-callout" style={{ marginBottom: 10 }}>
+              <span className="wn-callout-icon">🖥️</span>
+              Employees see the current status <em>and</em> the message — carrier outage, maintenance window, whatever you set.
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--muted)' }}>Manage widget embed codes under <strong>Settings → Employee Portal</strong>.</p>
+          </>
         ),
       },
     ],
