@@ -64,7 +64,7 @@ function priorityClass(p) {
 }
 
 function TaskCard({ task, isToday = false }) {
-  const isPending = (task.status || '').toLowerCase().includes('pending');
+  const isPending = /(pending|in.?progress|working|in.?review)/i.test(task.status || '');
   const late      = !isToday ? daysLate(task.dueDate) : 0;
   return (
     <a

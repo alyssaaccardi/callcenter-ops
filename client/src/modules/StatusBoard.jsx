@@ -7,7 +7,18 @@ const CC_TABS = ['savvy', 'mitel', 'systems'];
 
 function fmt(ts) {
   if (!ts) return 'Never changed';
-  return new Date(ts).toLocaleString();
+  return new Date(ts).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    hour12: true, timeZone: 'America/New_York',
+  }) + ' EST';
+}
+
+function fmtMsg(ts) {
+  if (!ts) return '';
+  return new Date(ts).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    hour12: true, timeZone: 'America/New_York',
+  }) + ' EST';
 }
 
 export default function StatusBoard() {
@@ -227,9 +238,23 @@ export default function StatusBoard() {
                 onChange={e => handleMessage('savvy', e.target.value)}
                 placeholder="Status message..."
               />
-              <button className="btn btn-secondary btn-sm mt-12" onClick={() => saveMessage('savvy')}>
-                Save Message
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => saveMessage('savvy')}>
+                  Save Message
+                </button>
+                {status?.savvyPhone?.message && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--green, #34d399)' }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green, #34d399)', display: 'inline-block', flexShrink: 0 }} />
+                    <span style={{ fontWeight: 700 }}>Message live</span>
+                    {status.savvyPhone.messageBy && (
+                      <span style={{ color: 'var(--muted)' }}>· Set by <strong style={{ color: 'var(--text)' }}>{status.savvyPhone.messageBy}</strong></span>
+                    )}
+                    {status.savvyPhone.messageAt && (
+                      <span style={{ color: 'var(--muted)' }}>· {fmtMsg(status.savvyPhone.messageAt)}</span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -279,9 +304,23 @@ export default function StatusBoard() {
                 onChange={e => handleMessage('mitel', e.target.value)}
                 placeholder="Status message..."
               />
-              <button className="btn btn-secondary btn-sm mt-12" onClick={() => saveMessage('mitel')}>
-                Save Message
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => saveMessage('mitel')}>
+                  Save Message
+                </button>
+                {status?.mitelClassic?.message && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--green, #34d399)' }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green, #34d399)', display: 'inline-block', flexShrink: 0 }} />
+                    <span style={{ fontWeight: 700 }}>Message live</span>
+                    {status.mitelClassic.messageBy && (
+                      <span style={{ color: 'var(--muted)' }}>· Set by <strong style={{ color: 'var(--text)' }}>{status.mitelClassic.messageBy}</strong></span>
+                    )}
+                    {status.mitelClassic.messageAt && (
+                      <span style={{ color: 'var(--muted)' }}>· {fmtMsg(status.mitelClassic.messageAt)}</span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}

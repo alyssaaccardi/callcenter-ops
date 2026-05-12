@@ -89,7 +89,7 @@ export default function SupportTVPage() {
   const [lastSync,  setLastSync]  = useState(null);
 
   const [tasks,       setTasks]       = useState([]);
-  const [stats,       setStats]       = useState(null);
+  const [upcoming,    setUpcoming]    = useState([]);
   const [staleCount,  setStaleCount]  = useState(null);
   const [sysStatus,   setSysStatus]   = useState(null);
   const [hubspotDids, setHubspotDids] = useState(null);
@@ -115,17 +115,18 @@ export default function SupportTVPage() {
     const tParam = t ? `&t=${t}` : '';
     const tObj   = t ? { t } : {};
 
-    const [tasksRes, statsRes, staleRes, statusRes, hsDidRes, lbRes] = await Promise.allSettled([
+    const [tasksRes, staleRes, statusRes, hsDidRes, lbRes] = await Promise.allSettled([
       api.get(`/api/monday/support-tasks${q}`),
-      api.get(`/api/monday/support-stats${q}`),
       api.get(`/api/zendesk/stale-tickets?team=support${tParam}`),
       api.get('/api/status'),
       api.get('/api/hubspot/dids'),
       api.get('/api/zendesk/leaderboard', { params: { team: 'support', period: 'today', ...tObj } }),
     ]);
 
-    if (tasksRes.status === 'fulfilled') setTasks(tasksRes.value.data?.tasks || []);
-    if (statsRes.status === 'fulfilled') setStats(statsRes.value.data);
+    if (tasksRes.status === 'fulfilled') {
+      setTasks(tasksRes.value.data?.tasks || []);
+      setUpcoming(tasksRes.value.data?.upcoming || []);
+    }
     if (staleRes.status === 'fulfilled') {
       const d = staleRes.value.data;
       setStaleCount(d.unconfigured ? null : (d.tickets?.length ?? 0));
@@ -136,7 +137,7 @@ export default function SupportTVPage() {
       const d = lbRes.value.data;
       setLeaderboard({ support: d.support || [], csatGood: d.csatGood || 0, csatBad: d.csatBad || 0 });
     }
-    setLastSync(new Date().toLocaleTimeString());
+    setLastSync(new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST');
     setLoading(false);
   }, []);
 
@@ -150,15 +151,14 @@ export default function SupportTVPage() {
   if (authError) return <div className="stv-loading"><span>{authError}</span></div>;
   if (loading)   return <div className="stv-loading"><div className="stv-spinner" /><span>Dialing in...</span></div>;
 
-  const overdueCount = tasks.length;
-  const doneCount    = stats?.byStatus?.find(s => s.label === 'Done')?.count ?? 0;
+  const overdueCount  = tasks.length;
+  const agents        = leaderboard.support.filter(a => a.replies > 0);
+  const repliesToday  = agents.reduce((s, a) => s + a.replies, 0);
 
-  const overdueClass = overdueCount > 0 ? 'red' : 'green';
-  const staleClass   = staleCount !== null && staleCount > 0 ? 'amber' : staleCount === 0 ? 'green' : 'muted';
-  const doneClass    = doneCount > 0 ? 'green' : 'muted';
-
-  const agents     = leaderboard.support;
-  const maxSolved  = Math.max(...agents.map(a => a.solved), 1);
+  const overdueClass  = overdueCount > 0 ? 'red' : 'green';
+  const staleClass    = staleCount !== null && staleCount > 0 ? 'amber' : staleCount === 0 ? 'green' : 'muted';
+  const solvedClass   = repliesToday > 0 ? 'green' : 'muted';
+  const maxReplies = Math.max(...agents.map(a => a.replies), 1);
   const barClass   = (i) => i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : 'default';
 
   const mobileServiceUp = sysStatus?.mobileApp?.state        !== 'DOWN';
@@ -188,7 +188,7 @@ export default function SupportTVPage() {
           <div className="stv-header-left">
             <img
               className="stv-logo"
-              src="/dialedin-logo-dark.png"
+              src="/al-logo.png"
               alt="AL"
               onError={e => { e.target.style.display = 'none'; }}
             />
@@ -214,11 +214,6 @@ export default function SupportTVPage() {
                 <span className="stv-clock-label">EST</span>
                 <span className="stv-clock">{fmtClock(now, 'America/New_York')}</span>
               </div>
-              <div className="stv-clock-sep" />
-              <div className="stv-clock-entry">
-                <span className="stv-clock-label">BZ</span>
-                <span className="stv-clock">{fmtClock(now, 'America/Belize')}</span>
-              </div>
             </div>
             <div className="stv-date">{fmtDate(now)}</div>
           </div>
@@ -237,9 +232,9 @@ export default function SupportTVPage() {
             sub={staleCount === 0 ? 'All fresh' : staleCount > 0 ? 'Need follow-up' : 'No data'}
           />
           <StatCard
-            label="Done Today" colorClass={doneClass}
-            value={doneCount}
-            sub="Tasks completed"
+            label="Replied Today" colorClass={solvedClass}
+            value={repliesToday}
+            sub={repliesToday === 1 ? '1 ticket replied' : `${repliesToday} tickets replied`}
           />
         </div>
 
@@ -306,24 +301,56 @@ export default function SupportTVPage() {
                   <div className="stv-empty-text">No overdue tasks — great work!</div>
                 </div>
               ) : (
-                tasks.map(task => (
-                  <a
-                    key={task.id}
-                    className="stv-task-card"
-                    href={`https://answeringlegal-unit.monday.com/boards/${BOARD_ID}/pulses/${task.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <div className="stv-task-name" title={task.name}>{task.name}</div>
-                    {task.priority && (
-                      <div className={`stv-task-pill ${priorityClass(task.priority)}`}>{task.priority}</div>
-                    )}
-                    {task.dueDate && (
-                      <div className="stv-task-due">{daysOverdue(task.dueDate)}</div>
-                    )}
-                    <div className="stv-task-arrow">↗</div>
-                  </a>
-                ))
+                tasks.map(task => {
+                  const isPending = /(pending|in.?progress|working|in.?review)/i.test(task.status || '');
+                  return (
+                    <a
+                      key={task.id}
+                      className={`stv-task-card${isPending ? ' pending' : ''}`}
+                      href={`https://answeringlegal-unit.monday.com/boards/${BOARD_ID}/pulses/${task.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <div className="stv-task-main">
+                        <div className="stv-task-name" title={task.name}>{task.name}</div>
+                        {isPending && task.assignee && (
+                          <div className="stv-task-working">⚙️ {task.assignee}</div>
+                        )}
+                      </div>
+                      {isPending
+                        ? <div className="stv-task-pill working">Being Worked On</div>
+                        : task.priority && <div className={`stv-task-pill ${priorityClass(task.priority)}`}>{task.priority}</div>
+                      }
+                      {task.dueDate && (
+                        <div className="stv-task-due">{daysOverdue(task.dueDate)}</div>
+                      )}
+                      <div className="stv-task-arrow">↗</div>
+                    </a>
+                  );
+                })
+              )}
+
+              {/* Due Today sub-section */}
+              {upcoming.length > 0 && (
+                <>
+                  <div className="stv-sub-section-label">Due Today · {upcoming.length}</div>
+                  {upcoming.map(task => (
+                    <a
+                      key={task.id}
+                      className="stv-task-card today"
+                      href={`https://answeringlegal-unit.monday.com/boards/${BOARD_ID}/pulses/${task.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <div className="stv-task-name" title={task.name}>{task.name}</div>
+                      {task.priority && (
+                        <div className={`stv-task-pill ${priorityClass(task.priority)}`}>{task.priority}</div>
+                      )}
+                      <div className="stv-task-due today">Today</div>
+                      <div className="stv-task-arrow">↗</div>
+                    </a>
+                  ))}
+                </>
               )}
             </div>
           </div>
@@ -336,38 +363,72 @@ export default function SupportTVPage() {
             <div className="stv-corner stv-corner-bl" />
             <div className="stv-corner stv-corner-br" />
             <div className="stv-panel-header">
-              <div className="stv-panel-title">Today's Leaderboard · Tickets Solved</div>
-              <div className="stv-panel-badge muted">
-                {agents.length} agent{agents.length !== 1 ? 's' : ''}
+              <div className="stv-panel-title">Today's Leaderboard · Replied &amp; Touched</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {(leaderboard.csatGood + leaderboard.csatBad) > 0 && (
+                  <div className="stv-panel-badge muted">
+                    👍 {leaderboard.csatGood} · 👎 {leaderboard.csatBad}
+                  </div>
+                )}
+                <div className="stv-panel-badge muted">
+                  {agents.length} agent{agents.length !== 1 ? 's' : ''}
+                </div>
               </div>
             </div>
             <div className="stv-panel-body">
               {agents.length === 0 ? (
                 <div className="stv-empty">
                   <div className="stv-empty-icon">🏆</div>
-                  <div className="stv-empty-text">No tickets solved yet today</div>
+                  <div className="stv-empty-text">No replies yet today</div>
                 </div>
               ) : (
-                agents.map((agent, i) => (
-                  <div key={agent.id} className={`stv-lb-row${i === 0 ? ' first' : ''}`}>
-                    <div className="stv-lb-medal">
-                      {i < 3 ? MEDALS[i] : <span className="stv-lb-rank">{i + 1}</span>}
+                <>
+                  {/* Top performer spotlight */}
+                  <div className="stv-top-performer">
+                    <div className="stv-tp-crown">👑</div>
+                    <div className="stv-tp-body">
+                      <div className="stv-tp-label">Top Performer Today</div>
+                      <div className="stv-tp-name">{agents[0].name}</div>
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="stv-lb-name">{agent.name}</div>
-                      <div className="stv-lb-bar-track">
-                        <div
-                          className={`stv-lb-bar-fill ${barClass(i)}`}
-                          style={{ width: `${maxSolved > 0 ? (agent.solved / maxSolved) * 100 : 0}%` }}
-                        />
+                    <div className="stv-tp-stats">
+                      <div className="stv-tp-stat">
+                        <div className="stv-tp-num">{agents[0].replies}</div>
+                        <div className="stv-tp-unit">replied</div>
+                      </div>
+                      <div className="stv-tp-divider" />
+                      <div className="stv-tp-stat">
+                        <div className="stv-tp-num stv-tp-placeholder">—</div>
+                        <div className="stv-tp-unit">calls</div>
                       </div>
                     </div>
-                    <div className="stv-lb-right">
-                      <div className="stv-lb-solved">{agent.solved}</div>
-                      <div className="stv-lb-solved-label">solved</div>
-                    </div>
                   </div>
-                ))
+
+                  {/* Full ranked list */}
+                  {agents.map((agent, i) => (
+                    <div key={agent.id} className={`stv-lb-row${i === 0 ? ' first' : ''}`}>
+                      <div className="stv-lb-medal">
+                        {i < 3 ? MEDALS[i] : <span className="stv-lb-rank">{i + 1}</span>}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="stv-lb-name">{agent.name}</div>
+                        <div className="stv-lb-bar-track">
+                          <div
+                            className={`stv-lb-bar-fill ${barClass(i)}`}
+                            style={{ width: `${maxReplies > 0 ? (agent.replies / maxReplies) * 100 : 0}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="stv-lb-right">
+                        <div className="stv-lb-solved">{agent.replies}</div>
+                        <div className="stv-lb-solved-label">replied</div>
+                      </div>
+                      <div className="stv-lb-calls">
+                        <div className="stv-lb-calls-num">{agent.touched ?? '—'}</div>
+                        <div className="stv-lb-calls-label">touched</div>
+                      </div>
+                    </div>
+                  ))}
+                </>
               )}
             </div>
           </div>

@@ -82,7 +82,7 @@ export default function TechTVPage() {
 
   const [queue,       setQueue]       = useState({ new: 0, open: 0, pending: 0, onHold: 0 });
   const [stale,       setStale]       = useState({ tickets: [], unconfigured: false });
-  const [leaderboard, setLeaderboard] = useState({ support: [], csatGood: 0, csatBad: 0, zdSubdomain: null });
+  const [leaderboard, setLeaderboard] = useState({ support: [], sections: [], csatGood: 0, csatBad: 0, zdSubdomain: null });
   const [sysStatus,   setSysStatus]   = useState(null);
   const [hubspotDids, setHubspotDids] = useState(null);
 
@@ -118,6 +118,7 @@ export default function TechTVPage() {
       const d = lbRes.value.data;
       setLeaderboard({
         support:     d.support     || [],
+        sections:    d.sections    || [],
         csatGood:    d.csatGood    || 0,
         csatBad:     d.csatBad     || 0,
         zdSubdomain: d.zdSubdomain || null,
@@ -125,7 +126,7 @@ export default function TechTVPage() {
     }
     if (statusRes.status === 'fulfilled') setSysStatus(statusRes.value.data);
     if (hsDidRes.status  === 'fulfilled') setHubspotDids(hsDidRes.value.data);
-    setLastSync(new Date().toLocaleTimeString());
+    setLastSync(new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST');
     setLoading(false);
   }, []);
 
@@ -139,8 +140,8 @@ export default function TechTVPage() {
   if (authError) return <div className="ttv-loading"><span>{authError}</span></div>;
   if (loading)   return <div className="ttv-loading"><div className="ttv-spinner" /><span>Dialing in...</span></div>;
 
-  const agents     = leaderboard.support;
-  const maxSolved  = Math.max(...agents.map(a => a.solved), 1);
+  const agents     = leaderboard.support.filter(a => a.replies > 0);
+  const maxReplies = Math.max(...agents.map(a => a.replies), 1);
   const staleList  = stale.tickets || [];
   const staleCount = stale.unconfigured ? null : staleList.length;
   const zdSub      = leaderboard.zdSubdomain;
@@ -182,7 +183,7 @@ export default function TechTVPage() {
           <div className="ttv-header-left">
             <img
               className="ttv-logo"
-              src="/dialedin-logo-dark.png"
+              src="/al-logo.png"
               alt="AL"
               onError={e => { e.target.style.display = 'none'; }}
             />
@@ -207,11 +208,6 @@ export default function TechTVPage() {
               <div className="ttv-clock-entry">
                 <span className="ttv-clock-label">EST</span>
                 <span className="ttv-clock">{fmtClock(now, 'America/New_York')}</span>
-              </div>
-              <div className="ttv-clock-sep" />
-              <div className="ttv-clock-entry">
-                <span className="ttv-clock-label">BZ</span>
-                <span className="ttv-clock">{fmtClock(now, 'America/Belize')}</span>
               </div>
             </div>
             <div className="ttv-date">{fmtDate(now)}</div>
@@ -294,8 +290,15 @@ export default function TechTVPage() {
             <div className="ttv-corner ttv-corner-br" />
             <div className="ttv-panel-header">
               <div className="ttv-panel-title">Leaderboard · This Week</div>
-              <div className="ttv-panel-badge muted">
-                {agents.length} agent{agents.length !== 1 ? 's' : ''}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {(leaderboard.csatGood + leaderboard.csatBad) > 0 && (
+                  <div className="ttv-panel-badge muted">
+                    👍 {leaderboard.csatGood} · 👎 {leaderboard.csatBad}
+                  </div>
+                )}
+                <div className="ttv-panel-badge muted">
+                  {agents.length} agent{agents.length !== 1 ? 's' : ''}
+                </div>
               </div>
             </div>
             <div className="ttv-panel-body">
@@ -305,26 +308,44 @@ export default function TechTVPage() {
                   <div className="ttv-empty-text">No activity this week yet</div>
                 </div>
               ) : (
-                agents.map((agent, i) => (
-                  <div key={agent.id} className={`ttv-lb-row${i === 0 ? ' first' : ''}`}>
-                    <div className="ttv-lb-medal">
-                      {i < 3 ? MEDALS[i] : <span className="ttv-lb-rank">{i + 1}</span>}
+                <>
+                  {/* Top performer spotlight */}
+                  <div className="ttv-top-performer">
+                    <div className="ttv-tp-crown">👑</div>
+                    <div className="ttv-tp-body">
+                      <div className="ttv-tp-label">Top Performer · This Week</div>
+                      <div className="ttv-tp-name">{agents[0].name}</div>
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="ttv-lb-name">{agent.name}</div>
-                      <div className="ttv-lb-bar-track">
-                        <div
-                          className={`ttv-lb-bar-fill ${barClass(i)}`}
-                          style={{ width: `${maxSolved > 0 ? (agent.solved / maxSolved) * 100 : 0}%` }}
-                        />
+                    <div className="ttv-tp-stats">
+                      <div className="ttv-tp-stat">
+                        <div className="ttv-tp-num">{agents[0].replies}</div>
+                        <div className="ttv-tp-unit">replied</div>
                       </div>
                     </div>
-                    <div className="ttv-lb-right">
-                      <div className="ttv-lb-solved">{agent.solved}</div>
-                      <div className="ttv-lb-solved-label">solved</div>
-                    </div>
                   </div>
-                ))
+
+                  {/* Full ranked list */}
+                  {agents.map((agent, i) => (
+                    <div key={agent.id} className={`ttv-lb-row${i === 0 ? ' first' : ''}`}>
+                      <div className="ttv-lb-medal">
+                        {i < 3 ? MEDALS[i] : <span className="ttv-lb-rank">{i + 1}</span>}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="ttv-lb-name">{agent.name}</div>
+                        <div className="ttv-lb-bar-track">
+                          <div
+                            className={`ttv-lb-bar-fill ${barClass(i)}`}
+                            style={{ width: `${maxReplies > 0 ? (agent.replies / maxReplies) * 100 : 0}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="ttv-lb-right">
+                        <div className="ttv-lb-solved">{agent.replies}</div>
+                        <div className="ttv-lb-solved-label">replied</div>
+                      </div>
+                    </div>
+                  ))}
+                </>
               )}
             </div>
           </div>

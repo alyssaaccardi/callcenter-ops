@@ -130,7 +130,7 @@ export default function AccountReview() {
       const res = await api.get('/api/monday/account-review');
       setItems(res.data?.items || []);
       setError(null);
-      setLastSync(new Date().toLocaleTimeString());
+      setLastSync(new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST');
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to load data');
     } finally {

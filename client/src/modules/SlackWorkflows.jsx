@@ -111,7 +111,7 @@ export default function SlackWorkflows() {
 
   function logLocal(msg, type = 'ok') {
     const entry = {
-      time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' }),
       msg, type,
     };
     setAuditLog(prev => [entry, ...prev].slice(0, 100));
@@ -124,7 +124,7 @@ export default function SlackWorkflows() {
     try {
       const res = await api.post('/api/slack/notify', { url: wf.url });
       if (res.data?.openUrl) window.open(res.data.openUrl, '_blank');
-      setLastTriggered(prev => ({ ...prev, [wf.id]: new Date().toLocaleTimeString() }));
+      setLastTriggered(prev => ({ ...prev, [wf.id]: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST' }));
       toast(`Fired: ${wf.name}`, 'success');
       logLocal(`Fired workflow: ${wf.name}`, 'ok');
     } catch (e) {

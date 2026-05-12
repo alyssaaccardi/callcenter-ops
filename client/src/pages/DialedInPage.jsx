@@ -84,7 +84,7 @@ function fmtSeconds(s) {
 function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, message, changedBy, changedAt, counts, xcally, queueStats }) {
   function fmtAttr() {
     if (!changedBy || !changedAt) return '';
-    return `Updated by ${changedBy} at ${new Date(changedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
+    return `Updated by ${changedBy} at ${new Date(changedAt).toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })} EST`;
   }
   const displayDid = didCount !== null && didCount !== undefined ? didCount : '—';
   return (
@@ -251,7 +251,7 @@ export default function DialedInPage() {
         setDids(d);
         setHsDids(hs);
         setXcally(xc);
-        const t = new Date(d?.syncedAt || s?.updatedAt || Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const t = new Date(d?.syncedAt || s?.updatedAt || Date.now()).toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' });
         setSyncInfo(`Live · Last sync: ${t}`);
       } catch (err) {
         setSyncInfo(`Sync error: ${err.message}`);

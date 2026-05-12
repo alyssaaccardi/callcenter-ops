@@ -56,7 +56,7 @@ export default function SmsModule() {
 
   function addSmsLog(msg, type = 'ok') {
     const entry = {
-      time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' }),
       msg, type,
     };
     setSmsLog(prev => [entry, ...prev].slice(0, 50));

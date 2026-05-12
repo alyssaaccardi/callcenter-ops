@@ -5,6 +5,7 @@ import './TeamLeaderboard.css';
 const POLL_MS = 60000;
 
 const PERIOD_OPTIONS = [
+  { label: 'Today',      key: 'today'      },
   { label: 'This Week',  key: 'this-week'  },
   { label: 'Last Week',  key: 'last-week'  },
   { label: 'Last Month', key: 'last-month' },
@@ -14,6 +15,7 @@ const PERIOD_OPTIONS = [
 ];
 
 const PERIOD_LABEL = {
+  'today':      'Today',
   'this-week':  'This Week',
   'last-week':  'Last Week',
   'last-month': 'Last Month',
@@ -28,12 +30,13 @@ function RankBadge({ rank }) {
 }
 
 export default function TeamLeaderboard({ team = 'support' }) {
+  const [sections,     setSections]     = useState([]);
   const [support,      setSupport]      = useState([]);
   const [escalation,   setEscalation]   = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState(null);
   const [lastSync,     setLastSync]     = useState(null);
-  const [period,       setPeriod]       = useState('this-week');
+  const [period,       setPeriod]       = useState('today');
   const [csatGood,     setCsatGood]     = useState(0);
   const [csatBad,      setCsatBad]      = useState(0);
   const [zdSubdomain,  setZdSubdomain]  = useState(null);
@@ -42,13 +45,14 @@ export default function TeamLeaderboard({ team = 'support' }) {
     setLoading(true);
     try {
       const res = await api.get('/api/zendesk/leaderboard', { params: { period: p, team } });
+      setSections(res.data?.sections   || []);
       setSupport(res.data?.support     || []);
       setEscalation(res.data?.escalation || []);
       setCsatGood(res.data?.csatGood   || 0);
       setCsatBad(res.data?.csatBad     || 0);
       setZdSubdomain(res.data?.zdSubdomain || null);
       setError(null);
-      setLastSync(new Date().toLocaleTimeString());
+      setLastSync(new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST');
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to load leaderboard');
     } finally {
@@ -67,26 +71,26 @@ export default function TeamLeaderboard({ team = 'support' }) {
     ? (q) => `https://${zdSubdomain}.zendesk.com/agent/search/1?q=${encodeURIComponent(q)}`
     : null;
 
-  const zdAgentSolvedUrl = (agent) => zdUrl
-    ? zdUrl(`type:ticket assignee_id:${agent.id} status:solved`)
+  const zdAgentRepliedUrl = (agent) => zdUrl
+    ? zdUrl(`type:ticket commenter:${agent.id}`)
     : null;
   const zdAgentOpenUrl   = (agent) => zdUrl
     ? zdUrl(`type:ticket assignee_id:${agent.id} status:open status:new`)
     : null;
 
-  const allAgents   = [...support, ...escalation];
-  const maxSolved   = Math.max(...allAgents.map(a => a.solved), 1);
-  const totalSolved = allAgents.reduce((s, a) => s + a.solved, 0);
-  const totalOpen   = allAgents.reduce((s, a) => s + a.open, 0);
-  const periodLabel = PERIOD_LABEL[period] || period;
+  const allAgents    = [...support, ...escalation];
+  const maxReplies   = Math.max(...allAgents.map(a => a.replies), 1);
+  const totalReplies = allAgents.reduce((s, a) => s + a.replies, 0);
+  const totalOpen    = allAgents.reduce((s, a) => s + a.open, 0);
+  const periodLabel  = PERIOD_LABEL[period] || period;
 
   function AgentRow({ agent, rank, isFirst }) {
-    const eff    = agent.solved + agent.open > 0
-      ? Math.round((agent.solved / (agent.solved + agent.open)) * 100)
+    const eff     = agent.replies + agent.open > 0
+      ? Math.round((agent.replies / (agent.replies + agent.open)) * 100)
       : null;
-    const barPct = maxSolved > 0 ? (agent.solved / maxSolved) * 100 : 0;
-    const solvedHref = zdAgentSolvedUrl(agent);
-    const openHref   = zdAgentOpenUrl(agent);
+    const barPct  = maxReplies > 0 ? (agent.replies / maxReplies) * 100 : 0;
+    const repliedHref = zdAgentRepliedUrl(agent);
+    const openHref    = zdAgentOpenUrl(agent);
 
     return (
       <div className={`tl-row${isFirst ? ' first' : ''}`}>
@@ -111,23 +115,27 @@ export default function TeamLeaderboard({ team = 'support' }) {
         </div>
 
         <div className="tl-col-solved">
-          {solvedHref ? (
+          {repliedHref ? (
             <a
               className="tl-solved-num tl-num-link"
-              href={solvedHref}
+              href={repliedHref}
               target="_blank"
               rel="noopener noreferrer"
-              title={`${agent.solved} tickets resolved by ${agent.name} in ${periodLabel} — click to open in Zendesk`}
+              title={`${agent.replies} tickets with a public reply from ${agent.name} in ${periodLabel} — click to open in Zendesk`}
             >
-              {agent.solved}
+              {agent.replies}
             </a>
           ) : (
-            <span className="tl-solved-num">{agent.solved}</span>
+            <span className="tl-solved-num">{agent.replies}</span>
           )}
         </div>
 
+        <div className="tl-col-touched" title={`${agent.touched} tickets assigned to ${agent.name} that were active in ${periodLabel}`}>
+          <span className="tl-touched-num">{agent.touched ?? '—'}</span>
+        </div>
+
         <div className="tl-col-bar">
-          <div className="tl-bar-track" title={`${agent.solved} solved — bar shows volume relative to top performer`}>
+          <div className="tl-bar-track" title={`${agent.replies} replied — bar shows volume relative to top performer`}>
             <div
               className={`tl-bar-fill ${rank === 1 ? 'gold' : rank === 2 ? 'silver' : rank === 3 ? 'bronze' : 'default'}`}
               style={{ width: `${barPct}%` }}
@@ -156,7 +164,7 @@ export default function TeamLeaderboard({ team = 'support' }) {
             ? (
               <span
                 className={`tl-eff ${eff >= 80 ? 'green' : eff >= 60 ? 'amber' : 'red'}`}
-                title={`Resolution rate: ${agent.solved} solved ÷ (${agent.solved} solved + ${agent.open} open) = ${eff}%`}
+                title={`Reply rate: ${agent.replies} replied ÷ (${agent.replies} replied + ${agent.open} open) = ${eff}%`}
               >
                 {eff}%
               </span>
@@ -186,7 +194,7 @@ export default function TeamLeaderboard({ team = 'support' }) {
             ) : (
               team === 'tech' ? 'Zendesk · Tech Team' : 'Zendesk · Trial Account + Escalation teams'
             )}
-            {' · '}tickets resolved &amp; open per agent · {POLL_MS / 1000}s refresh
+            {' · '}public replies &amp; open tickets per agent · {POLL_MS / 1000}s refresh
           </div>
         </div>
         <div className="flex" style={{ gap: 10, alignItems: 'center' }}>
@@ -213,7 +221,7 @@ export default function TeamLeaderboard({ team = 'support' }) {
         ))}
         {!loading && allAgents.length > 0 && (
           <span className="ar-period-note">
-            {allAgents.length} agent{allAgents.length !== 1 ? 's' : ''} · {totalSolved} resolved · {totalOpen} open
+            {allAgents.length} agent{allAgents.length !== 1 ? 's' : ''} · {totalReplies} replied · {totalOpen} open
           </span>
         )}
       </div>
@@ -221,14 +229,14 @@ export default function TeamLeaderboard({ team = 'support' }) {
       {/* Summary strip */}
       {!loading && allAgents.length > 0 && (() => {
         const csatTotal = csatGood + csatBad;
-        const csatPct   = csatTotal > 0 ? Math.round((csatGood / csatTotal) * 100) : null;
-        const effPct    = totalSolved + totalOpen > 0
-          ? Math.round((totalSolved / (totalSolved + totalOpen)) * 100)
+        const csatPct    = csatTotal > 0 ? Math.round((csatGood / csatTotal) * 100) : null;
+        const effPct     = totalReplies + totalOpen > 0
+          ? Math.round((totalReplies / (totalReplies + totalOpen)) * 100)
           : null;
-        const topAgent  = allAgents[0];
-        const csatHref  = zdUrl ? zdUrl('type:ticket has_csat:true') : null;
-        const solvedHref = zdUrl ? zdUrl(`type:ticket status:solved`) : null;
-        const openHref   = zdUrl ? zdUrl('type:ticket status:open status:new') : null;
+        const topAgent   = allAgents[0];
+        const csatHref   = zdUrl ? zdUrl('type:ticket has_csat:true') : null;
+        const repliedHref = zdUrl ? zdUrl(`type:ticket status:solved`) : null;
+        const openHref    = zdUrl ? zdUrl('type:ticket status:open status:new') : null;
 
         const SummaryCard = ({ href, children, className = '', title }) => {
           const cls = `tl-summary-card${className ? ' ' + className : ''}`;
@@ -239,12 +247,12 @@ export default function TeamLeaderboard({ team = 'support' }) {
         return (
           <div className="tl-summary mb-16">
             <SummaryCard
-              href={solvedHref}
-              title={`${totalSolved} tickets resolved across all agents in ${periodLabel} — data from Zendesk · click to view in Zendesk`}
+              href={repliedHref}
+              title={`${totalReplies} tickets with a public reply across all agents in ${periodLabel} — data from Zendesk · click to view in Zendesk`}
             >
-              <div className="tl-summary-label">Resolved · {periodLabel}</div>
-              <div className="tl-summary-value">{totalSolved}</div>
-              <div className="tl-summary-sub">Zendesk · solved tickets{solvedHref && ' · click to view ↗'}</div>
+              <div className="tl-summary-label">Replied · {periodLabel}</div>
+              <div className="tl-summary-value">{totalReplies}</div>
+              <div className="tl-summary-sub">Zendesk · tickets with reply{repliedHref && ' · click to view ↗'}</div>
             </SummaryCard>
 
             <SummaryCard
@@ -319,8 +327,11 @@ export default function TeamLeaderboard({ team = 'support' }) {
           <div className="tl-board-header">
             <span className="tl-col-rank">#</span>
             <span className="tl-col-name">Agent</span>
-            <span className="tl-col-solved" title={`Tickets resolved in the selected period (${periodLabel}) · source: Zendesk · click each number to view in Zendesk`}>
-              Solved ↗
+            <span className="tl-col-solved" title={`Tickets with a public reply in the selected period (${periodLabel}) · source: Zendesk · click each number to view in Zendesk`}>
+              Replied ↗
+            </span>
+            <span className="tl-col-touched" title={`Tickets assigned to this agent that were active in ${periodLabel} — broader activity signal`}>
+              Touched
             </span>
             <span className="tl-col-bar" style={{ fontSize: 9, color: 'rgba(60,50,120,0.3)', paddingLeft: 2 }}>
               relative volume
@@ -333,44 +344,63 @@ export default function TeamLeaderboard({ team = 'support' }) {
             </span>
           </div>
 
-          {/* Support team */}
-          {support.length > 0 && (
-            <div className="tl-section-label">
-              <div>
-                <span>{team === 'tech' ? 'Tech Team' : 'Trial Account Team'}</span>
-                <span className="tl-section-hint">Zendesk support queue · ranked by tickets resolved in period</span>
-              </div>
-              {zdUrl && (
-                <a className="tl-section-link" href={zdUrl('type:ticket')} target="_blank" rel="noopener noreferrer">
-                  View all tickets ↗
-                </a>
+          {/* Tech team: delineated sections per Zendesk group */}
+          {team === 'tech' && sections.length > 0 ? (
+            sections.map(section => (
+              <React.Fragment key={section.name}>
+                <div className="tl-section-label">
+                  <div>
+                    <span>{section.name}</span>
+                    <span className="tl-section-hint">Zendesk · ranked by public replies in period</span>
+                  </div>
+                </div>
+                {section.agents.map((agent, i) => (
+                  <AgentRow key={agent.id} agent={agent} rank={i + 1} isFirst={i === 0} />
+                ))}
+              </React.Fragment>
+            ))
+          ) : (
+            <>
+              {/* Support team */}
+              {support.length > 0 && (
+                <div className="tl-section-label">
+                  <div>
+                    <span>Trial Account Team</span>
+                    <span className="tl-section-hint">Zendesk support queue · ranked by public replies in period</span>
+                  </div>
+                  {zdUrl && (
+                    <a className="tl-section-link" href={zdUrl('type:ticket')} target="_blank" rel="noopener noreferrer">
+                      View all tickets ↗
+                    </a>
+                  )}
+                </div>
               )}
-            </div>
-          )}
-          {support.map((agent, i) => (
-            <AgentRow key={agent.id} agent={agent} rank={i + 1} isFirst={i === 0} />
-          ))}
+              {support.map((agent, i) => (
+                <AgentRow key={agent.id} agent={agent} rank={i + 1} isFirst={i === 0} />
+              ))}
 
-          {/* Escalation team */}
-          {escalation.length > 0 && (
-            <div className="tl-section-label escalation">
-              <div>
-                <span>Escalation Station</span>
-                <span className="tl-section-hint">handles escalated tickets · also counted in Trial team above</span>
-              </div>
-            </div>
+              {/* Escalation team */}
+              {escalation.length > 0 && (
+                <div className="tl-section-label escalation">
+                  <div>
+                    <span>Escalation Station</span>
+                    <span className="tl-section-hint">handles escalated tickets · also counted in Trial team above</span>
+                  </div>
+                </div>
+              )}
+              {escalation.map((agent, i) => (
+                <AgentRow key={`esc-${agent.id}`} agent={agent} rank={i + 1} isFirst={false} />
+              ))}
+            </>
           )}
-          {escalation.map((agent, i) => (
-            <AgentRow key={`esc-${agent.id}`} agent={agent} rank={i + 1} isFirst={false} />
-          ))}
 
           {/* Board footer */}
           <div className="tl-board-footer">
-            <span>Solved = resolved in <strong>{periodLabel}</strong> period</span>
+            <span>Replied = public replies in <strong>{periodLabel}</strong> period</span>
             <span>·</span>
             <span>Open = current live queue (all time)</span>
             <span>·</span>
-            <span>Rate = solved ÷ (solved + open)</span>
+            <span>Rate = replied ÷ (replied + open)</span>
             <span>·</span>
             <span>Bar = relative to top performer</span>
             {zdUrl && (

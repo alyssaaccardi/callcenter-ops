@@ -363,7 +363,12 @@ app.post('/api/status', requireAuth, async (req, res) => {
 
   function stampChange(obj) {
     if (!obj) return obj;
-    return { ...obj, changedBy, changedAt: obj.changedAt || new Date().toISOString() };
+    const out = { ...obj, changedBy, changedAt: obj.changedAt || new Date().toISOString() };
+    if ('message' in obj) {
+      out.messageBy = changedBy;
+      out.messageAt = new Date().toISOString();
+    }
+    return out;
   }
 
   if (savvyPhone)   statusStore.savvyPhone   = { ...statusStore.savvyPhone,   ...stampChange(savvyPhone) };
