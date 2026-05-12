@@ -91,10 +91,10 @@ function CompletedCard({ task }) {
         <div className="sc-task-meta-row">
           {task.taskType && <div className="sc-task-pill type">{task.taskType}</div>}
           {task.priority  && <div className={`sc-task-pill ${priorityClass(task.priority)}`}>{task.priority}</div>}
-          {task.assignee && (
+          {(task.solvedBy || task.assignee) && (
             <div className="sc-task-assignee">
-              <span className="sc-task-assignee-dot">{task.assignee[0].toUpperCase()}</span>
-              {task.assignee}
+              <span className="sc-task-assignee-dot">{(task.solvedBy || task.assignee)[0].toUpperCase()}</span>
+              {task.solvedBy || task.assignee}
             </div>
           )}
           {completedTime && <div className="sc-task-done-time">✓ {completedTime}</div>}
@@ -574,11 +574,6 @@ export default function SupportCenter() {
           <div className="sc-stat-row mb-8">
             <div className="sc-stat-group-label">Monday.com</div>
             <div className="sc-stat-strip">
-              <StatCard
-                label="Total Tasks" value={stats?.total ?? '—'}
-                href={mondayUrl}
-                title={`${stats?.total ?? '?'} total support tasks on the board — click to open Monday`}
-              />
               <StatCard
                 label="Overdue" value={overdueCount}
                 className={overdueCount > 0 ? 'accent-red' : ''}

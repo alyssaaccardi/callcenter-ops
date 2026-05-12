@@ -947,7 +947,7 @@ app.get('/api/monday/support-tasks', async (req, res) => {
   if (!apiKey) return res.status(500).json({ error: 'Monday.com credentials not configured' });
 
   const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
-  const itemFields = `id name updated_at column_values(ids: ["color_mkxwxqsx", "status", "date_mkx5zfsz", "dropdown_mkzc9hm", "text_mkx5ca0q", "text_mkx5cpnb", "dropdown_mkxjmeyh", "multiple_person_mkx5smfv", "multiple_person_mm38yn50"]) { id text value }`;
+  const itemFields = `id name updated_at column_values(ids: ["color_mkxwxqsx", "status", "date_mkx5zfsz", "dropdown_mkzc9hm", "text_mkx5ca0q", "text_mkx5cpnb", "dropdown_mkxjmeyh", "multiple_person_mkx5smfv", "multiple_person_mm38yn50", "multiple_person_mkzcjc37"]) { id text value }`;
 
   try {
     const allItems = [];
@@ -983,7 +983,8 @@ app.get('/api/monday/support-tasks', async (req, res) => {
       const accountCol  = item.column_values?.find(c => c.id === 'text_mkx5ca0q');
       const descCol     = item.column_values?.find(c => c.id === 'text_mkx5cpnb');
       const assigneeCol = item.column_values?.find(c => c.id === 'multiple_person_mkx5smfv');
-      const workerCol   = item.column_values?.find(c => c.id === 'multiple_person_mm38yn50');
+      const workerCol    = item.column_values?.find(c => c.id === 'multiple_person_mm38yn50');
+      const solvedByCol  = item.column_values?.find(c => c.id === 'multiple_person_mkzcjc37');
 
       let dueTime = '';
       try {
@@ -1008,6 +1009,7 @@ app.get('/api/monday/support-tasks', async (req, res) => {
         description: descCol?.text     || '',
         assignee:    assigneeCol?.text  || '',
         worker:      workerCol?.text    || '',
+        solvedBy:    solvedByCol?.text  || '',
         lastUpdate:  item.updated_at,
         link:        `https://answeringlegal-unit.monday.com/boards/${boardId}/pulses/${item.id}`,
       };
@@ -1212,9 +1214,8 @@ app.get('/api/zendesk/stale-tickets', async (req, res) => {
     const sub     = process.env.ZENDESK_SUBDOMAIN;
     const team    = req.query.team || null;
 
-    // Format date for Zendesk search (YYYY-MM-DD HH:MM avoids ISO colon encoding issues)
     const pad = n => String(n).padStart(2, '0');
-    const zdDate = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    const zdDate = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00Z`;
 
     // Build group filter for team-scoped views
     // Support also claims tickets with no group/assignee (unrouted new tickets)
@@ -1423,7 +1424,7 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
     // Build date filter string for solved tickets
     const now    = new Date();
     const pad    = n => String(n).padStart(2, '0');
-    const zdDate = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    const zdDate = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00Z`;
 
     let solvedFilter = '';
     let replyFilter  = '';
