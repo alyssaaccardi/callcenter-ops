@@ -473,6 +473,7 @@ export default function SupportCenter() {
 
   const fetchAll = useCallback(async (p, sh) => {
     setRefreshing(true);
+    setLbLoading(true);
     try {
       // Fire fast requests and leaderboard in parallel, but don't block page on leaderboard
       const fastPromise = Promise.allSettled([

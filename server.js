@@ -1563,8 +1563,8 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
         .map(({ _u, ...rest }) => rest);
       escalation = [];
     } else {
-      support    = agentStats.filter(a => hasActivity(a)).sort(byActivity).map(({ _u, ...rest }) => rest);
-      escalation = agentStats.filter(a => isEscalation(a._u) && hasActivity(a)).sort(byActivity).map(({ _u, ...rest }) => rest);
+      support    = agentStats.sort(byActivity).map(({ _u, ...rest }) => rest);
+      escalation = agentStats.filter(a => isEscalation(a._u)).sort(byActivity).map(({ _u, ...rest }) => rest);
     }
 
     // Fetch team-scoped CSAT counts via group filter on ticket search
