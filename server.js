@@ -195,7 +195,7 @@ app.get('/api/users', requireRole('super_admin'), (req, res) => {
 app.post('/api/users', requireRole('super_admin'), (req, res) => {
   const { email, name, role } = req.body;
   if (!email || !name || !role) return res.status(400).json({ error: 'email, name, and role are required' });
-  if (!['super_admin', 'call_center_ops', 'tv_display', 'support'].includes(role)) return res.status(400).json({ error: 'invalid role' });
+  if (!['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech'].includes(role)) return res.status(400).json({ error: 'invalid role' });
   addUser(email, name, role);
   res.json({ success: true });
 });
@@ -873,7 +873,7 @@ app.post('/api/monday/agent/:id/standby', requireAuth, async (req, res) => {
   const apiKey = process.env.MONDAY_API_KEY;
   const boardId = process.env.MONDAY_BOARD_ID;
   const statusColumnId = process.env.MONDAY_STATUS_COLUMN_ID;
-  const standbyLabel = process.env.MONDAY_STANDBY_LABEL || 'Standby';
+  const standbyLabel = process.env.MONDAY_STANDBY_LABEL || 'On Standby';
 
   if (!apiKey || !boardId || !statusColumnId) {
     return res.status(500).json({ error: 'Monday.com credentials not configured' });

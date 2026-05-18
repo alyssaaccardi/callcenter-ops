@@ -23,7 +23,7 @@ function useLocalSetting(key, defaultVal) {
 export default function Settings() {
   const { user } = useAuth();
   const SETTINGS_TABS = ALL_SETTINGS_TABS.filter(t => t.roles.includes(user?.role));
-  const [activeTab, setActiveTab] = useState('general');
+  const [activeTab, setActiveTab] = useState(() => SETTINGS_TABS[0]?.id ?? 'general');
 
   // Call centers
   const [savvyName, setSavvyName] = useLocalSetting('ccob_savvyName', 'Savvy Phone');

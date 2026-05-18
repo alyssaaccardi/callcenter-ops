@@ -61,7 +61,13 @@ export default function StatusBoard() {
     try {
       const res = await api.post('/api/status', patch);
       if (res.data?.success) {
-        setStatus(prev => ({ ...prev, ...patch }));
+        setStatus(prev => {
+          const next = { ...prev };
+          for (const [k, v] of Object.entries(patch)) {
+            next[k] = (v && typeof v === 'object' && !Array.isArray(v)) ? { ...prev[k], ...v } : v;
+          }
+          return next;
+        });
         toast('Status updated', 'success');
         const keys = Object.keys(patch);
         addLog(`Status updated: ${keys.join(', ')}`, 'ok');
