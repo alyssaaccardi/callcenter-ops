@@ -983,7 +983,7 @@ app.get('/api/monday/support-tasks', async (req, res) => {
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
     const todayEST = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-    const DONE_PHRASES = ['done', 'complete', 'closed', "won't fix", 'cancelled', 'resolved'];
+    const DONE_PHRASES = ['done', 'complete', 'closed', "won't fix", 'cancelled', 'resolved', 'send zendesk'];
 
     const allMapped = allItems.map(item => {
       const statusCol   = item.column_values?.find(c => c.id === 'color_mkxwxqsx');
@@ -1047,9 +1047,9 @@ app.get('/api/monday/support-tasks', async (req, res) => {
     });
 
     const upcoming = mapped.filter(task => {
-      const statusLow = (task.status || '').toLowerCase();
-      if (statusLow === 'due') return true;
-      if (!task.dueDate) return false;
+      if (!task.dueDate) {
+        return (task.status || '').toLowerCase() === 'due';
+      }
       const due = new Date(task.dueDate); due.setHours(0, 0, 0, 0);
       return !isNaN(due) && due >= today && due < tomorrow;
     });
