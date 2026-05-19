@@ -341,7 +341,7 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
         <div>
           <div className="sc-panel-title">Agent Leaderboard</div>
           <div className="sc-lb-source">
-            Zendesk · replied &amp; solved in period · open = all-time assigned · click chips → Zendesk
+            Tickets · replied &amp; solved in period · open = all-time assigned · click chips → Zendesk
           </div>
         </div>
         <div className="sc-lb-header-right">
@@ -367,7 +367,7 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
         {lbLoading && (
           <div className="sc-lb-loading">
             <div className="sc-spinner" />
-            <div className="sc-lb-loading-text">Pulling agent stats from Zendesk…</div>
+            <div className="sc-lb-loading-text">Pulling agent stats from tickets…</div>
           </div>
         )}
         {!lbLoading && unconfigured && <Empty icon="🔗" text="Add Zendesk credentials in .env" />}
@@ -548,7 +548,7 @@ export default function SupportCenter() {
       <div className="page-header">
         <div>
           <div className="page-title">Support Command Center</div>
-          <div className="page-sub">{activeTab === 'monday' ? 'Monday.com tasks' : `Zendesk · ${periodLabel}`} · {POLL_MS / 1000}s refresh</div>
+          <div className="page-sub">{activeTab === 'monday' ? 'Tasks' : `Tickets · ${periodLabel}`} · {POLL_MS / 1000}s refresh</div>
         </div>
         <div className="flex" style={{ gap: 10 }}>
           {lastSync && (
@@ -569,10 +569,10 @@ export default function SupportCenter() {
       {/* ── Source tabs ── */}
       <div className="settings-subnav" style={{ marginBottom: 16 }}>
         <div className={`settings-tab${activeTab === 'monday' ? ' active' : ''}`} onClick={() => setActiveTab('monday')}>
-          Monday.com
+          Tasks
         </div>
         <div className={`settings-tab${activeTab === 'zendesk' ? ' active' : ''}`} onClick={() => setActiveTab('zendesk')}>
-          Zendesk
+          Tickets
         </div>
       </div>
 

@@ -233,7 +233,7 @@ export default function SupportTVPage() {
 
         {/* ── Stat Strip ── */}
         <div className="stv-stat-strip">
-          <div className="stv-stat-source-label">Monday.com</div>
+          <div className="stv-stat-source-label">Tasks</div>
           <StatCard
             label="Overdue Tasks" colorClass={overdueClass}
             value={overdueCount}
@@ -250,7 +250,7 @@ export default function SupportTVPage() {
             sub={completedToday.length === 0 ? 'None yet' : `${completedToday.length} resolved`}
           />
           <div className="stv-stat-divider" />
-          <div className="stv-stat-source-label">Zendesk</div>
+          <div className="stv-stat-source-label">Tickets</div>
           <StatCard
             label="Stale Tickets" colorClass={staleClass}
             value={staleCount !== null ? staleCount : '—'}
@@ -316,7 +316,7 @@ export default function SupportTVPage() {
             <div className="stv-panel-header">
               <div>
                 <div className="stv-panel-title">Tasks</div>
-                <div style={{ fontSize: 10, opacity: 0.5, marginTop: 2, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Monday.com</div>
+                <div style={{ fontSize: 10, opacity: 0.5, marginTop: 2, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Tasks</div>
               </div>
               <div className={`stv-panel-badge ${overdueCount === 0 ? 'clear' : 'red'}`}>
                 {overdueCount === 0 ? 'All Clear' : `${overdueCount} Overdue`}
@@ -430,7 +430,7 @@ export default function SupportTVPage() {
             <div className="stv-panel-header">
               <div>
                 <div className="stv-panel-title">Leaderboard · Replied &amp; Touched</div>
-                <div style={{ fontSize: 10, opacity: 0.5, marginTop: 2, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Zendesk · Today</div>
+                <div style={{ fontSize: 10, opacity: 0.5, marginTop: 2, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Tickets · Today</div>
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {(leaderboard.csatGood + leaderboard.csatBad) > 0 && (
