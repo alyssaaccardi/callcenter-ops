@@ -5,6 +5,12 @@ import api from '../api';
 
 const CC_TABS = ['savvy', 'mitel', 'systems'];
 
+function fmtSecs(s) {
+  if (s == null || s <= 0) return '0s';
+  const m = Math.floor(s / 60), sec = Math.round(s % 60);
+  return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}
+
 function fmt(ts) {
   if (!ts) return 'Never changed';
   return new Date(ts).toLocaleString('en-US', {
@@ -27,9 +33,17 @@ export default function StatusBoard() {
   const [activeTab, setActiveTab] = useState('savvy');
   const [saving, setSaving] = useState(null);
   const [cannedResponses, setCannedResponses] = useState([]);
+  const [mitelQueues, setMitelQueues] = useState(null);
 
   useEffect(() => {
     api.get('/api/canned-responses').then(r => setCannedResponses(r.data || [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const fetch = () => api.get('/api/mitel/queue-stats').then(r => setMitelQueues(r.data)).catch(() => {});
+    fetch();
+    const id = setInterval(fetch, 10000);
+    return () => clearInterval(id);
   }, []);
 
   // Local form state mirrors status
@@ -288,6 +302,34 @@ export default function StatusBoard() {
                 </div>
               </div>
             </div>
+
+            {/* Queue hold times */}
+            {mitelQueues && !mitelQueues.unconfigured && mitelQueues.queues?.length > 0 && (
+              <div className="sb-queue-hold">
+                <div className="sb-queue-hold-title">
+                  Hold Times · Live
+                  {mitelQueues.updatedAt && Date.now() - new Date(mitelQueues.updatedAt).getTime() > 60000 && (
+                    <span className="sb-queue-stale">stale</span>
+                  )}
+                </div>
+                <div className="sb-queue-hold-rows">
+                  {mitelQueues.queues.map(q => {
+                    const hold = q.longestWait ?? q.recentMaxWait ?? null;
+                    const waiting = q.waiting ?? null;
+                    return (
+                      <div key={q.id} className={`sb-queue-hold-row${hold > 120 ? ' sb-queue-warn' : ''}`}>
+                        <span className="sb-queue-hold-name">{q.name}</span>
+                        <span className="sb-queue-hold-time">{hold != null ? fmtSecs(hold) : '—'}</span>
+                        {waiting != null && (
+                          <span className="sb-queue-hold-waiting">{waiting} holding</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="sb-msg-section">
               <label className="field-label">Status Message</label>
               <div className="msg-row">
