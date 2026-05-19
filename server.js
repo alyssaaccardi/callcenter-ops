@@ -1943,6 +1943,100 @@ app.get('/api/mitel/queue-stats/stream', (req, res) => {
   req.on('close', () => { clearInterval(heartbeat); mitelSseClients.delete(res); });
 });
 
+// ─── Mitel CloudLink REST API ─────────────────────────────────────────────────
+// Token cache — shared across requests, auto-refreshed
+let mitelClToken = null;     // { access_token, refresh_token, expiresAt }
+let mitelClFetching = false; // mutex to prevent concurrent auth calls
+
+async function getMitelClToken() {
+  const username   = process.env.MITEL_CL_USERNAME;
+  const password   = process.env.MITEL_CL_PASSWORD;
+  const account_id = process.env.MITEL_CL_ACCOUNT_ID;
+  if (!username || !password || !account_id) return null;
+
+  // Still valid (60s buffer)
+  if (mitelClToken && mitelClToken.expiresAt > Date.now() + 60_000) return mitelClToken.access_token;
+
+  // Mutex — only one concurrent auth request
+  if (mitelClFetching) {
+    await new Promise(r => setTimeout(r, 800));
+    return mitelClToken?.access_token || null;
+  }
+  mitelClFetching = true;
+
+  try {
+    // Try refresh first if we have a refresh token
+    if (mitelClToken?.refresh_token) {
+      try {
+        const r = await axios.post('https://api.mitel.io/2017-09-01/token', {
+          grant_type: 'refresh_token',
+          refresh_token: mitelClToken.refresh_token,
+        });
+        mitelClToken = {
+          access_token:  r.data.access_token,
+          refresh_token: r.data.refresh_token || mitelClToken.refresh_token,
+          expiresAt:     Date.now() + (r.data.expires_in || 3600) * 1000,
+        };
+        return mitelClToken.access_token;
+      } catch { /* fall through to password grant */ }
+    }
+
+    const r = await axios.post('https://api.mitel.io/2017-09-01/token', {
+      grant_type: 'password',
+      username,
+      password,
+      account_id,
+    });
+    mitelClToken = {
+      access_token:  r.data.access_token,
+      refresh_token: r.data.refresh_token || null,
+      expiresAt:     Date.now() + (r.data.expires_in || 3600) * 1000,
+    };
+    return mitelClToken.access_token;
+  } catch (err) {
+    console.error('Mitel CloudLink auth error:', err.response?.data || err.message);
+    return null;
+  } finally {
+    mitelClFetching = false;
+  }
+}
+
+// GET /api/mitel/cloudlink/calls — returns raw call data from all configured endpoints
+app.get('/api/mitel/cloudlink/calls', async (req, res) => {
+  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Unauthorized' });
+
+  const appId     = process.env.MITEL_CL_APP_ID;
+  const endpoints = (process.env.MITEL_CL_ENDPOINTS || '').split(',').map(s => s.trim()).filter(Boolean);
+
+  if (!process.env.MITEL_CL_USERNAME || !appId) return res.json({ unconfigured: true });
+  if (endpoints.length === 0) return res.json({ unconfigured: true, reason: 'no endpoints configured' });
+
+  const token = await getMitelClToken();
+  if (!token) return res.status(502).json({ error: 'Mitel CloudLink auth failed' });
+
+  const headers = { Authorization: `Bearer ${token}`, 'X-Mitel-App': appId };
+
+  try {
+    const results = await Promise.all(
+      endpoints.map(async endpointId => {
+        try {
+          const r = await axios.get(
+            `https://media.api.mitel.io/2017-09-01/endpoints/${endpointId}/calls`,
+            { headers }
+          );
+          return { endpointId, calls: r.data };
+        } catch (err) {
+          return { endpointId, error: err.response?.data || err.message };
+        }
+      })
+    );
+    res.json({ results, fetchedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error('Mitel CloudLink calls error:', err.message);
+    res.status(502).json({ error: 'Failed to fetch CloudLink calls', details: err.message });
+  }
+});
+
 // ─── React SPA Catch-All ─────────────────────────────────────────────────────
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'app', 'index.html'));
