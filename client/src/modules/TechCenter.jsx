@@ -52,18 +52,27 @@ function Empty({ icon, text }) {
   );
 }
 
-function StalePanel({ tickets, unconfigured, hours }) {
+function StalePanel({ tickets, unconfigured, hours, onHoursChange }) {
   const count = tickets?.length ?? 0;
   return (
     <div className="sc-panel">
       <div className="sc-panel-header">
-        <div className="sc-panel-title">Stale · {hours}h+ no reply</div>
+        <div className="sc-panel-title">Stale Tickets</div>
         <div className={`sc-panel-badge ${unconfigured ? 'muted' : count > 0 ? 'red' : 'green'}`}>
           {unconfigured ? 'N/A' : count > 0 ? `${count} stale` : 'All fresh'}
         </div>
       </div>
-      <div className="sc-panel-criteria">
-        NEW &amp; OPEN — no agent reply for {hours}+ business hrs (Mon–Fri 9–5)
+      <div className="sc-panel-criteria" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span>No reply &gt;</span>
+        {STALE_OPTIONS.map(h => (
+          <button
+            key={h}
+            className={`sc-filter-btn${hours === h ? ' active' : ''}`}
+            style={{ padding: '1px 7px', fontSize: 11 }}
+            onClick={() => onHoursChange(h)}
+          >{h}h</button>
+        ))}
+        <span style={{ marginLeft: 2, opacity: 0.6 }}>· NEW &amp; OPEN · Mon–Fri 9–5</span>
       </div>
       <div className="sc-panel-body">
         {unconfigured && <Empty icon="🔗" text="Add Zendesk credentials in .env" />}
@@ -472,18 +481,7 @@ export default function TechCenter() {
           ))}
         </div>
         <div className="sc-filter-divider" />
-        <div className="sc-filter-group">
-          <span className="sc-filter-label">Stale &gt;</span>
-          {STALE_OPTIONS.map(h => (
-            <button
-              key={h}
-              className={`sc-filter-btn${staleHours === h ? ' active' : ''}`}
-              onClick={() => setStaleHours(h)}
-            >{h}h</button>
-          ))}
-        </div>
-        <div className="sc-filter-divider" />
-        <span className="sc-filter-note">Affects CSAT · leaderboard · stale</span>
+        <span className="sc-filter-note">Affects CSAT &amp; leaderboard</span>
         {refreshing && <span className="sc-filter-note sc-filter-updating">↻</span>}
       </div>
 
@@ -579,7 +577,7 @@ export default function TechCenter() {
 
           {/* ── Panels ── */}
           <div className="sc-panel-grid mb-16">
-            <StalePanel tickets={stale.tickets} unconfigured={stale.unconfigured} hours={staleHours} />
+            <StalePanel tickets={stale.tickets} unconfigured={stale.unconfigured} hours={staleHours} onHoursChange={h => { setStaleHours(h); fetchAll(period, h); }} />
             <CsatPanel  ratings={csat.ratings}  unconfigured={csat.unconfigured} />
             <LeaderboardPanel
               sections={leaderboard.sections}
