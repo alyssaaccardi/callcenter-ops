@@ -272,7 +272,7 @@ export default function TeamLeaderboard({ team = 'support' }) {
           )}
         </div>
 
-        <div className="tl-col-touched" title={`${agent.touched ?? '—'} tickets assigned to ${agent.name} that were active in ${periodLabel}`}>
+        <div className="tl-col-touched" title={`${agent.touched ?? '—'} tickets resolved/solved by ${agent.name} in ${periodLabel} · from Zendesk`}>
           <span className="tl-touched-num">{agent.touched ?? '—'}</span>
         </div>
 
@@ -498,8 +498,8 @@ export default function TeamLeaderboard({ team = 'support' }) {
             <span className="tl-col-solved" title={`Tickets with a public reply in the selected period (${periodLabel}) · source: Tickets`}>
               Replied ↗
             </span>
-            <span className="tl-col-touched" title={`Tickets assigned to this agent that were active in ${periodLabel}`}>
-              Touched
+            <span className="tl-col-touched" title={`Tickets resolved/closed by this agent in ${periodLabel} · source: Tickets`}>
+              Solved
             </span>
             <span className="tl-col-bar" style={{ fontSize: 9, color: 'rgba(60,50,120,0.3)', paddingLeft: 2 }}>
               relative volume
@@ -554,11 +554,13 @@ export default function TeamLeaderboard({ team = 'support' }) {
 
           {/* Board footer */}
           <div className="tl-board-footer">
-            <span>Replied = public replies in <strong>{periodLabel}</strong></span>
+            <span>Replied = public ticket replies in <strong>{periodLabel}</strong> · Tickets incremental events API</span>
             <span>·</span>
-            <span>Open = current live queue (all time)</span>
+            <span>Solved = tickets closed in <strong>{periodLabel}</strong> · Tickets search</span>
             <span>·</span>
-            <span>Quality = avg build score/5 from Tasks · {periodLabel}</span>
+            <span>Open = live queue (all-time assigned, not period-filtered) · Tickets search</span>
+            <span>·</span>
+            <span>Quality = avg build score /5 from Tasks board · {periodLabel}</span>
             <span>·</span>
             <span>Rate = replied ÷ (replied + open)</span>
             {zdUrl && (

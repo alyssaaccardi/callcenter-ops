@@ -110,12 +110,24 @@ export default function SlackWorkflows() {
     }
   }, []);
 
+  // Hydrate audit log from persisted server history on mount
+  useEffect(() => {
+    api.get('/api/activity-log')
+      .then(res => {
+        const history = (res.data || [])
+          .filter(e => typeof e.msg === 'string' && e.msg.toLowerCase().includes('workflow'))
+          .map(e => ({ time: e.time, msg: e.msg, type: e.type === 'info' ? 'ok' : (e.type || 'ok'), user: e.user || null }));
+        setAuditLog(history);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => { fetchWorkflows(); }, [fetchWorkflows]);
 
   function logLocal(msg, type = 'ok') {
     const entry = {
       time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' }),
-      msg, type,
+      msg, type, user: user?.name || null,
     };
     setAuditLog(prev => [entry, ...prev].slice(0, 100));
     addLog(msg, type === 'err' ? 'err' : type === 'warn' ? 'warn' : 'ok');
@@ -247,10 +259,11 @@ export default function SlackWorkflows() {
       <div className="card">
         <div className="card-title">Audit Log</div>
         <div className="log-feed">
-          {auditLog.length === 0 && <div className="log-empty">No activity yet this session.</div>}
+          {auditLog.length === 0 && <div className="log-empty">No workflow history recorded.</div>}
           {auditLog.map((e, i) => (
             <div key={i} className="log-entry">
               <span className="log-time">{e.time}</span>
+              {e.user && <span className="log-user">{e.user}</span>}
               <span className={`log-msg ${e.type}`}>{e.msg}</span>
             </div>
           ))}

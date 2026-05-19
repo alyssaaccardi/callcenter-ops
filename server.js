@@ -1571,7 +1571,8 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
         const replies = periodStart
           ? (publicReplyMap.get(String(u.id))?.size ?? 0)
           : (await axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket commenter:${u.id}` } })).data?.count || 0;
-        return { id: u.id, name: u.name, email: u.email || null, photoUrl: u.photo?.thumb_url || null, open: openRes.data?.count || 0, replies, solved: solvedRes.data?.count || 0, touched: 0, _u: u };
+        const solved = solvedRes.data?.count || 0;
+        return { id: u.id, name: u.name, email: u.email || null, photoUrl: u.photo?.thumb_url || null, open: openRes.data?.count || 0, replies, solved, touched: solved, _u: u };
       } catch (e) {
         console.error(`Leaderboard agent stats error [${u.name}]:`, e.response?.data || e.message);
         return { id: u.id, name: u.name, email: u.email || null, photoUrl: u.photo?.thumb_url || null, open: 0, replies: 0, solved: 0, touched: 0, _u: u };
