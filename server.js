@@ -1028,20 +1028,27 @@ app.get('/api/monday/support-tasks', async (req, res) => {
     });
 
     const DONE_GROUP_PHRASES = ['closed', 'complet'];
+    const EXCLUDED_GROUPS    = ['escalation station'];
     function isDone(task) {
       const statusLow = (task.status || '').toLowerCase();
       const groupLow  = (task.groupTitle || '').toLowerCase();
       return DONE_PHRASES.some(p => statusLow.includes(p)) || DONE_GROUP_PHRASES.some(p => groupLow.includes(p));
     }
+    function isExcluded(task) {
+      const groupLow = (task.groupTitle || '').toLowerCase();
+      return EXCLUDED_GROUPS.some(g => groupLow.includes(g));
+    }
 
-    const completedToday = allMapped.filter(task => {
+    const countable = allMapped.filter(task => !isExcluded(task));
+
+    const completedToday = countable.filter(task => {
       if (!isDone(task)) return false;
       if (!task.lastUpdate) return false;
       const updateDate = new Date(task.lastUpdate).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
       return updateDate === todayEST;
     });
 
-    const mapped = allMapped.filter(task => !isDone(task));
+    const mapped = countable.filter(task => !isDone(task));
 
     const overdue  = mapped.filter(task => {
       const statusLow = (task.status || '').toLowerCase();
@@ -1081,7 +1088,7 @@ app.get('/api/monday/support-stats', async (req, res) => {
   if (!apiKey) return res.status(500).json({ error: 'Monday.com credentials not configured' });
 
   const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
-  const itemFields = `id name updated_at column_values(ids: ["color_mkxwxqsx", "status", "date_mkx5zfsz", "dropdown_mkxjmeyh", "multiple_person_mkx5smfv", "dropdown_mkzc9hm"]) { id text }`;
+  const itemFields = `id name updated_at group { id title } column_values(ids: ["color_mkxwxqsx", "status", "date_mkx5zfsz", "dropdown_mkxjmeyh", "multiple_person_mkx5smfv", "dropdown_mkzc9hm"]) { id text }`;
 
   try {
     const allItems = [];
@@ -1106,6 +1113,18 @@ app.get('/api/monday/support-stats', async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    const STATS_DONE_PHRASES    = ['done', 'complete', 'closed', "won't fix", 'cancelled', 'resolved', 'send zendesk'];
+    const STATS_DONE_GROUPS     = ['closed', 'complet'];
+    const STATS_EXCLUDED_GROUPS = ['escalation station'];
+
+    const activeItems = allItems.filter(item => {
+      const groupLow  = (item.group?.title || '').toLowerCase();
+      if (STATS_EXCLUDED_GROUPS.some(g => groupLow.includes(g))) return false;
+      if (STATS_DONE_GROUPS.some(g => groupLow.includes(g))) return false;
+      const statusLow = (item.column_values?.find(c => c.id === 'color_mkxwxqsx')?.text || '').toLowerCase();
+      return !STATS_DONE_PHRASES.some(p => statusLow.includes(p));
+    });
+
     const byStatus = {};
     const byPriority = {};
     const bySquad = {};
@@ -1115,7 +1134,7 @@ app.get('/api/monday/support-stats', async (req, res) => {
     const endOfWeek = new Date(today);
     endOfWeek.setDate(today.getDate() + (7 - today.getDay()));
 
-    for (const item of allItems) {
+    for (const item of activeItems) {
       const statusText   = item.column_values?.find(c => c.id === 'color_mkxwxqsx')?.text || 'Not Set';
       const priorityText = item.column_values?.find(c => c.id === 'status')?.text || 'None';
       const dueDateText  = item.column_values?.find(c => c.id === 'date_mkx5zfsz')?.text || '';
@@ -1144,7 +1163,7 @@ app.get('/api/monday/support-stats', async (req, res) => {
     }
 
     res.json({
-      total: allItems.length,
+      total: activeItems.length,
       overdue,
       dueToday,
       dueThisWeek,
