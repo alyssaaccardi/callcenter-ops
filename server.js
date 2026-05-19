@@ -1028,7 +1028,7 @@ app.get('/api/monday/support-tasks', async (req, res) => {
     });
 
     const DONE_GROUP_PHRASES = ['closed', 'complet'];
-    const EXCLUDED_GROUPS    = ['escalation station'];
+    const EXCLUDED_GROUPS    = ['escalation'];
     function isDone(task) {
       const statusLow = (task.status || '').toLowerCase();
       const groupLow  = (task.groupTitle || '').toLowerCase();
@@ -1115,7 +1115,7 @@ app.get('/api/monday/support-stats', async (req, res) => {
 
     const STATS_DONE_PHRASES    = ['done', 'complete', 'closed', "won't fix", 'cancelled', 'resolved', 'send zendesk'];
     const STATS_DONE_GROUPS     = ['closed', 'complet'];
-    const STATS_EXCLUDED_GROUPS = ['escalation station'];
+    const STATS_EXCLUDED_GROUPS = ['escalation'];
 
     const activeItems = allItems.filter(item => {
       const groupLow  = (item.group?.title || '').toLowerCase();

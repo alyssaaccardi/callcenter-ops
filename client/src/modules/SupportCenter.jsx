@@ -625,7 +625,7 @@ export default function SupportCenter() {
                 className="accent-green"
                 href="#completed-section"
                 sub={todayLabel}
-                title={`${completedToday.length} task${completedToday.length !== 1 ? 's' : ''} solved or responded to today by support groups (excludes Escalation Station) — click to jump to list`}
+                title={`${completedToday.length} task${completedToday.length !== 1 ? 's' : ''} solved or responded to today by support groups (excludes Escalation) — click to jump to list`}
               />
             </div>
           </div>
@@ -717,7 +717,7 @@ export default function SupportCenter() {
               <div>
                 <div className="sc-section-title">Solved or Responded Today</div>
                 <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
-                  Support groups · excl. Escalation Station · {todayLabel}
+                  Support groups · excl. Escalation · {todayLabel}
                 </div>
               </div>
               <div className={`sc-badge${completedToday.length === 0 ? ' clear' : ' done'}`}>

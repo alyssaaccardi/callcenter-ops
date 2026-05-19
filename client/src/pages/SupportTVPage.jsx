@@ -384,7 +384,7 @@ export default function SupportTVPage() {
               {/* Completed Today sub-section */}
               {completedToday.length > 0 && (
                 <>
-                  <div className="stv-sub-section-label done">Solved or Responded · {completedToday.length} · {todayLabel} · Support Groups</div>
+                  <div className="stv-sub-section-label done">Solved or Responded · {completedToday.length} · {todayLabel} · excl. Escalation</div>
                   {completedToday.map(task => {
                     const solver = task.solvedBy || task.assignee;
                     return (
