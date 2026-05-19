@@ -456,6 +456,7 @@ function SystemStatusStrip({ status, hubspotDids }) {
 export default function SupportCenter() {
   const { status, hubspotDids } = useApp();
   const { user } = useAuth();
+  const [activeTab,   setActiveTab]   = useState('monday');
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
   const [lbLoading,   setLbLoading]   = useState(true);
@@ -533,6 +534,7 @@ export default function SupportCenter() {
   const dueCount      = upcoming.length;
   const staleCount    = stale.unconfigured ? null : (stale.tickets?.length ?? 0);
   const todayLabel    = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' });
+  const periodLabel   = PERIOD_OPTIONS.find(o => o.key === period)?.label ?? period;
 
   const mondayUrl  = `https://answeringlegal-unit.monday.com/boards/${BOARD_ID}`;
   const zdSub      = queue.zdSubdomain;
@@ -546,7 +548,7 @@ export default function SupportCenter() {
       <div className="page-header">
         <div>
           <div className="page-title">Support Command Center</div>
-          <div className="page-sub">Monday.com · Zendesk · {POLL_MS / 1000}s refresh</div>
+          <div className="page-sub">{activeTab === 'monday' ? 'Monday.com tasks' : `Zendesk · ${periodLabel}`} · {POLL_MS / 1000}s refresh</div>
         </div>
         <div className="flex" style={{ gap: 10 }}>
           {lastSync && (
@@ -564,21 +566,14 @@ export default function SupportCenter() {
         </div>
       </div>
 
-      {/* Global filter bar */}
-      <div className="sc-filter-bar mb-16">
-        <div className="sc-filter-group">
-          <span className="sc-filter-label">Period</span>
-          {PERIOD_OPTIONS.map(o => (
-            <button
-              key={o.key}
-              className={`sc-filter-btn${period === o.key ? ' active' : ''}`}
-              onClick={() => setPeriod(o.key)}
-            >{o.label}</button>
-          ))}
+      {/* ── Source tabs ── */}
+      <div className="settings-subnav" style={{ marginBottom: 16 }}>
+        <div className={`settings-tab${activeTab === 'monday' ? ' active' : ''}`} onClick={() => setActiveTab('monday')}>
+          Monday.com
         </div>
-        <div className="sc-filter-divider" />
-        <span className="sc-filter-note">Affects CSAT &amp; leaderboard</span>
-        {refreshing && <span className="sc-filter-note sc-filter-updating">↻</span>}
+        <div className={`settings-tab${activeTab === 'zendesk' ? ' active' : ''}`} onClick={() => setActiveTab('zendesk')}>
+          Zendesk
+        </div>
       </div>
 
       {loading ? (
@@ -588,138 +583,158 @@ export default function SupportCenter() {
         </div>
       ) : (
         <>
-          {/* ── System Status ── */}
           <SystemStatusStrip status={status} hubspotDids={hubspotDids} />
 
-          {/* ── Stat strips ── */}
-          <div className="sc-stat-row mb-8">
-            <div className="sc-stat-group-label">Monday.com</div>
-            <div className="sc-stat-strip">
-              <StatCard
-                label="Overdue" value={overdueCount}
-                className={overdueCount > 0 ? 'accent-red' : ''}
-                href="#overdue-section"
-                sub={workingCount > 0 ? `${workingCount} being worked on` : undefined}
-                title={`${overdueCount} task${overdueCount !== 1 ? 's' : ''} past their due date (${workingCount} being worked on) — click to jump to list`}
-              />
-              <StatCard
-                label="Due Today" value={dueCount}
-                className={dueCount > 0 ? 'accent-amber' : ''}
-                href="#today-section"
-                sub={dueCount === 0 ? 'All clear' : undefined}
-                title={`${dueCount} task${dueCount !== 1 ? 's' : ''} due today — click to jump to list`}
-              />
-              <StatCard
-                label="Solved Today" value={completedToday.length}
-                className="accent-green"
-                href="#completed-section"
-                sub={todayLabel}
-                title={`${completedToday.length} task${completedToday.length !== 1 ? 's' : ''} solved or responded to today by support groups (excludes Escalation) — click to jump to list`}
-              />
-            </div>
-          </div>
-
-          <div className="sc-stat-row mb-16">
-            <div className="sc-stat-group-label">Zendesk Queue <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, opacity: 0.6 }}>(live)</span></div>
-            <div className="sc-stat-strip">
-              <StatCard
-                label="New" value={queue.unconfigured ? '—' : queue.new}
-                className={!queue.unconfigured && queue.new > 0 ? 'accent-purple' : ''}
-                href={zdGroupUrl ? zdGroupUrl('type:ticket status:new') : null}
-                title={`${queue.new} new ticket${queue.new !== 1 ? 's' : ''} awaiting first response — click to view in Zendesk`}
-              />
-              <StatCard
-                label="Open" value={queue.unconfigured ? '—' : queue.open}
-                className={!queue.unconfigured && queue.open > 0 ? 'accent-amber' : ''}
-                href={zdGroupUrl ? zdGroupUrl('type:ticket status:open') : null}
-                title={`${queue.open} open ticket${queue.open !== 1 ? 's' : ''} actively being worked — click to view in Zendesk`}
-              />
-              <StatCard
-                label="Pending" value={queue.unconfigured ? '—' : queue.pending}
-                href={zdGroupUrl ? zdGroupUrl('type:ticket status:pending') : null}
-                title={`${queue.pending} ticket${queue.pending !== 1 ? 's' : ''} awaiting customer response`}
-              />
-              <StatCard
-                label="On Hold" value={queue.unconfigured ? '—' : queue.onHold}
-                href={zdGroupUrl ? zdGroupUrl('type:ticket status:hold') : null}
-                title={`${queue.onHold} ticket${queue.onHold !== 1 ? 's' : ''} on hold`}
-              />
-              <StatCard
-                label={`Stale (${staleHours}h+)`} value={staleCount ?? '—'}
-                className={staleCount !== null && staleCount > 0 ? 'accent-red' : ''}
-                title={`${staleCount ?? '?'} open tickets with no agent reply for ${staleHours}+ business hours`}
-              />
-            </div>
-          </div>
-
-          {/* ── Panels ── */}
-          <div className="sc-panel-grid mb-16">
-            <StalePanel       tickets={stale.tickets}       unconfigured={stale.unconfigured}    hours={staleHours} onHoursChange={h => { setStaleHours(h); fetchAll(period, h); }} />
-            <CsatPanel        ratings={csat.ratings}        unconfigured={csat.unconfigured} />
-            <LeaderboardPanel
-              support={leaderboard.support}
-              escalation={leaderboard.escalation}
-              unconfigured={leaderboard.unconfigured}
-              csatGood={leaderboard.csatGood}
-              csatBad={leaderboard.csatBad}
-              zdUrl={zdUrl}
-              periodLabel={PERIOD_OPTIONS.find(o => o.key === period)?.label ?? period}
-              lbLoading={lbLoading}
-            />
-          </div>
-
-          {/* ── Due Today ── */}
-          <div className="sc-tasks-section" id="today-section">
-            <div className="sc-section-bar">
-              <div className="sc-section-title">Due Today</div>
-              <div className={`sc-badge${upcoming.length === 0 ? ' clear' : ' today'}`}>
-                {upcoming.length === 0 ? 'Nothing due' : `${upcoming.length} task${upcoming.length !== 1 ? 's' : ''}`}
-              </div>
-            </div>
-            {upcoming.length === 0 && <Empty icon="📅" text="No tasks due today" />}
-            {upcoming.length > 0 && (
-              <div className="sc-task-list">
-                {upcoming.map(task => <TaskCard key={task.id} task={task} isToday />)}
-              </div>
-            )}
-          </div>
-
-          {/* ── Overdue Tasks ── */}
-          <div className="sc-tasks-section" id="overdue-section">
-            <div className="sc-section-bar">
-              <div className="sc-section-title">Overdue</div>
-              <div className={`sc-badge${overdueCount === 0 ? ' clear' : ''}`}>
-                {overdueCount === 0 ? 'All clear' : `${overdueCount} overdue`}
-              </div>
-            </div>
-            {overdueCount === 0 && <Empty icon="✅" text="No overdue tasks — great work!" />}
-            {overdueCount > 0 && (
-              <div className="sc-task-list">
-                {tasks.map(task => <TaskCard key={task.id} task={task} />)}
-              </div>
-            )}
-          </div>
-
-          {/* ── Completed Today ── */}
-          <div className="sc-tasks-section" id="completed-section">
-            <div className="sc-section-bar">
-              <div>
-                <div className="sc-section-title">Solved or Responded Today</div>
-                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
-                  Support groups · excl. Escalation · {todayLabel}
+          {/* ══ MONDAY.COM TAB ══ */}
+          {activeTab === 'monday' && (
+            <>
+              <div className="sc-stat-row mb-16">
+                <div className="sc-stat-group-label">Tasks</div>
+                <div className="sc-stat-strip">
+                  <StatCard
+                    label="Overdue" value={overdueCount}
+                    className={overdueCount > 0 ? 'accent-red' : ''}
+                    href="#overdue-section"
+                    sub={workingCount > 0 ? `${workingCount} being worked on` : undefined}
+                    title={`${overdueCount} task${overdueCount !== 1 ? 's' : ''} past their due date — click to jump`}
+                  />
+                  <StatCard
+                    label="Due Today" value={dueCount}
+                    className={dueCount > 0 ? 'accent-amber' : ''}
+                    href="#today-section"
+                    sub={dueCount === 0 ? 'All clear' : undefined}
+                    title={`${dueCount} task${dueCount !== 1 ? 's' : ''} due today — click to jump`}
+                  />
+                  <StatCard
+                    label="Solved Today" value={completedToday.length}
+                    className={completedToday.length > 0 ? 'accent-green' : ''}
+                    href="#completed-section"
+                    sub={todayLabel}
+                    title={`${completedToday.length} task${completedToday.length !== 1 ? 's' : ''} solved or responded to today — click to jump`}
+                  />
                 </div>
               </div>
-              <div className={`sc-badge${completedToday.length === 0 ? ' clear' : ' done'}`}>
-                {completedToday.length === 0 ? 'None yet' : `${completedToday.length} done`}
+
+              <div className="sc-tasks-section" id="today-section">
+                <div className="sc-section-bar">
+                  <div className="sc-section-title">Due Today</div>
+                  <div className={`sc-badge${upcoming.length === 0 ? ' clear' : ' today'}`}>
+                    {upcoming.length === 0 ? 'Nothing due' : `${upcoming.length} task${upcoming.length !== 1 ? 's' : ''}`}
+                  </div>
+                </div>
+                {upcoming.length === 0 && <Empty icon="📅" text="No tasks due today" />}
+                {upcoming.length > 0 && (
+                  <div className="sc-task-list">
+                    {upcoming.map(task => <TaskCard key={task.id} task={task} isToday />)}
+                  </div>
+                )}
               </div>
-            </div>
-            {completedToday.length === 0 && <Empty icon="🏁" text="Nothing solved or responded to yet today" />}
-            {completedToday.length > 0 && (
-              <div className="sc-task-list">
-                {completedToday.map(task => <CompletedCard key={task.id} task={task} />)}
+
+              <div className="sc-tasks-section" id="overdue-section">
+                <div className="sc-section-bar">
+                  <div className="sc-section-title">Overdue</div>
+                  <div className={`sc-badge${overdueCount === 0 ? ' clear' : ''}`}>
+                    {overdueCount === 0 ? 'All clear' : `${overdueCount} overdue`}
+                  </div>
+                </div>
+                {overdueCount === 0 && <Empty icon="✅" text="No overdue tasks — great work!" />}
+                {overdueCount > 0 && (
+                  <div className="sc-task-list">
+                    {tasks.map(task => <TaskCard key={task.id} task={task} />)}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+
+              <div className="sc-tasks-section" id="completed-section">
+                <div className="sc-section-bar">
+                  <div>
+                    <div className="sc-section-title">Solved or Responded Today</div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                      Support groups · excl. Escalation · {todayLabel}
+                    </div>
+                  </div>
+                  <div className={`sc-badge${completedToday.length === 0 ? ' clear' : ' done'}`}>
+                    {completedToday.length === 0 ? 'None yet' : `${completedToday.length} done`}
+                  </div>
+                </div>
+                {completedToday.length === 0 && <Empty icon="🏁" text="Nothing solved or responded to yet today" />}
+                {completedToday.length > 0 && (
+                  <div className="sc-task-list">
+                    {completedToday.map(task => <CompletedCard key={task.id} task={task} />)}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ══ ZENDESK TAB ══ */}
+          {activeTab === 'zendesk' && (
+            <>
+              <div className="sc-filter-bar mb-16">
+                <div className="sc-filter-group">
+                  <span className="sc-filter-label">Period</span>
+                  {PERIOD_OPTIONS.map(o => (
+                    <button
+                      key={o.key}
+                      className={`sc-filter-btn${period === o.key ? ' active' : ''}`}
+                      onClick={() => setPeriod(o.key)}
+                    >{o.label}</button>
+                  ))}
+                </div>
+                <div className="sc-filter-divider" />
+                <span className="sc-filter-note">Affects CSAT &amp; leaderboard</span>
+                {refreshing && <span className="sc-filter-note sc-filter-updating">↻</span>}
+              </div>
+
+              <div className="sc-stat-row mb-16">
+                <div className="sc-stat-group-label">Queue <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, opacity: 0.6 }}>(live)</span></div>
+                <div className="sc-stat-strip">
+                  <StatCard
+                    label="New" value={queue.unconfigured ? '—' : queue.new}
+                    className={!queue.unconfigured && queue.new > 0 ? 'accent-purple' : ''}
+                    href={zdGroupUrl ? zdGroupUrl('type:ticket status:new') : null}
+                    title={`${queue.new} new ticket${queue.new !== 1 ? 's' : ''} awaiting first response`}
+                  />
+                  <StatCard
+                    label="Open" value={queue.unconfigured ? '—' : queue.open}
+                    className={!queue.unconfigured && queue.open > 0 ? 'accent-amber' : ''}
+                    href={zdGroupUrl ? zdGroupUrl('type:ticket status:open') : null}
+                    title={`${queue.open} open ticket${queue.open !== 1 ? 's' : ''} actively being worked`}
+                  />
+                  <StatCard
+                    label="Pending" value={queue.unconfigured ? '—' : queue.pending}
+                    href={zdGroupUrl ? zdGroupUrl('type:ticket status:pending') : null}
+                    title={`${queue.pending} ticket${queue.pending !== 1 ? 's' : ''} awaiting customer response`}
+                  />
+                  <StatCard
+                    label="On Hold" value={queue.unconfigured ? '—' : queue.onHold}
+                    href={zdGroupUrl ? zdGroupUrl('type:ticket status:hold') : null}
+                    title={`${queue.onHold} ticket${queue.onHold !== 1 ? 's' : ''} on hold`}
+                  />
+                  <StatCard
+                    label={`Stale (${staleHours}h+)`} value={staleCount ?? '—'}
+                    className={staleCount !== null && staleCount > 0 ? 'accent-red' : ''}
+                    title={`${staleCount ?? '?'} open tickets with no agent reply for ${staleHours}+ business hours`}
+                  />
+                </div>
+              </div>
+
+              <div className="sc-panel-grid mb-16">
+                <StalePanel tickets={stale.tickets} unconfigured={stale.unconfigured} hours={staleHours} onHoursChange={h => { setStaleHours(h); fetchAll(period, h); }} />
+                <CsatPanel  ratings={csat.ratings}  unconfigured={csat.unconfigured} />
+                <LeaderboardPanel
+                  support={leaderboard.support}
+                  escalation={leaderboard.escalation}
+                  unconfigured={leaderboard.unconfigured}
+                  csatGood={leaderboard.csatGood}
+                  csatBad={leaderboard.csatBad}
+                  zdUrl={zdUrl}
+                  periodLabel={periodLabel}
+                  lbLoading={lbLoading}
+                />
+              </div>
+            </>
+          )}
         </>
       )}
     </div>
