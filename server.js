@@ -958,7 +958,7 @@ app.get('/api/monday/support-tasks', async (req, res) => {
   if (!apiKey) return res.status(500).json({ error: 'Monday.com credentials not configured' });
 
   const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
-  const itemFields = `id name updated_at column_values(ids: ["color_mkxwxqsx", "status", "date_mkx5zfsz", "dropdown_mkzc9hm", "text_mkx5ca0q", "text_mkx5cpnb", "dropdown_mkxjmeyh", "multiple_person_mkx5smfv", "multiple_person_mm38yn50", "multiple_person_mkzcjc37"]) { id text value }`;
+  const itemFields = `id name updated_at group { id title } column_values(ids: ["color_mkxwxqsx", "status", "date_mkx5zfsz", "dropdown_mkzc9hm", "text_mkx5ca0q", "text_mkx5cpnb", "dropdown_mkxjmeyh", "multiple_person_mkx5smfv", "multiple_person_mm38yn50", "multiple_person_mkzcjc37"]) { id text value }`;
 
   try {
     const allItems = [];
@@ -1012,6 +1012,7 @@ app.get('/api/monday/support-tasks', async (req, res) => {
         id:          item.id,
         name:        item.name,
         status:      statusCol?.text  || '',
+        groupTitle:  item.group?.title || '',
         priority:    priorityCol?.text || '',
         dueDate:     dateCol?.text    || '',
         dueTime,
@@ -1026,18 +1027,21 @@ app.get('/api/monday/support-tasks', async (req, res) => {
       };
     });
 
-    const completedToday = allMapped.filter(task => {
+    const DONE_GROUP_PHRASES = ['closed', 'complet'];
+    function isDone(task) {
       const statusLow = (task.status || '').toLowerCase();
-      if (!DONE_PHRASES.some(p => statusLow.includes(p))) return false;
+      const groupLow  = (task.groupTitle || '').toLowerCase();
+      return DONE_PHRASES.some(p => statusLow.includes(p)) || DONE_GROUP_PHRASES.some(p => groupLow.includes(p));
+    }
+
+    const completedToday = allMapped.filter(task => {
+      if (!isDone(task)) return false;
       if (!task.lastUpdate) return false;
       const updateDate = new Date(task.lastUpdate).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
       return updateDate === todayEST;
     });
 
-    const mapped = allMapped.filter(task => {
-      const statusLow = (task.status || '').toLowerCase();
-      return !DONE_PHRASES.some(p => statusLow.includes(p));
-    });
+    const mapped = allMapped.filter(task => !isDone(task));
 
     const overdue  = mapped.filter(task => {
       const statusLow = (task.status || '').toLowerCase();
