@@ -378,7 +378,6 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
         {!lbLoading && !unconfigured && escalation?.length > 0 && (
           <div className="sc-lb-section escalation">
             Escalation Station
-            <span className="sc-lb-section-hint">dual-role — also in trial team above</span>
           </div>
         )}
         {!lbLoading && !unconfigured && escalation?.map((a, i) => (
