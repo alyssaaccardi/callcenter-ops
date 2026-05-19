@@ -1571,10 +1571,10 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
         const replies = periodStart
           ? (publicReplyMap.get(String(u.id))?.size ?? 0)
           : (await axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket commenter:${u.id}` } })).data?.count || 0;
-        return { id: u.id, name: u.name, open: openRes.data?.count || 0, replies, solved: solvedRes.data?.count || 0, _u: u };
+        return { id: u.id, name: u.name, email: u.email || null, photoUrl: u.photo?.thumb_url || null, open: openRes.data?.count || 0, replies, solved: solvedRes.data?.count || 0, touched: 0, _u: u };
       } catch (e) {
         console.error(`Leaderboard agent stats error [${u.name}]:`, e.response?.data || e.message);
-        return { id: u.id, name: u.name, open: 0, replies: 0, solved: 0, _u: u };
+        return { id: u.id, name: u.name, email: u.email || null, photoUrl: u.photo?.thumb_url || null, open: 0, replies: 0, solved: 0, touched: 0, _u: u };
       }
     }));
 
@@ -1800,11 +1800,22 @@ app.get('/api/monday/account-review', async (req, res) => {
   }`;
 
   try {
-    const response = await axios.post('https://api.monday.com/v2', { query: gqlQuery }, { headers, timeout: 20000 });
+    const usersQuery = `query { users(kind: non_guests) { id name email photo_thumb } }`;
+
+    const [response, usersRes] = await Promise.all([
+      axios.post('https://api.monday.com/v2', { query: gqlQuery }, { headers, timeout: 20000 }),
+      axios.post('https://api.monday.com/v2', { query: usersQuery }, { headers, timeout: 10000 }).catch(() => null),
+    ]);
 
     if (response.data?.errors) throw new Error(response.data.errors[0]?.message);
 
     const allItems = response.data?.data?.boards?.[0]?.items_page?.items || [];
+    const mondayUsers = (usersRes?.data?.data?.users || []).map(u => ({
+      id:         u.id,
+      name:       u.name,
+      email:      u.email || null,
+      photoThumb: u.photo_thumb || null,
+    }));
 
     const col = (item, id) => item.column_values?.find(c => c.id === id)?.text || '';
 
@@ -1831,7 +1842,7 @@ app.get('/api/monday/account-review', async (req, res) => {
       };
     });
 
-    res.json({ items });
+    res.json({ items, mondayUsers });
   } catch (err) {
     console.error('Account review error:', err.response?.data || err.message);
     res.status(500).json({ error: 'Failed to fetch account review data', details: err.message });

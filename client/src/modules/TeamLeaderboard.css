@@ -65,7 +65,7 @@ a.tl-summary-card:hover {
 
 .tl-board-header {
   display: grid;
-  grid-template-columns: 44px 1fr 64px 56px 1fr 60px 80px;
+  grid-template-columns: 44px 1fr 64px 56px 1fr 60px 80px 80px;
   align-items: center;
   gap: 12px;
   padding: 10px 20px;
@@ -80,7 +80,7 @@ a.tl-summary-card:hover {
 
 .tl-row {
   display: grid;
-  grid-template-columns: 44px 1fr 64px 56px 1fr 60px 80px;
+  grid-template-columns: 44px 1fr 64px 56px 1fr 60px 80px 80px;
   align-items: center;
   gap: 12px;
   padding: 13px 20px;
@@ -102,6 +102,7 @@ a.tl-summary-card:hover {
 .tl-col-touched { text-align: right; padding-right: 4px; }
 .tl-col-bar     { /* flex fills */ }
 .tl-col-open    { text-align: right; padding-right: 4px; }
+.tl-col-quality { text-align: center; }
 .tl-col-eff     { text-align: right; }
 .tl-touched-num { font-size: 14px; font-weight: 700; color: var(--teal, #00c9b1); font-family: var(--mono); }
 
@@ -187,6 +188,50 @@ a.tl-open-num:hover { opacity: 0.7; text-decoration: underline; }
   font-size: 13px;
   font-weight: 700;
   flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.tl-avatar-img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  position: absolute;
+  inset: 0;
+}
+
+.tl-avatar-initial {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Build quality column ────────────────────────────────────────────────────── */
+.tl-quality-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.tl-quality-score {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--mono);
+}
+
+.tl-quality-score.green { color: #059669; }
+.tl-quality-score.amber { color: #b45309; }
+.tl-quality-score.red   { color: #dc2626; }
+.tl-quality-score.muted { color: rgba(60,50,120,0.25); font-weight: 400; font-family: inherit; }
+
+.tl-quality-meta {
+  font-size: 9px;
+  color: rgba(60,50,120,0.4);
+  white-space: nowrap;
 }
 
 .tl-name {
@@ -331,3 +376,5 @@ body.dark a.tl-summary-card:hover { box-shadow: 0 8px 24px rgba(168,85,247,0.15)
 body.dark .tl-summary-sub { color: rgba(226,232,240,0.35); }
 body.dark .tl-summary-card.accent-red { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.08); }
 body.dark .tl-summary-card.accent-red .tl-summary-value { color: #f87171; }
+
+body.dark .tl-quality-meta { color: rgba(226,232,240,0.35); }

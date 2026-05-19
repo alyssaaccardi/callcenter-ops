@@ -1,0 +1,13 @@
+{
+  "name": "mitel-poller",
+  "version": "1.0.0",
+  "description": "Mitel CCM queue stats poller — runs on office PC, pushes to JSONBin",
+  "main": "mitel-queue-poller.js",
+  "scripts": {
+    "start": "node mitel-queue-poller.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "mssql": "^11.0.1"
+  }
+}

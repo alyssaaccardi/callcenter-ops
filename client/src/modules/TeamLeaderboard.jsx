@@ -24,6 +24,114 @@ const PERIOD_LABEL = {
   'all':        'All Time',
 };
 
+// ── Account review period helpers ────────────────────────────────────────────
+function getArRange(periodKey) {
+  const now = new Date();
+  if (periodKey === 'all') return { start: null, end: null };
+  let start, end = null;
+  if (periodKey === 'today') {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  } else if (periodKey === 'this-week') {
+    const dow = now.getDay();
+    start = new Date(now);
+    start.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
+    start.setHours(0, 0, 0, 0);
+  } else if (periodKey === 'last-week') {
+    const dow = now.getDay();
+    start = new Date(now);
+    start.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1) - 7);
+    start.setHours(0, 0, 0, 0);
+    end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+  } else if (periodKey === 'last-month') {
+    start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    end   = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+  } else if (periodKey === '90d') {
+    start = new Date(now); start.setDate(now.getDate() - 90);
+  } else if (periodKey === '180d') {
+    start = new Date(now); start.setDate(now.getDate() - 180);
+  }
+  return { start: start || null, end };
+}
+
+function arInRange(dateStr, range) {
+  if (!range.start) return true;
+  if (!dateStr) return false;
+  const d = new Date(dateStr);
+  if (isNaN(d)) return false;
+  if (d < range.start) return false;
+  if (range.end && d > range.end) return false;
+  return true;
+}
+
+function normName(n) {
+  return (n || '').toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+function buildArLookup(arItems, range) {
+  const map = new Map();
+  arItems
+    .filter(i => arInRange(i.dateOpened, range))
+    .forEach(i => {
+      const key = normName(i.openedBy);
+      if (!key) return;
+      if (!map.has(key)) map.set(key, { count: 0, scores: [] });
+      const e = map.get(key);
+      e.count++;
+      if (i.buildQuality > 0) e.scores.push(i.buildQuality);
+    });
+  return map;
+}
+
+function lookupAr(agentName, agentEmail, arLookup) {
+  const full = normName(agentName);
+  if (arLookup.has(full)) return arLookup.get(full);
+
+  // Try email prefix → name (e.g. "john.smith@..." → "john smith")
+  if (agentEmail) {
+    const prefix = normName(agentEmail.split('@')[0].replace(/[._-]/g, ' '));
+    if (arLookup.has(prefix)) return arLookup.get(prefix);
+    // Also try just first word of email prefix
+    const prefFirst = prefix.split(' ')[0];
+    if (prefFirst.length > 2) {
+      for (const [key, val] of arLookup) {
+        if (key.split(' ')[0] === prefFirst) return val;
+      }
+    }
+  }
+
+  // First-name-only fallback (when AR key is a single word)
+  const firstName = full.split(' ')[0];
+  if (firstName.length > 2 && arLookup.has(firstName)) return arLookup.get(firstName);
+
+  return null;
+}
+
+// Build a photo lookup from Monday.com users: name→photoThumb + email→photoThumb
+function buildPhotoLookup(mondayUsers = []) {
+  const byName  = new Map();
+  const byEmail = new Map();
+  mondayUsers.forEach(u => {
+    if (!u.photoThumb) return;
+    if (u.name)  byName.set(normName(u.name),   u.photoThumb);
+    if (u.email) byEmail.set(u.email.toLowerCase(), u.photoThumb);
+  });
+  return { byName, byEmail };
+}
+
+function resolvePhoto(agent, photoLookup) {
+  // 1. Zendesk native photo
+  if (agent.photoUrl) return agent.photoUrl;
+  // 2. Monday.com by email
+  if (agent.email && photoLookup.byEmail.has(agent.email.toLowerCase()))
+    return photoLookup.byEmail.get(agent.email.toLowerCase());
+  // 3. Monday.com by name
+  const n = normName(agent.name);
+  if (photoLookup.byName.has(n)) return photoLookup.byName.get(n);
+  return null;
+}
+
 function RankBadge({ rank }) {
   const cls = rank === 1 ? 'gold' : rank === 2 ? 'silver' : rank === 3 ? 'bronze' : '';
   return <span className={`tl-rank ${cls}`}>{rank}</span>;
@@ -40,17 +148,26 @@ export default function TeamLeaderboard({ team = 'support' }) {
   const [csatGood,     setCsatGood]     = useState(0);
   const [csatBad,      setCsatBad]      = useState(0);
   const [zdSubdomain,  setZdSubdomain]  = useState(null);
+  const [arItems,      setArItems]      = useState([]);
+  const [mondayUsers,  setMondayUsers]  = useState([]);
 
   const fetchData = useCallback(async (p) => {
     setLoading(true);
     try {
-      const res = await api.get('/api/zendesk/leaderboard', { params: { period: p, team } });
-      setSections(res.data?.sections   || []);
-      setSupport(res.data?.support     || []);
-      setEscalation(res.data?.escalation || []);
-      setCsatGood(res.data?.csatGood   || 0);
-      setCsatBad(res.data?.csatBad     || 0);
-      setZdSubdomain(res.data?.zdSubdomain || null);
+      const [zdRes, arRes] = await Promise.all([
+        api.get('/api/zendesk/leaderboard', { params: { period: p, team } }),
+        api.get('/api/monday/account-review').catch(() => null),
+      ]);
+      setSections(zdRes.data?.sections   || []);
+      setSupport(zdRes.data?.support     || []);
+      setEscalation(zdRes.data?.escalation || []);
+      setCsatGood(zdRes.data?.csatGood   || 0);
+      setCsatBad(zdRes.data?.csatBad     || 0);
+      setZdSubdomain(zdRes.data?.zdSubdomain || null);
+      if (arRes?.data) {
+        setArItems(arRes.data?.items      || []);
+        setMondayUsers(arRes.data?.mondayUsers || []);
+      }
       setError(null);
       setLastSync(new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST');
     } catch (err) {
@@ -78,6 +195,13 @@ export default function TeamLeaderboard({ team = 'support' }) {
     ? zdUrl(`type:ticket assignee_id:${agent.id} status:open status:new`)
     : null;
 
+  // Account review lookup (period-filtered, client-side)
+  const arRange  = getArRange(period);
+  const arLookup = buildArLookup(arItems, arRange);
+
+  // Photo lookup from Monday.com users
+  const photoLookup = buildPhotoLookup(mondayUsers);
+
   const allAgents    = [...support, ...escalation];
   const maxReplies   = Math.max(...allAgents.map(a => a.replies), 1);
   const totalReplies = allAgents.reduce((s, a) => s + a.replies, 0);
@@ -85,19 +209,34 @@ export default function TeamLeaderboard({ team = 'support' }) {
   const periodLabel  = PERIOD_LABEL[period] || period;
 
   function AgentRow({ agent, rank, isFirst }) {
-    const eff     = agent.replies + agent.open > 0
+    const eff        = agent.replies + agent.open > 0
       ? Math.round((agent.replies / (agent.replies + agent.open)) * 100)
       : null;
-    const barPct  = maxReplies > 0 ? (agent.replies / maxReplies) * 100 : 0;
+    const barPct     = maxReplies > 0 ? (agent.replies / maxReplies) * 100 : 0;
     const repliedHref = zdAgentRepliedUrl(agent);
     const openHref    = zdAgentOpenUrl(agent);
+    const photo       = resolvePhoto(agent, photoLookup);
+
+    const ar  = lookupAr(agent.name, agent.email, arLookup);
+    const avg = ar?.scores.length
+      ? (ar.scores.reduce((s, v) => s + v, 0) / ar.scores.length)
+      : null;
+    const arColor = avg === null ? '' : avg >= 4 ? 'green' : avg >= 3 ? 'amber' : 'red';
 
     return (
       <div className={`tl-row${isFirst ? ' first' : ''}`}>
         <div className="tl-col-rank"><RankBadge rank={rank} /></div>
 
         <div className="tl-col-name">
-          <div className="tl-avatar">{(agent.name || '?')[0].toUpperCase()}</div>
+          <div className="tl-avatar">
+            {photo
+              ? <img src={photo} alt={agent.name} className="tl-avatar-img" onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />
+              : null
+            }
+            <span className="tl-avatar-initial" style={photo ? { display: 'none' } : {}}>
+              {(agent.name || '?')[0].toUpperCase()}
+            </span>
+          </div>
           <div className="tl-name-cell">
             <span className="tl-name">{agent.name}</span>
             {zdUrl && (
@@ -121,7 +260,7 @@ export default function TeamLeaderboard({ team = 'support' }) {
               href={repliedHref}
               target="_blank"
               rel="noopener noreferrer"
-              title={`${agent.replies} tickets with a public reply from ${agent.name} in ${periodLabel} — click to open in Zendesk`}
+              title={`${agent.replies} tickets with a public reply from ${agent.name} in ${periodLabel}`}
             >
               {agent.replies}
             </a>
@@ -130,7 +269,7 @@ export default function TeamLeaderboard({ team = 'support' }) {
           )}
         </div>
 
-        <div className="tl-col-touched" title={`${agent.touched} tickets assigned to ${agent.name} that were active in ${periodLabel}`}>
+        <div className="tl-col-touched" title={`${agent.touched ?? '—'} tickets assigned to ${agent.name} that were active in ${periodLabel}`}>
           <span className="tl-touched-num">{agent.touched ?? '—'}</span>
         </div>
 
@@ -150,12 +289,25 @@ export default function TeamLeaderboard({ team = 'support' }) {
               href={openHref}
               target="_blank"
               rel="noopener noreferrer"
-              title={`${agent.open} tickets currently open or new assigned to ${agent.name} (all-time, not period-filtered) — click to open in Zendesk`}
+              title={`${agent.open} tickets currently open or new assigned to ${agent.name} (all-time)`}
             >
               {agent.open}
             </a>
           ) : (
             <span className={`tl-open-num ${agent.open > 10 ? 'high' : agent.open > 5 ? 'mid' : ''}`}>{agent.open}</span>
+          )}
+        </div>
+
+        <div className="tl-col-quality" title={ar ? `${ar.count} accounts opened · ${ar.scores.length} rated · avg ${avg?.toFixed(1) ?? '—'}/5 · from Account Review board` : 'No account review data matched'}>
+          {ar ? (
+            <div className="tl-quality-cell">
+              <span className={`tl-quality-score ${arColor}`}>
+                {avg !== null ? avg.toFixed(1) : '—'}
+              </span>
+              <span className="tl-quality-meta">{ar.count} accts</span>
+            </div>
+          ) : (
+            <span className="tl-quality-score muted">—</span>
           )}
         </div>
 
@@ -194,7 +346,7 @@ export default function TeamLeaderboard({ team = 'support' }) {
             ) : (
               team === 'tech' ? 'Zendesk · Tech Team' : 'Zendesk · Trial Account + Escalation teams'
             )}
-            {' · '}public replies &amp; open tickets per agent · {POLL_MS / 1000}s refresh
+            {' · '}Tickets &amp; account review quality · {POLL_MS / 1000}s refresh
           </div>
         </div>
         <div className="flex" style={{ gap: 10, alignItems: 'center' }}>
@@ -238,6 +390,13 @@ export default function TeamLeaderboard({ team = 'support' }) {
         const repliedHref = zdUrl ? zdUrl(`type:ticket status:solved`) : null;
         const openHref    = zdUrl ? zdUrl('type:ticket status:open status:new') : null;
 
+        // AR team stats for the period
+        const arPeriodItems = arItems.filter(i => arInRange(i.dateOpened, arRange));
+        const arRated = arPeriodItems.filter(i => i.buildQuality > 0);
+        const arTeamAvg = arRated.length
+          ? arRated.reduce((s, i) => s + i.buildQuality, 0) / arRated.length
+          : null;
+
         const SummaryCard = ({ href, children, className = '', title }) => {
           const cls = `tl-summary-card${className ? ' ' + className : ''}`;
           if (href) return <a className={cls} href={href} target="_blank" rel="noopener noreferrer" title={title}>{children}</a>;
@@ -248,17 +407,17 @@ export default function TeamLeaderboard({ team = 'support' }) {
           <div className="tl-summary mb-16">
             <SummaryCard
               href={repliedHref}
-              title={`${totalReplies} tickets with a public reply across all agents in ${periodLabel} — data from Zendesk · click to view in Zendesk`}
+              title={`${totalReplies} tickets with a public reply across all agents in ${periodLabel}`}
             >
               <div className="tl-summary-label">Replied · {periodLabel}</div>
               <div className="tl-summary-value">{totalReplies}</div>
-              <div className="tl-summary-sub">Zendesk · tickets with reply{repliedHref && ' · click to view ↗'}</div>
+              <div className="tl-summary-sub">Tickets · public replies{repliedHref && ' · click ↗'}</div>
             </SummaryCard>
 
             <SummaryCard
               href={openHref}
               className={totalOpen > 20 ? 'accent-amber' : ''}
-              title={`${totalOpen} tickets currently open or new across all agents — this is the live queue, not period-filtered · click to view in Zendesk`}
+              title={`${totalOpen} tickets currently open or new across all agents — live queue`}
             >
               <div className="tl-summary-label">Open Queue · Live</div>
               <div className="tl-summary-value">{totalOpen}</div>
@@ -269,7 +428,7 @@ export default function TeamLeaderboard({ team = 'support' }) {
               href={csatHref}
               className={csatPct !== null ? (csatPct >= 80 ? 'accent-green' : csatPct >= 60 ? 'accent-amber' : 'accent-red') : ''}
               title={csatTotal > 0
-                ? `CSAT: ${csatGood} positive / ${csatBad} negative = ${csatPct}% satisfaction · ${periodLabel} · from Zendesk satisfaction ratings${csatHref ? ' · click to view' : ''}`
+                ? `CSAT: ${csatGood} positive / ${csatBad} negative = ${csatPct}% · ${periodLabel}`
                 : 'No CSAT ratings in this period'
               }
             >
@@ -277,25 +436,36 @@ export default function TeamLeaderboard({ team = 'support' }) {
               <div className="tl-summary-value">{csatPct !== null ? `${csatPct}%` : '—'}</div>
               <div className="tl-summary-sub">
                 {csatTotal > 0
-                  ? `${csatGood} 👍 · ${csatBad} 👎 · ${csatTotal} ratings${csatHref ? ' · click ↗' : ''}`
+                  ? `${csatGood} 👍 · ${csatBad} 👎${csatHref ? ' · click ↗' : ''}`
                   : 'No ratings yet this period'
                 }
               </div>
             </SummaryCard>
 
-            <SummaryCard
-              className={effPct !== null ? (effPct >= 80 ? 'accent-green' : effPct >= 60 ? 'accent-amber' : 'accent-red') : ''}
-              title={`Resolution rate = total solved ÷ (solved + open). ${effPct}% means ${effPct}% of all assigned work is resolved. Below 60% means backlog is growing.`}
-            >
-              <div className="tl-summary-label">Resolution Rate</div>
-              <div className="tl-summary-value">{effPct !== null ? `${effPct}%` : '—'}</div>
-              <div className="tl-summary-sub">
-                {effPct !== null
-                  ? `Solved ÷ (solved+open)${topAgent ? ` · top: ${topAgent.name.split(' ')[0]}` : ''}`
-                  : 'No data'
-                }
-              </div>
-            </SummaryCard>
+            {arTeamAvg !== null ? (
+              <SummaryCard
+                className={arTeamAvg >= 4 ? 'accent-green' : arTeamAvg >= 3 ? 'accent-amber' : 'accent-red'}
+                title={`Team build quality avg: ${arTeamAvg.toFixed(1)}/5 based on ${arRated.length} rated accounts · from Monday.com Account Review board`}
+              >
+                <div className="tl-summary-label">Build Quality · Avg</div>
+                <div className="tl-summary-value">{arTeamAvg.toFixed(1)}<span style={{ fontSize: 14, fontWeight: 400, color: 'var(--muted)' }}>/5</span></div>
+                <div className="tl-summary-sub">{arRated.length} of {arPeriodItems.length} accounts rated · Monday.com</div>
+              </SummaryCard>
+            ) : (
+              <SummaryCard
+                className={effPct !== null ? (effPct >= 80 ? 'accent-green' : effPct >= 60 ? 'accent-amber' : 'accent-red') : ''}
+                title={`Resolution rate = total replied ÷ (replied + open). Below 60% means backlog is growing.`}
+              >
+                <div className="tl-summary-label">Resolution Rate</div>
+                <div className="tl-summary-value">{effPct !== null ? `${effPct}%` : '—'}</div>
+                <div className="tl-summary-sub">
+                  {effPct !== null
+                    ? `Replied ÷ (replied+open)${topAgent ? ` · top: ${topAgent.name.split(' ')[0]}` : ''}`
+                    : 'No data'
+                  }
+                </div>
+              </SummaryCard>
+            )}
           </div>
         );
       })()}
@@ -323,23 +493,26 @@ export default function TeamLeaderboard({ team = 'support' }) {
       {!loading && !error && allAgents.length > 0 && (
         <div className="tl-board">
 
-          {/* Column headers with context */}
+          {/* Column headers */}
           <div className="tl-board-header">
             <span className="tl-col-rank">#</span>
             <span className="tl-col-name">Agent</span>
-            <span className="tl-col-solved" title={`Tickets with a public reply in the selected period (${periodLabel}) · source: Zendesk · click each number to view in Zendesk`}>
+            <span className="tl-col-solved" title={`Tickets with a public reply in the selected period (${periodLabel}) · source: Tickets`}>
               Replied ↗
             </span>
-            <span className="tl-col-touched" title={`Tickets assigned to this agent that were active in ${periodLabel} — broader activity signal`}>
+            <span className="tl-col-touched" title={`Tickets assigned to this agent that were active in ${periodLabel}`}>
               Touched
             </span>
             <span className="tl-col-bar" style={{ fontSize: 9, color: 'rgba(60,50,120,0.3)', paddingLeft: 2 }}>
               relative volume
             </span>
-            <span className="tl-col-open" title="Tickets currently open or new assigned to this agent — live, all-time queue · not period-filtered · click to view in Zendesk">
+            <span className="tl-col-open" title="Tickets currently open or new — live, all-time queue">
               Open ↗
             </span>
-            <span className="tl-col-eff" title="Resolution rate = solved ÷ (solved + open). Green ≥80% · Amber 60–79% · Red <60%">
+            <span className="tl-col-quality" title="Avg build quality score from Account Review board · 1=poor 5=excellent">
+              Quality
+            </span>
+            <span className="tl-col-eff" title="Reply rate = replied ÷ (replied + open). Green ≥80% · Amber 60–79% · Red &lt;60%">
               Rate
             </span>
           </div>
@@ -351,7 +524,7 @@ export default function TeamLeaderboard({ team = 'support' }) {
                 <div className="tl-section-label">
                   <div>
                     <span>{section.name}</span>
-                    <span className="tl-section-hint">Zendesk · ranked by public replies in period</span>
+                    <span className="tl-section-hint">Tickets · ranked by public replies in period</span>
                   </div>
                 </div>
                 {section.agents.map((agent, i) => (
@@ -361,12 +534,11 @@ export default function TeamLeaderboard({ team = 'support' }) {
             ))
           ) : (
             <>
-              {/* Support team */}
               {support.length > 0 && (
                 <div className="tl-section-label">
                   <div>
                     <span>Trial Account Team</span>
-                    <span className="tl-section-hint">Zendesk support queue · ranked by public replies in period</span>
+                    <span className="tl-section-hint">Tickets support queue · ranked by public replies in period</span>
                   </div>
                   {zdUrl && (
                     <a className="tl-section-link" href={zdUrl('type:ticket')} target="_blank" rel="noopener noreferrer">
@@ -379,12 +551,11 @@ export default function TeamLeaderboard({ team = 'support' }) {
                 <AgentRow key={agent.id} agent={agent} rank={i + 1} isFirst={i === 0} />
               ))}
 
-              {/* Escalation team */}
               {escalation.length > 0 && (
                 <div className="tl-section-label escalation">
                   <div>
                     <span>Escalation Station</span>
-                    <span className="tl-section-hint">handles escalated tickets · also counted in Trial team above</span>
+                    <span className="tl-section-hint">handles escalated tickets</span>
                   </div>
                 </div>
               )}
@@ -396,18 +567,18 @@ export default function TeamLeaderboard({ team = 'support' }) {
 
           {/* Board footer */}
           <div className="tl-board-footer">
-            <span>Replied = public replies in <strong>{periodLabel}</strong> period</span>
+            <span>Replied = public replies in <strong>{periodLabel}</strong></span>
             <span>·</span>
             <span>Open = current live queue (all time)</span>
             <span>·</span>
-            <span>Rate = replied ÷ (replied + open)</span>
+            <span>Quality = avg build score/5 from Tasks · {periodLabel}</span>
             <span>·</span>
-            <span>Bar = relative to top performer</span>
+            <span>Rate = replied ÷ (replied + open)</span>
             {zdUrl && (
               <>
                 <span>·</span>
                 <a href={zdUrl('type:ticket')} target="_blank" rel="noopener noreferrer" className="tl-footer-link">
-                  Open Zendesk ↗
+                  Open Tickets ↗
                 </a>
               </>
             )}

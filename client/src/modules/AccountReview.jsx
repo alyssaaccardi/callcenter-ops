@@ -117,18 +117,20 @@ function EfficiencyBar({ score, maxScore }) {
 }
 
 export default function AccountReview() {
-  const [items,      setItems]      = useState([]);
-  const [loading,    setLoading]    = useState(true);
-  const [error,      setError]      = useState(null);
-  const [lastSync,   setLastSync]   = useState(null);
-  const [periodKey,  setPeriodKey]  = useState('this-week');
-  const [reviewTab,  setReviewTab]  = useState('trial'); // 'trial' | 'pending'
-  const [sortMode,  setSortMode]  = useState('quality');
+  const [items,       setItems]       = useState([]);
+  const [mondayUsers, setMondayUsers] = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState(null);
+  const [lastSync,    setLastSync]    = useState(null);
+  const [periodKey,   setPeriodKey]   = useState('this-week');
+  const [reviewTab,   setReviewTab]   = useState('trial'); // 'trial' | 'pending'
+  const [sortMode,    setSortMode]    = useState('quality');
 
   const fetchData = useCallback(async () => {
     try {
       const res = await api.get('/api/monday/account-review');
       setItems(res.data?.items || []);
+      setMondayUsers(res.data?.mondayUsers || []);
       setError(null);
       setLastSync(new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EST');
     } catch (err) {
@@ -143,6 +145,13 @@ export default function AccountReview() {
     const id = setInterval(fetchData, POLL_MS);
     return () => clearInterval(id);
   }, [fetchData]);
+
+  // Build photo lookup from Monday.com users by name
+  const arPhotoByName = new Map();
+  mondayUsers.forEach(u => {
+    if (u.photoThumb) arPhotoByName.set((u.name || '').toLowerCase().trim(), u.photoThumb);
+  });
+  const resolveArPhoto = name => arPhotoByName.get((name || '').toLowerCase().trim()) || null;
 
   const range = getRange(periodKey);
   const periodItems = items.filter(i => inRange(i.dateOpened, range));
@@ -162,7 +171,6 @@ export default function AccountReview() {
     count:      a.count,
     rated:      a.scores.length,
     avg:        a.scores.length ? a.scores.reduce((s, v) => s + v, 0) / a.scores.length : null,
-    // Efficiency = avg quality × account count (rewards high quality + high volume)
     efficiency: a.scores.length ? (a.scores.reduce((s, v) => s + v, 0) / a.scores.length) * a.count : null,
   }));
 
@@ -338,6 +346,7 @@ export default function AccountReview() {
             {leaderboard.map((agent, i) => {
               const sl = scoreLabel(agent.avg);
               const rank = i + 1;
+              const photo = resolveArPhoto(agent.name);
 
               return (
                 <div key={`${periodKey}-${sortMode}-${agent.name}`} className={`ar-agent-row${agent.avg === null && sortMode !== 'volume' ? ' unrated' : ''}`}>
@@ -345,7 +354,18 @@ export default function AccountReview() {
                     {rank}
                   </div>
                   <div className="ar-agent-info">
-                    <div className="ar-agent-name">{agent.name}</div>
+                    <div className="ar-agent-name-row">
+                      <div className="ar-agent-avatar">
+                        {photo
+                          ? <img src={photo} alt={agent.name} className="ar-avatar-img" onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
+                          : null
+                        }
+                        <span className="ar-avatar-initial" style={photo ? { display: 'none' } : {}}>
+                          {(agent.name || '?')[0].toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="ar-agent-name">{agent.name}</div>
+                    </div>
                     <div className="ar-agent-meta">
                       <span className="ar-meta-vol">{agent.count} opened</span>
                       {agent.rated > 0 && agent.count > agent.rated && (
