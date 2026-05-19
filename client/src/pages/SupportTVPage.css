@@ -111,8 +111,19 @@
 
 /* ── Stat Strip ── */
 .stv-stat-strip {
-  display: grid; grid-template-columns: repeat(3, 1fr);
-  gap: 12px; flex-shrink: 0;
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 10px; flex-shrink: 0;
+}
+.stv-stat-strip .stv-stat { flex: 1; min-width: 130px; }
+
+.stv-stat-source-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.18em;
+  text-transform: uppercase; color: rgba(255,255,255,0.35);
+  align-self: center; white-space: nowrap;
+}
+.stv-stat-divider {
+  width: 1px; height: 40px; background: rgba(255,255,255,0.1); flex-shrink: 0;
 }
 
 .stv-stat {

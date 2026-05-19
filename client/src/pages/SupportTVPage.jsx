@@ -233,6 +233,7 @@ export default function SupportTVPage() {
 
         {/* ── Stat Strip ── */}
         <div className="stv-stat-strip">
+          <div className="stv-stat-source-label">Monday.com</div>
           <StatCard
             label="Overdue Tasks" colorClass={overdueClass}
             value={overdueCount}
@@ -243,6 +244,13 @@ export default function SupportTVPage() {
             value={dueCount}
             sub={dueCount === 0 ? 'Nothing due' : `${dueCount} task${dueCount !== 1 ? 's' : ''} due`}
           />
+          <StatCard
+            label="Solved Today" colorClass={completedToday.length > 0 ? 'green' : 'muted'}
+            value={completedToday.length}
+            sub={completedToday.length === 0 ? 'None yet' : `${completedToday.length} resolved`}
+          />
+          <div className="stv-stat-divider" />
+          <div className="stv-stat-source-label">Zendesk</div>
           <StatCard
             label="Stale Tickets" colorClass={staleClass}
             value={staleCount !== null ? staleCount : '—'}
@@ -306,7 +314,10 @@ export default function SupportTVPage() {
             <div className="stv-corner stv-corner-bl" />
             <div className="stv-corner stv-corner-br" />
             <div className="stv-panel-header">
-              <div className="stv-panel-title">Overdue Tasks</div>
+              <div>
+                <div className="stv-panel-title">Tasks</div>
+                <div style={{ fontSize: 10, opacity: 0.5, marginTop: 2, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Monday.com</div>
+              </div>
               <div className={`stv-panel-badge ${overdueCount === 0 ? 'clear' : 'red'}`}>
                 {overdueCount === 0 ? 'All Clear' : `${overdueCount} Overdue`}
               </div>
@@ -417,7 +428,10 @@ export default function SupportTVPage() {
             <div className="stv-corner stv-corner-bl" />
             <div className="stv-corner stv-corner-br" />
             <div className="stv-panel-header">
-              <div className="stv-panel-title">Today's Leaderboard · Replied &amp; Touched</div>
+              <div>
+                <div className="stv-panel-title">Leaderboard · Replied &amp; Touched</div>
+                <div style={{ fontSize: 10, opacity: 0.5, marginTop: 2, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Zendesk · Today</div>
+              </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {(leaderboard.csatGood + leaderboard.csatBad) > 0 && (
                   <div className="stv-panel-badge muted">
