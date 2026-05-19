@@ -266,7 +266,7 @@ function CsatPanel({ ratings, unconfigured }) {
 
 function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad, zdUrl, periodLabel, lbLoading }) {
   const rankCls     = i => i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
-  const totalAgents = (support?.length ?? 0) + (escalation?.length ?? 0);
+  const totalAgents = support?.length ?? 0;
   const supportReplies = (support || []).reduce((s, a) => s + a.replies, 0);
   const supportSolved  = (support || []).reduce((s, a) => s + (a.solved || 0), 0);
   const csatTotal  = (csatGood || 0) + (csatBad || 0);
@@ -375,14 +375,6 @@ function LeaderboardPanel({ support, escalation, unconfigured, csatGood, csatBad
           <AgentRow key={a.id} agent={a} rank={i} />
         ))}
 
-        {!lbLoading && !unconfigured && escalation?.length > 0 && (
-          <div className="sc-lb-section escalation">
-            Escalation Station
-          </div>
-        )}
-        {!lbLoading && !unconfigured && escalation?.map((a, i) => (
-          <AgentRow key={`esc-${a.id}`} agent={a} rank={i} />
-        ))}
       </div>
 
       {!lbLoading && !unconfigured && csatTotal > 0 && (

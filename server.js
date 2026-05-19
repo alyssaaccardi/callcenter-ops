@@ -1255,7 +1255,7 @@ app.get('/api/zendesk/stale-tickets', async (req, res) => {
     // Support also claims tickets with no group/assignee (unrouted new tickets)
     let groupFilter = '';
     if (team) {
-      const groups = team === 'tech' ? ZD_TECH_GROUPS : [...ZD_SUPPORT_GROUPS, ZD_ESCALATION_GROUP];
+      const groups = team === 'tech' ? ZD_TECH_GROUPS : ZD_SUPPORT_GROUPS;
       groupFilter = ' ' + groups.map(id => `group_id:${id}`).join(' ');
       if (team !== 'tech') groupFilter += ' group_id:none';
     }
@@ -1345,7 +1345,7 @@ app.get('/api/zendesk/csat', async (req, res) => {
     const team = req.query.team || null;
     if (team) {
       try {
-        const groupIds  = team === 'tech' ? ZD_TECH_GROUPS : [...ZD_SUPPORT_GROUPS, ZD_ESCALATION_GROUP];
+        const groupIds  = team === 'tech' ? ZD_TECH_GROUPS : ZD_SUPPORT_GROUPS;
         const memberIds = await zdGroupMembers(base, headers, groupIds);
         if (memberIds.length) teamAgentIds = new Set(memberIds);
       } catch { /* non-fatal — fall through to unfiltered */ }
@@ -1432,7 +1432,7 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
     const allAgents = (usersRes.data?.users || []).filter(u => u.active && !u.suspended);
 
     let users;
-    const groupIds = team === 'tech' ? ZD_TECH_GROUPS : [...ZD_SUPPORT_GROUPS, ZD_ESCALATION_GROUP];
+    const groupIds = team === 'tech' ? ZD_TECH_GROUPS : ZD_SUPPORT_GROUPS;
 
     // For tech: fetch per-group membership to build delineated sections
     let techGroupSets = null;
@@ -1695,7 +1695,7 @@ app.get('/api/zendesk/queue-stats', async (req, res) => {
     // Support also claims tickets with no group/assignee (unrouted new tickets)
     let groupFilter = '';
     if (team) {
-      const groups = team === 'tech' ? ZD_TECH_GROUPS : [...ZD_SUPPORT_GROUPS, ZD_ESCALATION_GROUP];
+      const groups = team === 'tech' ? ZD_TECH_GROUPS : ZD_SUPPORT_GROUPS;
       groupFilter = ' ' + groups.map(id => `group_id:${id}`).join(' ');
       if (team !== 'tech') groupFilter += ' group_id:none';
     }
