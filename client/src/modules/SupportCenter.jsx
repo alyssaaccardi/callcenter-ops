@@ -528,11 +528,11 @@ export default function SupportCenter() {
     } catch { /* ignore */ }
   }
 
-  const doneCount     = stats?.byStatus?.find(s => s.label?.toLowerCase() === 'done')?.count ?? 0;
   const overdueCount  = tasks.length;
   const workingCount  = tasks.filter(t => t.worker || /(pending|in.?progress|working|in.?review)/i.test(t.status || '')).length;
   const dueCount      = upcoming.length;
   const staleCount    = stale.unconfigured ? null : (stale.tickets?.length ?? 0);
+  const todayLabel    = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' });
 
   const mondayUrl  = `https://answeringlegal-unit.monday.com/boards/${BOARD_ID}`;
   const zdSub      = queue.zdSubdomain;
@@ -621,10 +621,11 @@ export default function SupportCenter() {
                 title={`${dueCount} task${dueCount !== 1 ? 's' : ''} due today — click to jump to list`}
               />
               <StatCard
-                label="Done" value={doneCount}
+                label="Solved Today" value={completedToday.length}
                 className="accent-green"
-                href={mondayUrl}
-                title={`${doneCount} tasks completed`}
+                href="#completed-section"
+                sub={todayLabel}
+                title={`${completedToday.length} task${completedToday.length !== 1 ? 's' : ''} solved or responded to today by support groups (excludes Escalation Station) — click to jump to list`}
               />
             </div>
           </div>
@@ -713,12 +714,17 @@ export default function SupportCenter() {
           {/* ── Completed Today ── */}
           <div className="sc-tasks-section" id="completed-section">
             <div className="sc-section-bar">
-              <div className="sc-section-title">Completed Today</div>
+              <div>
+                <div className="sc-section-title">Solved or Responded Today</div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                  Support groups · excl. Escalation Station · {todayLabel}
+                </div>
+              </div>
               <div className={`sc-badge${completedToday.length === 0 ? ' clear' : ' done'}`}>
                 {completedToday.length === 0 ? 'None yet' : `${completedToday.length} done`}
               </div>
             </div>
-            {completedToday.length === 0 && <Empty icon="🏁" text="Nothing completed yet today" />}
+            {completedToday.length === 0 && <Empty icon="🏁" text="Nothing solved or responded to yet today" />}
             {completedToday.length > 0 && (
               <div className="sc-task-list">
                 {completedToday.map(task => <CompletedCard key={task.id} task={task} />)}

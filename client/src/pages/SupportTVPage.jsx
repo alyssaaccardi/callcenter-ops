@@ -164,6 +164,7 @@ export default function SupportTVPage() {
 
   const overdueCount  = tasks.length;
   const dueCount      = upcoming.length;
+  const todayLabel    = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' });
   const agents        = leaderboard.support.filter(a => a.replies > 0);
   const repliesToday  = agents.reduce((s, a) => s + a.replies, 0);
 
@@ -383,7 +384,7 @@ export default function SupportTVPage() {
               {/* Completed Today sub-section */}
               {completedToday.length > 0 && (
                 <>
-                  <div className="stv-sub-section-label done">Completed Today · {completedToday.length}</div>
+                  <div className="stv-sub-section-label done">Solved or Responded · {completedToday.length} · {todayLabel} · Support Groups</div>
                   {completedToday.map(task => {
                     const solver = task.solvedBy || task.assignee;
                     return (
