@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
+import { DialingIn } from '../components/DialingIn';
 import './SupportTVPage.css';
 
 const POLL_MS  = 15000;
@@ -160,7 +161,7 @@ export default function SupportTVPage() {
   }, [authed, fetchAll]);
 
   if (authError) return <div className="stv-loading"><span>{authError}</span></div>;
-  if (loading)   return <div className="stv-loading"><div className="stv-spinner" /><span>Dialing in...</span></div>;
+  if (loading)   return <div className="stv-loading"><DialingIn /></div>;
 
   const overdueCount  = tasks.length;
   const dueCount      = upcoming.length;

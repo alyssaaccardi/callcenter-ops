@@ -1,0 +1,124 @@
+/* ── UFO "Dialing In" loading state ────────────────────────────────────────── */
+
+.di-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 56px 24px 40px;
+  gap: 20px;
+  user-select: none;
+}
+
+/* ── Scene container — positions UFO group + victim ──────────────────────── */
+.di-scene {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ── UFO body + beam move together ──────────────────────────────────────── */
+.di-ufo-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: di-hover 2.4s ease-in-out infinite;
+}
+
+.di-ufo {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+  color: var(--purple, #7c3aed);
+  letter-spacing: 0;
+}
+
+/* ── Tractor beam — CSS trapezoid ─────────────────────────────────────────── */
+.di-beam {
+  width: 52px;
+  height: 44px;
+  margin-top: -1px;
+  background: linear-gradient(
+    to bottom,
+    rgba(124, 58, 237, 0.55) 0%,
+    rgba(124, 58, 237, 0.08) 100%
+  );
+  clip-path: polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%);
+  animation: di-beam-flicker 1.6s ease-in-out infinite;
+}
+
+/* ── Abductee rises into beam ─────────────────────────────────────────────── */
+.di-victim {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 6px 0 0;
+  color: var(--purple, #7c3aed);
+  animation: di-abduct 4s ease-in-out infinite;
+}
+
+/* ── Label ────────────────────────────────────────────────────────────────── */
+.di-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--purple, #7c3aed);
+  opacity: 0.75;
+}
+
+.di-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  animation: di-blink 0.85s step-start infinite;
+}
+
+/* ── Keyframes ────────────────────────────────────────────────────────────── */
+
+/* UFO hovers gently — beam moves with it */
+@keyframes di-hover {
+  0%, 100% { transform: translateY(0px);  }
+  50%       { transform: translateY(-9px); }
+}
+
+/* Beam pulses opacity to simulate tractor-beam energy */
+@keyframes di-beam-flicker {
+  0%, 100% { opacity: 1;    }
+  30%       { opacity: 0.45; }
+  60%       { opacity: 0.9;  }
+  80%       { opacity: 0.55; }
+}
+
+/* Victim rises into beam, disappears, reappears below */
+@keyframes di-abduct {
+  0%   { transform: translateY(0px);  opacity: 1; }
+  52%  { transform: translateY(-44px); opacity: 1; }
+  65%  { transform: translateY(-44px); opacity: 0; }
+  66%  { transform: translateY(2px);  opacity: 0; }
+  82%  { transform: translateY(0px);  opacity: 0; }
+  100% { transform: translateY(0px);  opacity: 1; }
+}
+
+/* Blinking terminal cursor */
+@keyframes di-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* ── Dark mode — switch to terminal teal ─────────────────────────────────── */
+body.dark .di-ufo,
+body.dark .di-victim,
+body.dark .di-label,
+body.dark .di-cursor {
+  color: var(--teal, #00c9b1);
+}
+
+body.dark .di-beam {
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 201, 177, 0.6) 0%,
+    rgba(0, 201, 177, 0.06) 100%
+  );
+}

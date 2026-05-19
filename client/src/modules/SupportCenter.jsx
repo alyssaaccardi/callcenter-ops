@@ -3,6 +3,7 @@ import api from '../api';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import UserBadge from '../components/UserBadge';
+import { DialingIn } from '../components/DialingIn';
 import '../pages/SupportPage.css';
 
 const POLL_MS  = 15000;
@@ -577,10 +578,7 @@ export default function SupportCenter() {
       </div>
 
       {loading ? (
-        <div className="sc-empty" style={{ paddingTop: 60 }}>
-          <div className="sc-spinner" style={{ width: 24, height: 24, margin: '0 auto 8px' }} />
-          <div className="sc-empty-text">Dialing in...</div>
-        </div>
+        <DialingIn />
       ) : (
         <>
           <SystemStatusStrip status={status} hubspotDids={hubspotDids} />

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
+import { DialingIn } from '../components/DialingIn';
 import './TeamLeaderboard.css';
 
 const POLL_MS = 60000;
@@ -202,7 +203,9 @@ export default function TeamLeaderboard({ team = 'support' }) {
   // Photo lookup from Monday.com users
   const photoLookup = buildPhotoLookup(mondayUsers);
 
-  const allAgents    = [...support, ...escalation];
+  // For display: support team only (no escalation), tech uses all sections
+  const displayAgents = team === 'tech' ? [...support, ...escalation] : support;
+  const allAgents    = displayAgents;
   const maxReplies   = Math.max(...allAgents.map(a => a.replies), 1);
   const totalReplies = allAgents.reduce((s, a) => s + a.replies, 0);
   const totalOpen    = allAgents.reduce((s, a) => s + a.open, 0);
@@ -470,12 +473,7 @@ export default function TeamLeaderboard({ team = 'support' }) {
         );
       })()}
 
-      {loading && (
-        <div className="ar-empty" style={{ paddingTop: 60 }}>
-          <div className="sc-spinner" style={{ width: 24, height: 24, margin: '0 auto 8px' }} />
-          <div className="ar-empty-text">Dialing in...</div>
-        </div>
-      )}
+      {loading && <DialingIn />}
 
       {!loading && error && (
         <div className="ar-empty">
@@ -551,17 +549,6 @@ export default function TeamLeaderboard({ team = 'support' }) {
                 <AgentRow key={agent.id} agent={agent} rank={i + 1} isFirst={i === 0} />
               ))}
 
-              {escalation.length > 0 && (
-                <div className="tl-section-label escalation">
-                  <div>
-                    <span>Escalation Station</span>
-                    <span className="tl-section-hint">handles escalated tickets</span>
-                  </div>
-                </div>
-              )}
-              {escalation.map((agent, i) => (
-                <AgentRow key={`esc-${agent.id}`} agent={agent} rank={i + 1} isFirst={false} />
-              ))}
             </>
           )}
 

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { DialingIn } from '../components/DialingIn';
 import api from '../api';
 import './AccountReview.css';
 
@@ -274,12 +275,7 @@ export default function AccountReview() {
         )}
       </div>
 
-      {loading && (
-        <div className="ar-empty" style={{ paddingTop: 60 }}>
-          <div className="sc-spinner" style={{ width: 24, height: 24, margin: '0 auto 8px' }} />
-          <div className="ar-empty-text">Dialing in...</div>
-        </div>
-      )}
+      {loading && <DialingIn />}
 
       {!loading && error && (
         <div className="ar-empty">

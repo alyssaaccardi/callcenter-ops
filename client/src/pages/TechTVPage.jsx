@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
+import { DialingIn } from '../components/DialingIn';
 import './TechTVPage.css';
 
 const POLL_MS = 20000;
@@ -138,7 +139,7 @@ export default function TechTVPage() {
   }, [authed, fetchAll]);
 
   if (authError) return <div className="ttv-loading"><span>{authError}</span></div>;
-  if (loading)   return <div className="ttv-loading"><div className="ttv-spinner" /><span>Dialing in...</span></div>;
+  if (loading)   return <div className="ttv-loading"><DialingIn /></div>;
 
   const agents     = leaderboard.support.filter(a => a.replies > 0);
   const maxReplies = Math.max(...agents.map(a => a.replies), 1);
