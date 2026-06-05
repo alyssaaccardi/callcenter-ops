@@ -105,7 +105,7 @@ async function putBin(binId, data) {
 async function fetchQueueStats() {
   const p = await getPool();
 
-  const [todayResult, recentResult, threeHrResult] = await Promise.all([
+  const [todayResult, recentResult, hourlyResult] = await Promise.all([
     // Today's running totals
     p.request().query(`
       SELECT
@@ -134,40 +134,54 @@ async function fetchQueueStats() {
         AND CallStartTime >= DATEADD(MINUTE, -15, GETDATE())
       GROUP BY Queue
     `),
-    // Rolling 3-hour avg hold time
+    // Per-hour speed of answer — last 4 hours, grouped by hour (GETDATE() is local/EST on this machine)
     p.request().query(`
       SELECT
-        Queue,
-        COUNT(*) AS threeHrAnswered,
-        AVG(CASE WHEN TimeToAnswer > 0 THEN CAST(TimeToAnswer AS float) END) AS threeHrAvgWait
+        DATEPART(HOUR, CallStartTime) AS HourOfDay,
+        COUNT(*)                      AS answered,
+        AVG(CAST(TimeToAnswer AS float)) AS avgWait
       FROM [dbo].[tblData_LC_Trace]
       WHERE Queue IN ('P862','P861','P803')
         AND PegCount = 1
         AND TimeToAnswer IS NOT NULL
-        AND CallStartTime >= DATEADD(HOUR, -3, GETDATE())
-      GROUP BY Queue
+        AND TimeToAnswer > 0
+        AND CallStartTime >= DATEADD(HOUR, -4, GETDATE())
+      GROUP BY DATEPART(HOUR, CallStartTime)
+      ORDER BY HourOfDay ASC
     `),
   ]);
 
   const queues = ['P862', 'P861', 'P803'].map(id => {
-    const t  = todayResult.recordset.find(r => r.Queue === id);
-    const r  = recentResult.recordset.find(r => r.Queue === id);
-    const h3 = threeHrResult.recordset.find(r => r.Queue === id);
+    const t = todayResult.recordset.find(r => r.Queue === id);
+    const r = recentResult.recordset.find(r => r.Queue === id);
     return {
       id,
-      name:            QUEUE_MAP[id],
-      answered:        t?.answered    ?? 0,
-      abandoned:       t?.abandoned   ?? 0,
-      avgWait:         t?.avgWait     != null ? Math.round(t.avgWait)         : null,
-      avgDuration:     t?.avgDuration != null ? Math.round(t.avgDuration)     : null,
-      recentAnswered:  r?.recentAnswered ?? 0,
-      recentAvgWait:   r?.recentAvgWait  != null ? Math.round(r.recentAvgWait)  : null,
-      recentMaxWait:   r?.recentMaxWait  ?? null,
-      threeHrAnswered: h3?.threeHrAnswered ?? 0,
-      threeHrAvgWait:  h3?.threeHrAvgWait  != null ? Math.round(h3.threeHrAvgWait) : null,
+      name:           QUEUE_MAP[id],
+      answered:       t?.answered    ?? 0,
+      abandoned:      t?.abandoned   ?? 0,
+      avgWait:        t?.avgWait     != null ? Math.round(t.avgWait)        : null,
+      avgDuration:    t?.avgDuration != null ? Math.round(t.avgDuration)    : null,
+      recentAnswered: r?.recentAnswered ?? 0,
+      recentAvgWait:  r?.recentAvgWait  != null ? Math.round(r.recentAvgWait) : null,
+      recentMaxWait:  r?.recentMaxWait  ?? null,
     };
   });
-  return { queues, updatedAt: new Date().toISOString() };
+
+  // Build per-hour speed-of-answer array (all queues combined), newest first
+  const nowHour = new Date().getHours(); // local hour on this machine (EST)
+  const hourlyStats = [1, 2, 3].map(h => {
+    const targetHour = (nowHour - h + 24) % 24;
+    const row = hourlyResult.recordset.find(r => r.HourOfDay === targetHour);
+    const label = new Date(new Date().setHours(targetHour, 0, 0, 0))
+      .toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+    return {
+      label,
+      avgWait:  row?.avgWait  != null ? Math.round(row.avgWait) : null,
+      answered: row?.answered ?? 0,
+    };
+  });
+
+  return { queues, hourlyStats, updatedAt: new Date().toISOString() };
 }
 
 // ── Main loop ─────────────────────────────────────────────────────────────────

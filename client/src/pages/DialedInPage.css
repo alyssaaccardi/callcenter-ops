@@ -315,9 +315,11 @@
 .tv-mitel-wait { color: #c8d8f8; }
 .tv-mitel-stats.stale { opacity: 0.45; }
 .tv-mitel-stats.stale .tv-mitel-stats-title::after { content: ' ⚠'; color: #f59e0b; }
-.tv-mitel-3hr-row { display: flex; align-items: baseline; justify-content: space-between; margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06); }
-.tv-mitel-3hr-label { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(9px, 1vw, 12px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.1em; text-transform: uppercase; }
-.tv-mitel-3hr-value { font-family: 'Bebas Neue', sans-serif; font-size: clamp(14px, 1.5vw, 19px); letter-spacing: 0.04em; color: #8899bb; }
+.tv-hourly-stats { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 2px; }
+.tv-hourly-stats-title { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(9px, 1vw, 12px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 3px; }
+.tv-hourly-stats-row { display: flex; align-items: baseline; justify-content: space-between; padding: 1px 0; }
+.tv-hourly-stats-label { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(12px, 1.3vw, 16px); font-weight: 600; color: #8899bb; letter-spacing: 0.04em; }
+.tv-hourly-stats-value { font-family: 'Bebas Neue', sans-serif; font-size: clamp(14px, 1.5vw, 19px); letter-spacing: 0.04em; color: #c8d8f0; }
 
 @keyframes tv-upPop       { from{opacity:0;transform:scale(0.5)} to{opacity:1;transform:scale(1)} }
 @keyframes tv-upPhoneRing { from{transform:rotate(-15deg) scale(1)} to{transform:rotate(15deg) scale(1.1)} }

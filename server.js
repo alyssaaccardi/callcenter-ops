@@ -1859,30 +1859,58 @@ app.get('/api/monday/account-review', async (req, res) => {
 });
 
 // ─── Xcally Realtime Queue ───────────────────────────────────────────────────
-const XCALLY_QUEUE_NAME  = 'Answering_Legal';
-const XCALLY_BUFFER_MS   = 3 * 60 * 60 * 1000; // 3 hours
-const xcallyHoldBuffer   = []; // { ts, answered, cumulativeWait }
-let   xcally3hrAvgWait   = null;
+const XCALLY_QUEUE_NAME = 'Answering_Legal';
+const XCALLY_BUFFER_MS  = 4 * 60 * 60 * 1000; // 4 hours — covers 3 completed + boundary
+const xcallyHoldBuffer  = []; // { ts, answered, cumulativeWait }
 
 function xcallyBufferPush(answered, avgHoldtime) {
   if (answered == null || avgHoldtime == null) return;
   const ts             = Date.now();
   const cumulativeWait = answered * avgHoldtime;
   const prev           = xcallyHoldBuffer[xcallyHoldBuffer.length - 1];
-  // Day reset detection — answered rolls back to 0 at midnight
-  if (prev && answered < prev.answered) xcallyHoldBuffer.length = 0;
+  if (prev && answered < prev.answered) xcallyHoldBuffer.length = 0; // midnight reset
   xcallyHoldBuffer.push({ ts, answered, cumulativeWait });
-  // Evict entries older than 3 hours
   const cutoff = ts - XCALLY_BUFFER_MS;
   while (xcallyHoldBuffer.length > 1 && xcallyHoldBuffer[0].ts < cutoff) xcallyHoldBuffer.shift();
-  // Weighted avg: delta cumulativeWait / delta answered over the window
-  if (xcallyHoldBuffer.length >= 2) {
-    const first   = xcallyHoldBuffer[0];
-    const last    = xcallyHoldBuffer[xcallyHoldBuffer.length - 1];
-    const dAns    = last.answered       - first.answered;
-    const dWait   = last.cumulativeWait - first.cumulativeWait;
-    xcally3hrAvgWait = dAns > 0 ? Math.round(dWait / dAns) : null;
+}
+
+// Returns speed-of-answer for each of the last 3 completed EST hours, newest first
+function xcallyHourlyStats() {
+  if (xcallyHoldBuffer.length < 2) return [];
+  const now = new Date();
+  // Compute EST offset: diff between UTC and EST wall-clock time
+  const parts  = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(now);
+  const gp = t => parseInt(parts.find(p => p.type === t).value);
+  const estNowMs    = Date.UTC(gp('year'), gp('month') - 1, gp('day'), gp('hour'), gp('minute'), gp('second'));
+  const offsetMs    = now.getTime() - estNowMs; // how far UTC is ahead of EST
+  const estHour     = gp('hour');
+
+  const results = [];
+  for (let h = 1; h <= 3; h++) {
+    // UTC timestamps for this EST hour boundary
+    const hourStartMs = Date.UTC(gp('year'), gp('month') - 1, gp('day'), estHour - h,     0, 0) + offsetMs;
+    const hourEndMs   = Date.UTC(gp('year'), gp('month') - 1, gp('day'), estHour - h + 1, 0, 0) + offsetMs;
+
+    const startSnap = xcallyHoldBuffer.filter(e => e.ts <= hourStartMs).at(-1);
+    const endSnap   = xcallyHoldBuffer.filter(e => e.ts <= hourEndMs).at(-1);
+
+    let avgWait = null;
+    if (startSnap && endSnap && endSnap !== startSnap) {
+      const dAns  = endSnap.answered       - startSnap.answered;
+      const dWait = endSnap.cumulativeWait - startSnap.cumulativeWait;
+      avgWait = dAns > 0 ? Math.round(dWait / dAns) : null;
+    }
+
+    const label = new Date(hourStartMs).toLocaleTimeString('en-US', {
+      timeZone: 'America/New_York', hour: 'numeric', hour12: true,
+    });
+    results.push({ label, avgWait });
   }
+  return results; // [most recent completed hour, ..., 3 hours ago]
 }
 
 async function pollXcallyBuffer() {
@@ -1898,7 +1926,6 @@ async function pollXcallyBuffer() {
   } catch (_) {}
 }
 
-// Poll every 60s for 3-hour rolling avg — separate from the on-demand realtime endpoint
 pollXcallyBuffer();
 setInterval(pollXcallyBuffer, 60 * 1000);
 
@@ -1925,15 +1952,14 @@ app.get('/api/xcally/queue', async (req, res) => {
       ? Math.max(...activeCallers.map(r => r.holdtime || 0))
       : 0;
 
-    // Also feed this fresh reading into the 3-hr buffer
     xcallyBufferPush(queue.answered, queue.avgholdtime ?? queue.avgHoldtime ?? queue.avg_holdtime ?? null);
 
     res.json({
-      waiting:        queue.waiting,
+      waiting:     queue.waiting,
       longestWait,
-      answered:       queue.answered,
-      abandoned:      queue.abandoned,
-      threeHrAvgWait: xcally3hrAvgWait,
+      answered:    queue.answered,
+      abandoned:   queue.abandoned,
+      hourlyStats: xcallyHourlyStats(),
     });
   } catch (err) {
     console.error('Xcally queue error:', err.message);
