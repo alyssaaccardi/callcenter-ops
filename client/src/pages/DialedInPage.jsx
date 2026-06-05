@@ -70,7 +70,9 @@ function spawnPhones() {
 function classifyByCC(agents) {
   const groups = { savvy: [], mitel: [] };
   for (const a of agents) {
-    ((a.callCenter || '').toLowerCase().includes('savvy') ? groups.savvy : groups.mitel).push(a.name);
+    const cc = (a.callCenter || '').toLowerCase();
+    if (cc.includes('savvy')) groups.savvy.push(a.name);
+    else if (cc.includes('mitel')) groups.mitel.push(a.name);
   }
   return groups;
 }
@@ -265,7 +267,8 @@ export default function DialedInPage() {
 
     async function fetchAgents() {
       try {
-        const res = await fetch('/api/monday/agents');
+        const agentUrl = token ? `/api/monday/agents?t=${encodeURIComponent(token)}` : '/api/monday/agents';
+        const res = await fetch(agentUrl);
         if (!res.ok) return;
         const { agents: list } = await res.json();
         const here    = list.filter(a => (a.status || '').toLowerCase().includes('here'));

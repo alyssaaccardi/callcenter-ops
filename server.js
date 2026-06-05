@@ -810,7 +810,15 @@ app.get('/api/wix/status', requireAuth, async (req, res) => {
 });
 
 // ─── Monday.com: Get Agents (cursor-paginated) ───────────────────────────────
-app.get('/api/monday/agents', requireAuth, async (req, res) => {
+app.get('/api/monday/agents', (req, res, next) => {
+  const token = req.query.t;
+  if (token) {
+    const sessions = loadTvSessions();
+    if (!sessions.has(token)) return res.status(401).json({ error: 'Unauthorized' });
+    return next();
+  }
+  requireAuth(req, res, next);
+}, async (req, res) => {
   const apiKey         = process.env.MONDAY_API_KEY;
   const boardId        = process.env.MONDAY_BOARD_ID;
   const statusColumnId = process.env.MONDAY_STATUS_COLUMN_ID    || 'status';
