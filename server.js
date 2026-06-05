@@ -1859,7 +1859,48 @@ app.get('/api/monday/account-review', async (req, res) => {
 });
 
 // ─── Xcally Realtime Queue ───────────────────────────────────────────────────
-const XCALLY_QUEUE_NAME = 'Answering_Legal';
+const XCALLY_QUEUE_NAME  = 'Answering_Legal';
+const XCALLY_BUFFER_MS   = 3 * 60 * 60 * 1000; // 3 hours
+const xcallyHoldBuffer   = []; // { ts, answered, cumulativeWait }
+let   xcally3hrAvgWait   = null;
+
+function xcallyBufferPush(answered, avgHoldtime) {
+  if (answered == null || avgHoldtime == null) return;
+  const ts             = Date.now();
+  const cumulativeWait = answered * avgHoldtime;
+  const prev           = xcallyHoldBuffer[xcallyHoldBuffer.length - 1];
+  // Day reset detection — answered rolls back to 0 at midnight
+  if (prev && answered < prev.answered) xcallyHoldBuffer.length = 0;
+  xcallyHoldBuffer.push({ ts, answered, cumulativeWait });
+  // Evict entries older than 3 hours
+  const cutoff = ts - XCALLY_BUFFER_MS;
+  while (xcallyHoldBuffer.length > 1 && xcallyHoldBuffer[0].ts < cutoff) xcallyHoldBuffer.shift();
+  // Weighted avg: delta cumulativeWait / delta answered over the window
+  if (xcallyHoldBuffer.length >= 2) {
+    const first   = xcallyHoldBuffer[0];
+    const last    = xcallyHoldBuffer[xcallyHoldBuffer.length - 1];
+    const dAns    = last.answered       - first.answered;
+    const dWait   = last.cumulativeWait - first.cumulativeWait;
+    xcally3hrAvgWait = dAns > 0 ? Math.round(dWait / dAns) : null;
+  }
+}
+
+async function pollXcallyBuffer() {
+  try {
+    const base = process.env.XCALLY_URL;
+    const user = process.env.XCALLY_USER;
+    const pass = process.env.XCALLY_PASS;
+    if (!base || !user || !pass) return;
+    const auth = { username: user, password: pass };
+    const queueRes = await axios.get(`${base}/api/realtime/queues`, { auth });
+    const queue = (queueRes.data?.rows || []).find(q => q.name === XCALLY_QUEUE_NAME);
+    if (queue) xcallyBufferPush(queue.answered, queue.avgholdtime ?? queue.avgHoldtime ?? queue.avg_holdtime ?? null);
+  } catch (_) {}
+}
+
+// Poll every 60s for 3-hour rolling avg — separate from the on-demand realtime endpoint
+pollXcallyBuffer();
+setInterval(pollXcallyBuffer, 60 * 1000);
 
 app.get('/api/xcally/queue', async (req, res) => {
   try {
@@ -1884,11 +1925,15 @@ app.get('/api/xcally/queue', async (req, res) => {
       ? Math.max(...activeCallers.map(r => r.holdtime || 0))
       : 0;
 
+    // Also feed this fresh reading into the 3-hr buffer
+    xcallyBufferPush(queue.answered, queue.avgholdtime ?? queue.avgHoldtime ?? queue.avg_holdtime ?? null);
+
     res.json({
-      waiting:     queue.waiting,
+      waiting:        queue.waiting,
       longestWait,
-      answered:    queue.answered,
-      abandoned:   queue.abandoned,
+      answered:       queue.answered,
+      abandoned:      queue.abandoned,
+      threeHrAvgWait: xcally3hrAvgWait,
     });
   } catch (err) {
     console.error('Xcally queue error:', err.message);

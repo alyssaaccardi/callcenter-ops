@@ -83,7 +83,7 @@ function fmtSeconds(s) {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, message, changedBy, changedAt, counts, xcally, queueStats }) {
+function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, message, changedBy, changedAt, counts, xcally, queueStats, threeHrAvgWait }) {
   function fmtAttr() {
     if (!changedBy || !changedAt) return '';
     return `Updated by ${changedBy} at ${new Date(changedAt).toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })} EST`;
@@ -134,6 +134,11 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
               <div className="tv-queue-stat-label">Longest Wait</div>
               <div className="tv-queue-stat-value">{fmtSeconds(xcally?.longestWait)}</div>
             </div>
+            <div className="tv-queue-stat-divider" />
+            <div className="tv-queue-stat">
+              <div className="tv-queue-stat-label">Avg Hold (3h)</div>
+              <div className="tv-queue-stat-value">{fmtSeconds(threeHrAvgWait)}</div>
+            </div>
           </div>
         )}
         {queueStats?.queues?.length > 0 && (
@@ -158,6 +163,10 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
                 </span>
               </div>
             ))}
+            <div className="tv-mitel-3hr-row">
+              <span className="tv-mitel-3hr-label">Avg Hold (3h)</span>
+              <span className="tv-mitel-3hr-value">{fmtSeconds(threeHrAvgWait)}</span>
+            </div>
           </div>
         )}
       </div>
@@ -402,12 +411,20 @@ export default function DialedInPage() {
             name="Savvy Phone" didCount={dids?.savvy} didPop={didPop.savvy}
             message={savvy?.message} changedBy={savvy?.changedBy} changedAt={savvy?.changedAt}
             counts={agents.savvy} xcally={xcally}
+            threeHrAvgWait={xcally?.threeHrAvgWait ?? null}
           />
           <CcPanel
             isUp={mitelUp} locationLabel="Mitel Location" carrierLabel="via Bandwidth"
             name="Mitel Classic" didCount={dids?.mitel} didPop={didPop.mitel}
             message={mitel?.message} changedBy={mitel?.changedBy} changedAt={mitel?.changedAt}
             counts={agents.mitel} queueStats={mitelStats}
+            threeHrAvgWait={mitelStats?.queues?.length > 0 ? (() => {
+              const qs = mitelStats.queues.filter(q => q.threeHrAvgWait != null && q.threeHrAnswered > 0);
+              if (!qs.length) return null;
+              const totalAns  = qs.reduce((s, q) => s + q.threeHrAnswered, 0);
+              const weightedW = qs.reduce((s, q) => s + q.threeHrAvgWait * q.threeHrAnswered, 0);
+              return totalAns > 0 ? Math.round(weightedW / totalAns) : null;
+            })() : null}
           />
         </div>
 

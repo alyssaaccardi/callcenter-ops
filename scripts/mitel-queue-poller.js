@@ -105,7 +105,7 @@ async function putBin(binId, data) {
 async function fetchQueueStats() {
   const p = await getPool();
 
-  const [todayResult, recentResult] = await Promise.all([
+  const [todayResult, recentResult, threeHrResult] = await Promise.all([
     // Today's running totals
     p.request().query(`
       SELECT
@@ -134,21 +134,37 @@ async function fetchQueueStats() {
         AND CallStartTime >= DATEADD(MINUTE, -15, GETDATE())
       GROUP BY Queue
     `),
+    // Rolling 3-hour avg hold time
+    p.request().query(`
+      SELECT
+        Queue,
+        COUNT(*) AS threeHrAnswered,
+        AVG(CASE WHEN TimeToAnswer > 0 THEN CAST(TimeToAnswer AS float) END) AS threeHrAvgWait
+      FROM [dbo].[tblData_LC_Trace]
+      WHERE Queue IN ('P862','P861','P803')
+        AND PegCount = 1
+        AND TimeToAnswer IS NOT NULL
+        AND CallStartTime >= DATEADD(HOUR, -3, GETDATE())
+      GROUP BY Queue
+    `),
   ]);
 
   const queues = ['P862', 'P861', 'P803'].map(id => {
-    const t = todayResult.recordset.find(r => r.Queue === id);
-    const r = recentResult.recordset.find(r => r.Queue === id);
+    const t  = todayResult.recordset.find(r => r.Queue === id);
+    const r  = recentResult.recordset.find(r => r.Queue === id);
+    const h3 = threeHrResult.recordset.find(r => r.Queue === id);
     return {
       id,
-      name:           QUEUE_MAP[id],
-      answered:       t?.answered    ?? 0,
-      abandoned:      t?.abandoned   ?? 0,
-      avgWait:        t?.avgWait     != null ? Math.round(t.avgWait)        : null,
-      avgDuration:    t?.avgDuration != null ? Math.round(t.avgDuration)    : null,
-      recentAnswered: r?.recentAnswered ?? 0,
-      recentAvgWait:  r?.recentAvgWait  != null ? Math.round(r.recentAvgWait) : null,
-      recentMaxWait:  r?.recentMaxWait  ?? null,
+      name:            QUEUE_MAP[id],
+      answered:        t?.answered    ?? 0,
+      abandoned:       t?.abandoned   ?? 0,
+      avgWait:         t?.avgWait     != null ? Math.round(t.avgWait)         : null,
+      avgDuration:     t?.avgDuration != null ? Math.round(t.avgDuration)     : null,
+      recentAnswered:  r?.recentAnswered ?? 0,
+      recentAvgWait:   r?.recentAvgWait  != null ? Math.round(r.recentAvgWait)  : null,
+      recentMaxWait:   r?.recentMaxWait  ?? null,
+      threeHrAnswered: h3?.threeHrAnswered ?? 0,
+      threeHrAvgWait:  h3?.threeHrAvgWait  != null ? Math.round(h3.threeHrAvgWait) : null,
     };
   });
   return { queues, updatedAt: new Date().toISOString() };
