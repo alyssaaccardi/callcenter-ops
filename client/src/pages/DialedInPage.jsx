@@ -149,30 +149,35 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
             )}
           </>
         )}
-        {queueStats?.queues?.length > 0 && (
-          <div className={`tv-mitel-stats${queueStats.updatedAt && Date.now() - new Date(queueStats.updatedAt).getTime() > 60000 ? ' stale' : ''}`}>
-            <div className="tv-mitel-stats-header">
-              <span className="tv-mitel-stats-title">Live Queues</span>
-              <span className="tv-mitel-stats-cols">
-                <span>Holding</span><span>Wait</span><span>Ans</span>
-              </span>
-            </div>
-            {queueStats.queues.map(q => (
-              <div key={q.id} className={`tv-mitel-stats-row${q.waiting > 0 ? ' tv-queue-active' : ''}`}>
-                <span className="tv-mitel-stats-queue">{q.name}</span>
-                <span className="tv-mitel-stats-cols">
-                  <span className={`tv-mitel-waiting${q.waiting > 0 ? ' has-waiting' : ''}`}>
-                    {q.waiting != null ? q.waiting : '—'}
-                  </span>
-                  <span className="tv-mitel-wait">
-                    {q.longestWait != null ? fmtSeconds(q.longestWait) : (q.recentMaxWait != null ? fmtSeconds(q.recentMaxWait) : '—')}
-                  </span>
-                  <span className="tv-mitel-answered">{q.answered != null ? q.answered.toLocaleString() : '—'}</span>
-                </span>
+        {queueStats?.queues?.length > 0 && (() => {
+          const qs           = queueStats.queues;
+          const stale        = queueStats.updatedAt && Date.now() - new Date(queueStats.updatedAt).getTime() > 60000;
+          const totalAns     = qs.reduce((s, q) => s + (q.answered || 0), 0);
+          const totalAbn     = qs.reduce((s, q) => s + (q.abandoned || 0), 0);
+          const weightedWait = qs.reduce((s, q) => s + (q.avgWait || 0) * (q.answered || 0), 0);
+          const avgHold      = totalAns > 0 ? Math.round(weightedWait / totalAns) : null;
+          const recentWait   = qs.reduce((s, q) => s + (q.recentAvgWait || 0) * (q.recentAnswered || 0), 0);
+          const recentAns    = qs.reduce((s, q) => s + (q.recentAnswered || 0), 0);
+          const recentAvg    = recentAns > 0 ? Math.round(recentWait / recentAns) : null;
+          return (
+            <div className={`tv-queue-stats tv-mitel-agg${stale ? ' stale' : ''}`}>
+              <div className="tv-queue-stat">
+                <div className="tv-queue-stat-label">Calls Today</div>
+                <div className="tv-queue-stat-value">{totalAns.toLocaleString()}</div>
               </div>
-            ))}
-          </div>
-        )}
+              <div className="tv-queue-stat-divider" />
+              <div className="tv-queue-stat">
+                <div className="tv-queue-stat-label">Avg Hold</div>
+                <div className="tv-queue-stat-value">{fmtSeconds(avgHold)}</div>
+              </div>
+              <div className="tv-queue-stat-divider" />
+              <div className="tv-queue-stat">
+                <div className="tv-queue-stat-label">15m Avg Hold</div>
+                <div className="tv-queue-stat-value">{fmtSeconds(recentAvg)}</div>
+              </div>
+            </div>
+          );
+        })()}
         {queueStats?.hourlyStats?.length > 0 && (
           <div className="tv-hourly-stats">
             <div className="tv-hourly-stats-title">Speed of Answer</div>
