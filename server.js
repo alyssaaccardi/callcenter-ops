@@ -1863,13 +1863,12 @@ const XCALLY_QUEUE_NAME = 'Answering_Legal';
 const XCALLY_BUFFER_MS  = 4 * 60 * 60 * 1000; // 4 hours — covers 3 completed + boundary
 const xcallyHoldBuffer  = []; // { ts, answered, cumulativeWait }
 
-function xcallyBufferPush(answered, avgHoldtime) {
-  if (answered == null || avgHoldtime == null) return;
-  const ts             = Date.now();
-  const cumulativeWait = answered * avgHoldtime;
-  const prev           = xcallyHoldBuffer[xcallyHoldBuffer.length - 1];
+function xcallyBufferPush(answered, sumHoldTime) {
+  if (answered == null || sumHoldTime == null) return;
+  const ts   = Date.now();
+  const prev = xcallyHoldBuffer[xcallyHoldBuffer.length - 1];
   if (prev && answered < prev.answered) xcallyHoldBuffer.length = 0; // midnight reset
-  xcallyHoldBuffer.push({ ts, answered, cumulativeWait });
+  xcallyHoldBuffer.push({ ts, answered, cumulativeWait: sumHoldTime });
   const cutoff = ts - XCALLY_BUFFER_MS;
   while (xcallyHoldBuffer.length > 1 && xcallyHoldBuffer[0].ts < cutoff) xcallyHoldBuffer.shift();
 }
@@ -1922,7 +1921,7 @@ async function pollXcallyBuffer() {
     const auth = { username: user, password: pass };
     const queueRes = await axios.get(`${base}/api/realtime/queues`, { auth });
     const queue = (queueRes.data?.rows || []).find(q => q.name === XCALLY_QUEUE_NAME);
-    if (queue) xcallyBufferPush(queue.answered, queue.avgholdtime ?? queue.avgHoldtime ?? queue.avg_holdtime ?? null);
+    if (queue) xcallyBufferPush(queue.answered, queue.sumHoldTime ?? null);
   } catch (_) {}
 }
 
@@ -1952,14 +1951,18 @@ app.get('/api/xcally/queue', async (req, res) => {
       ? Math.max(...activeCallers.map(r => r.holdtime || 0))
       : 0;
 
-    xcallyBufferPush(queue.answered, queue.avgholdtime ?? queue.avgHoldtime ?? queue.avg_holdtime ?? null);
+    xcallyBufferPush(queue.answered, queue.sumHoldTime ?? null);
+
+    const avgHoldTime = queue.answered > 0 && queue.sumHoldTime != null
+      ? Math.round(queue.sumHoldTime / queue.answered) : null;
 
     res.json({
-      waiting:     queue.waiting,
+      waiting:      queue.waiting,
       longestWait,
-      answered:    queue.answered,
-      abandoned:   queue.abandoned,
-      hourlyStats: xcallyHourlyStats(),
+      answered:     queue.answered,
+      abandoned:    queue.abandoned,
+      avgHoldTime,
+      hourlyStats:  xcallyHourlyStats(),
     });
   } catch (err) {
     console.error('Xcally queue error:', err.message);

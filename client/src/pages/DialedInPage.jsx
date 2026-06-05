@@ -132,13 +132,18 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
               </div>
               <div className="tv-queue-stat-divider" />
               <div className="tv-queue-stat">
+                <div className="tv-queue-stat-label">Avg Hold</div>
+                <div className="tv-queue-stat-value">{fmtSeconds(xcally?.avgHoldTime)}</div>
+              </div>
+              <div className="tv-queue-stat-divider" />
+              <div className="tv-queue-stat">
                 <div className="tv-queue-stat-label">Longest Wait</div>
                 <div className="tv-queue-stat-value">{fmtSeconds(xcally?.longestWait)}</div>
               </div>
             </div>
             {xcally?.hourlyStats?.length > 0 && (
               <div className="tv-hourly-stats">
-                <div className="tv-hourly-stats-title">Speed of Answer</div>
+                <div className="tv-hourly-stats-title">Avg Hold by Hour</div>
                 {xcally.hourlyStats.map(h => (
                   <div className="tv-hourly-stats-row" key={h.label}>
                     <span className="tv-hourly-stats-label">{h.label}</span>
@@ -180,7 +185,7 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
         })()}
         {queueStats?.hourlyStats?.length > 0 && (
           <div className="tv-hourly-stats">
-            <div className="tv-hourly-stats-title">Speed of Answer</div>
+            <div className="tv-hourly-stats-title">Avg Hold by Hour</div>
             {queueStats.hourlyStats.map(h => (
               <div className="tv-hourly-stats-row" key={h.label}>
                 <span className="tv-hourly-stats-label">{h.label}</span>
