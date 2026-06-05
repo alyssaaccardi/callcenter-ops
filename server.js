@@ -1859,9 +1859,26 @@ app.get('/api/monday/account-review', async (req, res) => {
 });
 
 // ─── Xcally Realtime Queue ───────────────────────────────────────────────────
-const XCALLY_QUEUE_NAME = 'Answering_Legal';
-const XCALLY_BUFFER_MS  = 4 * 60 * 60 * 1000; // 4 hours — covers 3 completed + boundary
-const xcallyHoldBuffer  = []; // { ts, answered, cumulativeWait }
+const XCALLY_QUEUE_NAME  = 'Answering_Legal';
+const XCALLY_BUFFER_MS   = 4 * 60 * 60 * 1000; // 4 hours — covers 3 completed + boundary
+const XCALLY_BUFFER_FILE = path.join(__dirname, 'xcally-buffer.json');
+const xcallyHoldBuffer   = []; // { ts, answered, cumulativeWait }
+
+// Persist buffer so server restarts don't lose hours of history
+function saveXcallyBuffer() {
+  try { fs.writeFileSync(XCALLY_BUFFER_FILE, JSON.stringify(xcallyHoldBuffer)); } catch (_) {}
+}
+function loadXcallyBuffer() {
+  try {
+    const data = JSON.parse(fs.readFileSync(XCALLY_BUFFER_FILE, 'utf8'));
+    if (Array.isArray(data)) {
+      const cutoff = Date.now() - XCALLY_BUFFER_MS;
+      xcallyHoldBuffer.push(...data.filter(e => e.ts > cutoff && e.answered != null && e.cumulativeWait != null));
+    }
+  } catch (_) {}
+}
+loadXcallyBuffer();
+setInterval(saveXcallyBuffer, 60 * 1000);
 
 function xcallyBufferPush(answered, sumHoldTime) {
   if (answered == null || sumHoldTime == null) return;
