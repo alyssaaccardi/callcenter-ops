@@ -18,6 +18,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 let mitelQueueCache = null;
+let mitelLastPush   = 0;
 const mitelSseClients = new Set();
 
 // Cache for Zendesk incremental public-reply maps (avoids hammering the 10 req/min limit)
@@ -1998,10 +1999,20 @@ app.post('/api/mitel/queue-stats', (req, res) => {
     return res.status(400).json({ error: 'Invalid payload' });
   }
   mitelQueueCache = data;
+  mitelLastPush   = Date.now();
   const payload = `data: ${JSON.stringify(data)}\n\n`;
   for (const client of mitelSseClients) client.write(payload);
   res.json({ ok: true });
 });
+
+// Watchdog: if no push in 90s, notify SSE clients the poller is offline
+setInterval(() => {
+  if (mitelQueueCache && Date.now() - mitelLastPush > 90_000) {
+    mitelQueueCache = null;
+    const offline = `data: ${JSON.stringify({ offline: true })}\n\n`;
+    for (const client of mitelSseClients) client.write(offline);
+  }
+}, 30_000);
 
 // Mitel queue stats — returns from in-memory cache (updated by office PC push)
 app.get('/api/mitel/queue-stats', (req, res) => {
@@ -2035,7 +2046,7 @@ app.get('/api/mitel/queue-stats/stream', (req, res) => {
   });
   res.flushHeaders();
 
-  if (mitelQueueCache) res.write(`data: ${JSON.stringify(mitelQueueCache)}\n\n`);
+  res.write(`data: ${JSON.stringify(mitelQueueCache ?? { offline: true })}\n\n`);
 
   mitelSseClients.add(res);
   const heartbeat = setInterval(() => res.write(':heartbeat\n\n'), 25000);

@@ -159,6 +159,12 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
             )}
           </>
         )}
+        {queueStats?.offline && (
+          <div className="tv-poller-offline">
+            <span className="tv-poller-offline-dot" />
+            Poller Offline
+          </div>
+        )}
         {queueStats?.queues?.length > 0 && (() => {
           const qs           = queueStats.queues;
           const stale        = queueStats.updatedAt && Date.now() - new Date(queueStats.updatedAt).getTime() > 60000;

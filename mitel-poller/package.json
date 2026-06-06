@@ -1,7 +1,7 @@
 {
   "name": "mitel-poller",
   "version": "1.0.0",
-  "description": "Mitel CCM queue stats poller — runs on office PC, pushes to JSONBin",
+  "description": "Mitel CCM queue stats poller — runs on office PC, pushes to ops server",
   "main": "mitel-queue-poller.js",
   "scripts": {
     "start": "node mitel-queue-poller.js"

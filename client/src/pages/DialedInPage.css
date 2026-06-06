@@ -315,6 +315,18 @@
 .tv-mitel-wait { color: #c8d8f8; }
 .tv-mitel-stats.stale { opacity: 0.45; }
 .tv-mitel-stats.stale .tv-mitel-stats-title::after { content: ' ⚠'; color: #f59e0b; }
+.tv-poller-offline {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 8px; padding: 4px 10px; border-radius: 4px;
+  background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25);
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: #ef4444;
+}
+.tv-poller-offline-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: #ef4444;
+  animation: tv-pulse-red 1s ease-in-out infinite;
+}
+
 .tv-hourly-stats { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 3px; }
 .tv-hourly-stats-title { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(8px, 0.9vw, 11px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 1px; }
 .tv-hourly-stats-cols { display: flex; align-items: center; gap: 10px; }
