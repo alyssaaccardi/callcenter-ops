@@ -109,9 +109,10 @@ async function fetchQueueStats() {
         AND CallStartTime >= DATEADD(MINUTE, -15, GETDATE())
       GROUP BY Queue
     `),
-    // Per-hour speed of answer — last 4 hours grouped by hour
+    // Last 3 complete hours with meaningful data — DB lags ~2hrs so we let the
+    // data tell us which hours are available rather than assuming "now minus N"
     p.request().query(`
-      SELECT
+      SELECT TOP 3
         DATEPART(HOUR, CallStartTime) AS HourOfDay,
         COUNT(*)                      AS answered,
         AVG(CAST(TimeToAnswer AS float)) AS avgWait
@@ -120,9 +121,10 @@ async function fetchQueueStats() {
         AND PegCount = 1
         AND TimeToAnswer IS NOT NULL
         AND TimeToAnswer > 0
-        AND CallStartTime >= DATEADD(HOUR, -4, GETDATE())
+        AND CallStartTime >= CAST(GETDATE() AS DATE)
       GROUP BY DATEPART(HOUR, CallStartTime)
-      ORDER BY HourOfDay ASC
+      HAVING COUNT(*) >= 20
+      ORDER BY HourOfDay DESC
     `),
   ]);
 
@@ -142,18 +144,14 @@ async function fetchQueueStats() {
     };
   });
 
-  // Per-hour breakdown (all queues combined), 3 completed hours newest first
-  const nowHour = new Date().getHours();
-  const hourlyStats = [1, 2, 3].map(h => {
-    const targetHour = (nowHour - h + 24) % 24;
-    const row  = hourlyResult.recordset.find(r => r.HourOfDay === targetHour);
-    const d    = new Date();
-    d.setHours(targetHour, 0, 0, 0);
-    const label = d.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+  // Build hourly stats from whatever 3 complete hours the DB has (newest first)
+  const hourlyStats = hourlyResult.recordset.map(row => {
+    const d = new Date();
+    d.setHours(row.HourOfDay, 0, 0, 0);
     return {
-      label,
-      avgWait:  row?.avgWait  != null ? Math.round(row.avgWait) : null,
-      answered: row?.answered ?? 0,
+      label:    d.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true }),
+      avgWait:  row.avgWait != null ? Math.round(row.avgWait) : null,
+      answered: row.answered ?? 0,
     };
   });
 

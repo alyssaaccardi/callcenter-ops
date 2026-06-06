@@ -144,12 +144,17 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
             {xcally?.hourlyStats?.length > 0 && (
               <div className="tv-hourly-stats">
                 <div className="tv-hourly-stats-title">Avg Hold by Hour</div>
-                {xcally.hourlyStats.map(h => (
-                  <div className="tv-hourly-stats-row" key={h.label}>
-                    <span className="tv-hourly-stats-label">{h.label}</span>
-                    <span className="tv-hourly-stats-value">{fmtSeconds(h.avgWait)}</span>
-                  </div>
-                ))}
+                <div className="tv-hourly-stats-cols">
+                  {xcally.hourlyStats.map((h, i) => (
+                    <React.Fragment key={h.label}>
+                      {i > 0 && <div className="tv-hourly-stats-divider" />}
+                      <div className="tv-hourly-stats-col">
+                        <span className="tv-hourly-stats-label">{h.label}</span>
+                        <span className="tv-hourly-stats-value">{fmtSeconds(h.avgWait)}</span>
+                      </div>
+                    </React.Fragment>
+                  ))}
+                </div>
               </div>
             )}
           </>
@@ -186,12 +191,17 @@ function CcPanel({ isUp, locationLabel, carrierLabel, name, didCount, didPop, me
         {queueStats?.hourlyStats?.length > 0 && (
           <div className="tv-hourly-stats">
             <div className="tv-hourly-stats-title">Avg Hold by Hour</div>
-            {queueStats.hourlyStats.map(h => (
-              <div className="tv-hourly-stats-row" key={h.label}>
-                <span className="tv-hourly-stats-label">{h.label}</span>
-                <span className="tv-hourly-stats-value">{fmtSeconds(h.avgWait)}</span>
-              </div>
-            ))}
+            <div className="tv-hourly-stats-cols">
+              {queueStats.hourlyStats.map((h, i) => (
+                <React.Fragment key={h.label}>
+                  {i > 0 && <div className="tv-hourly-stats-divider" />}
+                  <div className="tv-hourly-stats-col">
+                    <span className="tv-hourly-stats-label">{h.label}</span>
+                    <span className="tv-hourly-stats-value">{fmtSeconds(h.avgWait)}</span>
+                  </div>
+                </React.Fragment>
+              ))}
+            </div>
           </div>
         )}
       </div>
