@@ -111,11 +111,11 @@ export default function StaffBroadcast() {
   const previewLinks = links.filter(l => l.url.trim());
 
   return (
-    <div className="sb-page">
-      <div className="sb-header">
+    <div>
+      <div className="page-header">
         <div>
-          <h1 className="sb-title">Staff Site Broadcast</h1>
-          <p className="sb-subtitle">Publish an announcement directly to the Answering Legal staff site homepage.</p>
+          <div className="page-title">Staff Site</div>
+          <div className="page-sub">Publish an announcement to the Answering Legal staff site homepage</div>
         </div>
         {live && (
           <div className="sb-live-badge">
@@ -125,10 +125,10 @@ export default function StaffBroadcast() {
         )}
       </div>
 
-      <div className="sb-layout">
+      <div className="grid-2">
 
-        {/* ── Editor ── */}
-        <div className="card sb-editor">
+        {/* ── Left: Editor ── */}
+        <div className="card">
           <div className="card-title">Announcement</div>
 
           <label className="sb-label">Title</label>
@@ -148,26 +148,28 @@ export default function StaffBroadcast() {
             rows={5}
           />
 
-          <label className="sb-label">Links <span className="sb-label-hint">(optional)</span></label>
+          <label className="sb-label">
+            Links <span className="sb-label-hint">(optional)</span>
+          </label>
           <div className="sb-links-list">
             {links.map((l, i) => (
               <div className="sb-link-row" key={i}>
                 <input
                   type="text"
-                  className="sb-link-label"
                   placeholder="Label"
                   value={l.label}
                   onChange={e => updateLink(i, 'label', e.target.value)}
+                  style={{ flex: '0 0 140px' }}
                 />
                 <input
                   type="url"
-                  className="sb-link-url"
                   placeholder="https://..."
                   value={l.url}
                   onChange={e => updateLink(i, 'url', e.target.value)}
+                  style={{ flex: 1 }}
                 />
                 {links.length > 1 && (
-                  <button className="sb-link-remove" onClick={() => removeLink(i)} title="Remove">×</button>
+                  <button className="sb-link-remove" onClick={() => removeLink(i)}>×</button>
                 )}
               </div>
             ))}
@@ -192,41 +194,43 @@ export default function StaffBroadcast() {
           )}
         </div>
 
-        {/* ── Preview ── */}
-        <div className="card">
-          <div className="card-title">Preview</div>
-          {!title && !body && !previewLinks.length ? (
-            <div className="sb-preview-empty">Nothing to preview yet</div>
-          ) : (
-            <div className="sb-preview">
-              {title && <div className="sb-preview-title">{title}</div>}
-              {body  && <div className="sb-preview-body">{body}</div>}
-              {previewLinks.length > 0 && (
-                <ul className="sb-preview-links">
-                  {previewLinks.map((l, i) => (
-                    <li key={i}>
-                      <a href={l.url} target="_blank" rel="noreferrer">{l.label || l.url}</a>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
+        {/* ── Right: Preview + Embed ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-        {/* ── Wix Embed ── */}
-        <div className="card sb-embed-card">
-          <div className="card-title">Wix Embed Code</div>
-          <p className="sb-embed-hint">
-            In the Wix editor, add an <strong>HTML iFrame</strong> element to your homepage and paste this code.
-            It auto-refreshes every 30 seconds.
-          </p>
-          <pre className="sb-embed-code">{buildEmbedCode()}</pre>
-          <button className="btn btn-secondary sb-btn-copy" onClick={copyEmbed}>
-            {copied ? '✓ Copied!' : 'Copy Code'}
-          </button>
-        </div>
+          <div className="card">
+            <div className="card-title">Preview</div>
+            {!title && !body && !previewLinks.length ? (
+              <div className="sb-preview-empty">Nothing to preview yet</div>
+            ) : (
+              <div className="sb-preview">
+                {title && <div className="sb-preview-title">{title}</div>}
+                {body  && <div className="sb-preview-body">{body}</div>}
+                {previewLinks.length > 0 && (
+                  <ul className="sb-preview-links">
+                    {previewLinks.map((l, i) => (
+                      <li key={i}>
+                        <a href={l.url} target="_blank" rel="noreferrer">{l.label || l.url}</a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
 
+          <div className="card">
+            <div className="card-title">Wix Embed Code</div>
+            <p className="sb-embed-hint">
+              In the Wix editor, add an <strong>HTML iFrame</strong> element to your homepage
+              and paste this code. It auto-refreshes every 30 seconds.
+            </p>
+            <pre className="sb-embed-code">{buildEmbedCode()}</pre>
+            <button className="btn btn-secondary sb-copy-btn" onClick={copyEmbed}>
+              {copied ? '✓ Copied!' : 'Copy Code'}
+            </button>
+          </div>
+
+        </div>
       </div>
     </div>
   );
