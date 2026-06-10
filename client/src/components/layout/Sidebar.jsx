@@ -8,6 +8,7 @@ const ALL_NAV_ITEMS = [
   { id: 'sms',              icon: '📱', label: 'SMS Messaging',                    roles: ['super_admin', 'call_center_ops'], section: 'Operations'    },
   { id: 'slack',            icon: '💬', label: 'Slack Workflows',                  roles: ['super_admin', 'call_center_ops'], section: 'Operations'    },
   { id: 'monday',           icon: '📋', label: 'Agent Board',                      roles: ['super_admin', 'call_center_ops'], section: 'Operations'    },
+  { id: 'staff-broadcast',  icon: '📣', label: 'Staff Site',                        roles: ['super_admin', 'call_center_ops'], section: 'Operations'    },
   { id: 'settings',         icon: '⚙️', label: 'Settings',                         roles: ['super_admin', 'call_center_ops'], section: 'Operations'    },
   { id: 'support-center',   icon: '🎧', label: 'Support Center',                   roles: ['super_admin', 'support'],         section: 'Support'       },
   { id: 'account-review',   icon: '🔍', label: 'Account Review',                   roles: ['super_admin', 'support'],         section: 'Support'       },

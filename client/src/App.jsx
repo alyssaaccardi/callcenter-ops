@@ -17,6 +17,7 @@ import TechLeaderboard from './modules/TechLeaderboard';
 import AppPortal from './modules/AppPortal';
 import TechTVPage from './pages/TechTVPage';
 import Settings from './modules/Settings';
+import StaffBroadcast from './modules/StaffBroadcast';
 import UserManagementModule from './modules/UserManagementModule';
 import MobilePage from './pages/MobilePage';
 import LoginPage from './pages/LoginPage';
@@ -51,6 +52,7 @@ function DashboardInner({ user, defaultModule }) {
     'tech-center':      isTech    ? <TechCenter />              : null,
     'tech-leaderboard': isTech    ? <TechLeaderboard />         : null,
     'app-portal':       isTech    ? <AppPortal />               : null,
+    'staff-broadcast':  isOps ? <StaffBroadcast /> : null,
     settings:           (user?.role === 'super_admin' || user?.role === 'call_center_ops') ? <Settings /> : null,
     'user-management':  user?.role === 'super_admin' ? <UserManagementModule /> : null,
   };

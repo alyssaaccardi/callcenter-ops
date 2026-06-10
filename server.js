@@ -810,6 +810,42 @@ app.get('/api/wix/status', requireAuth, async (req, res) => {
   }
 });
 
+// ─── Staff Broadcast ─────────────────────────────────────────────────────────
+const STAFF_BROADCAST_FILE = path.join(__dirname, 'staff-broadcast.json');
+
+function loadBroadcast() {
+  try { return JSON.parse(fs.readFileSync(STAFF_BROADCAST_FILE, 'utf8')); } catch { return null; }
+}
+function saveBroadcast(data) {
+  fs.writeFileSync(STAFF_BROADCAST_FILE, JSON.stringify(data, null, 2));
+}
+
+// Public — no auth — Wix embed fetches this
+app.get('/api/staff-broadcast', (req, res) => {
+  const b = loadBroadcast();
+  if (!b) return res.json({ empty: true });
+  res.json(b);
+});
+
+app.post('/api/staff-broadcast', requireAuth, (req, res) => {
+  const { title, body, links } = req.body;
+  if (!title && !body) return res.status(400).json({ error: 'title or body required' });
+  const data = {
+    title:     title  || '',
+    body:      body   || '',
+    links:     Array.isArray(links) ? links.filter(l => l.url) : [],
+    updatedAt: new Date().toISOString(),
+    updatedBy: req.user?.name || req.user?.email || 'unknown',
+  };
+  saveBroadcast(data);
+  res.json({ ok: true, data });
+});
+
+app.delete('/api/staff-broadcast', requireAuth, (req, res) => {
+  try { fs.unlinkSync(STAFF_BROADCAST_FILE); } catch {}
+  res.json({ ok: true });
+});
+
 // ─── Monday.com: Get Agents (cursor-paginated) ───────────────────────────────
 app.get('/api/monday/agents', (req, res, next) => {
   const token = req.query.t;
