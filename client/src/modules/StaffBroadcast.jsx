@@ -6,33 +6,36 @@ import './StaffBroadcast.css';
 const EMBED_URL = 'https://ops.answeringlegal.com/api/staff-broadcast';
 
 function buildEmbedCode() {
-  return `<div id="al-broadcast"></div>
+  return `<div id="al-bc"></div>
 <script>
-(function() {
-  var el = document.getElementById('al-broadcast');
-  function render(d) {
-    if (!d || d.empty) { el.innerHTML = ''; return; }
-    var html = '<div style="font-family:sans-serif;line-height:1.5;">';
-    if (d.title) html += '<strong style="font-size:1.1em;">' + d.title + '</strong><br>';
-    if (d.body)  html += '<span>' + d.body.replace(/\\n/g,'<br>') + '</span>';
-    if (d.links && d.links.length) {
-      html += '<ul style="margin:8px 0 0;padding-left:18px;">';
-      d.links.forEach(function(l) {
-        html += '<li><a href="' + l.url + '" target="_blank">' + (l.label || l.url) + '</a></li>';
+(function(){
+  var el=document.getElementById('al-bc');
+  function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  function render(d){
+    if(!d||d.empty){el.style.display='none';return;}
+    el.style.display='block';
+    var s='<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.08);max-width:520px;">';
+    if(d.imageUrl) s+='<img src="'+esc(d.imageUrl)+'" style="width:100%;height:auto;display:block;max-height:240px;object-fit:cover;">';
+    s+='<div style="padding:20px 22px;">';
+    if(d.title) s+='<div style="font-size:18px;font-weight:700;color:#1a1a3e;margin-bottom:8px;line-height:1.3;">'+esc(d.title)+'</div>';
+    if(d.body)  s+='<div style="font-size:14px;line-height:1.65;color:#444;margin-bottom:14px;white-space:pre-wrap;">'+esc(d.body)+'</div>';
+    if(d.links&&d.links.length){
+      s+='<div style="display:flex;flex-wrap:wrap;gap:8px;">';
+      d.links.forEach(function(l){
+        s+='<a href="'+esc(l.url)+'" target="_blank" style="display:inline-block;padding:7px 18px;background:#1a6fe8;color:#fff;border-radius:20px;text-decoration:none;font-size:13px;font-weight:600;line-height:1;">'+esc(l.label||l.url)+'</a>';
       });
-      html += '</ul>';
+      s+='</div>';
     }
-    html += '</div>';
-    el.innerHTML = html;
+    s+='</div></div>';
+    el.innerHTML=s;
   }
-  function load() {
-    var x = new XMLHttpRequest();
+  function load(){
+    var x=new XMLHttpRequest();
     x.open('GET','${EMBED_URL}');
-    x.onload = function() { try { render(JSON.parse(x.responseText)); } catch(e) {} };
+    x.onload=function(){try{render(JSON.parse(x.responseText));}catch(e){}};
     x.send();
   }
-  load();
-  setInterval(load, 30000);
+  load();setInterval(load,30000);
 })();
 <\/script>`;
 }
@@ -40,12 +43,14 @@ function buildEmbedCode() {
 export default function StaffBroadcast() {
   const { toast } = useApp();
 
-  const [title, setTitle]   = useState('');
-  const [body, setBody]     = useState('');
-  const [links, setLinks]   = useState([{ label: '', url: '' }]);
-  const [live, setLive]     = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [title, setTitle]       = useState('');
+  const [body, setBody]         = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [links, setLinks]       = useState([{ label: '', url: '' }]);
+  const [live, setLive]         = useState(null);
+  const [saving, setSaving]     = useState(false);
+  const [copied, setCopied]     = useState(false);
+  const [imgError, setImgError] = useState(false);
 
   useEffect(() => {
     api.get('/api/staff-broadcast').then(r => {
@@ -53,6 +58,7 @@ export default function StaffBroadcast() {
       if (d && !d.empty) {
         setTitle(d.title || '');
         setBody(d.body || '');
+        setImageUrl(d.imageUrl || '');
         setLinks(d.links?.length ? [...d.links, { label: '', url: '' }] : [{ label: '', url: '' }]);
         setLive(d);
       }
@@ -80,7 +86,7 @@ export default function StaffBroadcast() {
     }
     setSaving(true);
     try {
-      const { data } = await api.post('/api/staff-broadcast', { title, body, links: cleanLinks });
+      const { data } = await api.post('/api/staff-broadcast', { title, body, imageUrl, links: cleanLinks });
       setLive(data.data);
       toast('Broadcast saved and live on Wix', 'ok');
     } catch {
@@ -94,7 +100,7 @@ export default function StaffBroadcast() {
     if (!window.confirm('Remove the current broadcast from the Wix site?')) return;
     try {
       await api.delete('/api/staff-broadcast');
-      setTitle(''); setBody(''); setLinks([{ label: '', url: '' }]); setLive(null);
+      setTitle(''); setBody(''); setImageUrl(''); setLinks([{ label: '', url: '' }]); setLive(null);
       toast('Broadcast cleared', 'ok');
     } catch {
       toast('Failed to clear broadcast', 'error');
@@ -109,6 +115,7 @@ export default function StaffBroadcast() {
   }
 
   const previewLinks = links.filter(l => l.url.trim());
+  const hasContent   = title || body || previewLinks.length || (imageUrl && !imgError);
 
   return (
     <div>
@@ -145,8 +152,30 @@ export default function StaffBroadcast() {
             placeholder="Details, context, instructions..."
             value={body}
             onChange={e => setBody(e.target.value)}
-            rows={5}
+            rows={4}
           />
+
+          <label className="sb-label">
+            Image URL <span className="sb-label-hint">(optional — paste a direct image link)</span>
+          </label>
+          <input
+            type="url"
+            placeholder="https://example.com/photo.jpg"
+            value={imageUrl}
+            onChange={e => { setImageUrl(e.target.value); setImgError(false); }}
+          />
+          {imageUrl && !imgError && (
+            <div className="sb-img-preview">
+              <img
+                src={imageUrl}
+                alt="preview"
+                onError={() => setImgError(true)}
+              />
+            </div>
+          )}
+          {imageUrl && imgError && (
+            <div className="sb-img-error">Image URL didn't load — check the link</div>
+          )}
 
           <label className="sb-label">
             Links <span className="sb-label-hint">(optional)</span>
@@ -156,7 +185,7 @@ export default function StaffBroadcast() {
               <div className="sb-link-row" key={i}>
                 <input
                   type="text"
-                  placeholder="Label"
+                  placeholder="Button label"
                   value={l.label}
                   onChange={e => updateLink(i, 'label', e.target.value)}
                   style={{ flex: '0 0 140px' }}
@@ -195,25 +224,35 @@ export default function StaffBroadcast() {
         </div>
 
         {/* ── Right: Preview + Embed ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
           <div className="card">
             <div className="card-title">Preview</div>
-            {!title && !body && !previewLinks.length ? (
+            {!hasContent ? (
               <div className="sb-preview-empty">Nothing to preview yet</div>
             ) : (
               <div className="sb-preview">
-                {title && <div className="sb-preview-title">{title}</div>}
-                {body  && <div className="sb-preview-body">{body}</div>}
-                {previewLinks.length > 0 && (
-                  <ul className="sb-preview-links">
-                    {previewLinks.map((l, i) => (
-                      <li key={i}>
-                        <a href={l.url} target="_blank" rel="noreferrer">{l.label || l.url}</a>
-                      </li>
-                    ))}
-                  </ul>
+                {imageUrl && !imgError && (
+                  <img
+                    src={imageUrl}
+                    alt=""
+                    className="sb-preview-img"
+                    onError={() => setImgError(true)}
+                  />
                 )}
+                <div className="sb-preview-body-wrap">
+                  {title && <div className="sb-preview-title">{title}</div>}
+                  {body  && <div className="sb-preview-body">{body}</div>}
+                  {previewLinks.length > 0 && (
+                    <div className="sb-preview-link-pills">
+                      {previewLinks.map((l, i) => (
+                        <a key={i} href={l.url} target="_blank" rel="noreferrer" className="sb-preview-pill">
+                          {l.label || l.url}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

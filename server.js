@@ -829,11 +829,12 @@ app.get('/api/staff-broadcast', (req, res) => {
 });
 
 app.post('/api/staff-broadcast', requireAuth, (req, res) => {
-  const { title, body, links } = req.body;
+  const { title, body, links, imageUrl } = req.body;
   if (!title && !body) return res.status(400).json({ error: 'title or body required' });
   const data = {
-    title:     title  || '',
-    body:      body   || '',
+    title:     title    || '',
+    body:      body     || '',
+    imageUrl:  imageUrl || '',
     links:     Array.isArray(links) ? links.filter(l => l.url) : [],
     updatedAt: new Date().toISOString(),
     updatedBy: req.user?.name || req.user?.email || 'unknown',
