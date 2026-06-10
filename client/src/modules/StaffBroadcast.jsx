@@ -25,14 +25,14 @@ function buildEmbedCode() {
     html += '</div>';
     el.innerHTML = html;
   }
-  function fetch() {
+  function load() {
     var x = new XMLHttpRequest();
     x.open('GET','${EMBED_URL}');
     x.onload = function() { try { render(JSON.parse(x.responseText)); } catch(e) {} };
     x.send();
   }
-  fetch();
-  setInterval(fetch, 30000);
+  load();
+  setInterval(load, 30000);
 })();
 <\/script>`;
 }
@@ -62,7 +62,6 @@ export default function StaffBroadcast() {
   function updateLink(i, field, val) {
     setLinks(prev => {
       const next = prev.map((l, idx) => idx === i ? { ...l, [field]: val } : l);
-      // auto-add a blank row when last row gets filled
       const last = next[next.length - 1];
       if (last.label || last.url) next.push({ label: '', url: '' });
       return next;
@@ -127,13 +126,14 @@ export default function StaffBroadcast() {
       </div>
 
       <div className="sb-layout">
+
         {/* ── Editor ── */}
-        <div className="sb-card sb-editor">
-          <div className="sb-card-title">Announcement</div>
+        <div className="card sb-editor">
+          <div className="card-title">Announcement</div>
 
           <label className="sb-label">Title</label>
           <input
-            className="sb-input"
+            type="text"
             placeholder="e.g. Office closed Monday"
             value={title}
             onChange={e => setTitle(e.target.value)}
@@ -142,7 +142,6 @@ export default function StaffBroadcast() {
 
           <label className="sb-label">Body</label>
           <textarea
-            className="sb-textarea"
             placeholder="Details, context, instructions..."
             value={body}
             onChange={e => setBody(e.target.value)}
@@ -154,13 +153,15 @@ export default function StaffBroadcast() {
             {links.map((l, i) => (
               <div className="sb-link-row" key={i}>
                 <input
-                  className="sb-input sb-link-label"
+                  type="text"
+                  className="sb-link-label"
                   placeholder="Label"
                   value={l.label}
                   onChange={e => updateLink(i, 'label', e.target.value)}
                 />
                 <input
-                  className="sb-input sb-link-url"
+                  type="url"
+                  className="sb-link-url"
                   placeholder="https://..."
                   value={l.url}
                   onChange={e => updateLink(i, 'url', e.target.value)}
@@ -173,11 +174,11 @@ export default function StaffBroadcast() {
           </div>
 
           <div className="sb-actions">
-            <button className="sb-btn sb-btn-primary" onClick={save} disabled={saving}>
+            <button className="btn btn-primary" onClick={save} disabled={saving}>
               {saving ? 'Saving…' : 'Save & Publish'}
             </button>
             {live && (
-              <button className="sb-btn sb-btn-danger" onClick={clear}>Clear from Site</button>
+              <button className="btn btn-danger" onClick={clear}>Clear from Site</button>
             )}
           </div>
 
@@ -192,8 +193,8 @@ export default function StaffBroadcast() {
         </div>
 
         {/* ── Preview ── */}
-        <div className="sb-card sb-preview-card">
-          <div className="sb-card-title">Preview</div>
+        <div className="card">
+          <div className="card-title">Preview</div>
           {!title && !body && !previewLinks.length ? (
             <div className="sb-preview-empty">Nothing to preview yet</div>
           ) : (
@@ -214,17 +215,18 @@ export default function StaffBroadcast() {
         </div>
 
         {/* ── Wix Embed ── */}
-        <div className="sb-card sb-embed-card">
-          <div className="sb-card-title">Wix Embed Code</div>
+        <div className="card sb-embed-card">
+          <div className="card-title">Wix Embed Code</div>
           <p className="sb-embed-hint">
             In the Wix editor, add an <strong>HTML iFrame</strong> element to your homepage and paste this code.
             It auto-refreshes every 30 seconds.
           </p>
           <pre className="sb-embed-code">{buildEmbedCode()}</pre>
-          <button className="sb-btn sb-btn-copy" onClick={copyEmbed}>
+          <button className="btn btn-secondary sb-btn-copy" onClick={copyEmbed}>
             {copied ? '✓ Copied!' : 'Copy Code'}
           </button>
         </div>
+
       </div>
     </div>
   );
