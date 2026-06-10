@@ -820,8 +820,9 @@ function saveBroadcast(data) {
   fs.writeFileSync(STAFF_BROADCAST_FILE, JSON.stringify(data, null, 2));
 }
 
-// Public — no auth — Wix embed fetches this
+// Public — no auth — Wix embed fetches this (open CORS so Wix domains can fetch it)
 app.get('/api/staff-broadcast', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
   const b = loadBroadcast();
   if (!b) return res.json({ empty: true });
   res.json(b);
