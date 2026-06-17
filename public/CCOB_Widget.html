@@ -151,13 +151,16 @@ html, body {
 // ── Config from URL params ──────────────────────────────────────────────────
 // Usage: CCOB_Widget.html?cc=savvy&key=YOUR_KEY&backend=https://your-server.com
 // cc: "savvy" (default) or "mitel"
+// name: override the displayed system name; set to "" to show just "Operational"/"Down"
 const params  = new URLSearchParams(window.location.search);
 const CC      = params.get('cc') || 'savvy';
 const API_KEY = params.get('key') || '';
 const BACKEND = (params.get('backend') || window.location.origin).replace(/\/$/, '');
 const POLL_MS = 30000;
 
-const CC_NAMES = { savvy: 'Savvy Phone', mitel: 'Mitel Classic' };
+const CC_NAMES = { savvy: 'Savvy Phone', mitel: '' };
+const CC_NAME  = params.has('name') ? params.get('name') : (CC_NAMES[CC] ?? CC);
+const PREFIX   = CC_NAME ? `${CC_NAME} — ` : '';
 
 function render(state, message, updatedAt) {
   const widget  = document.getElementById('widget');
@@ -168,8 +171,8 @@ function render(state, message, updatedAt) {
   widget.className = state;
 
   const labels = {
-    operational: `${CC_NAMES[CC] || CC} — Operational`,
-    down:        `${CC_NAMES[CC] || CC} — Down`,
+    operational: `${PREFIX}Operational`,
+    down:        `${PREFIX}Down`,
     loading:     'Checking status…',
     error:       'Status unavailable'
   };
