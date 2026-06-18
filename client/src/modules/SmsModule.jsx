@@ -23,6 +23,7 @@ export default function SmsModule() {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [smsLog, setSmsLog] = useState([]);
+  const [confirm, setConfirm] = useState(null);
 
   useEffect(() => {
     fetchGroups();
@@ -63,11 +64,21 @@ export default function SmsModule() {
     addLog(msg, type);
   }
 
-  async function sendSms() {
+  function sendSms() {
     if (!message.trim()) { toast('Message is required', 'warn'); return; }
     const hasTarget = selectedGroups.length > 0 || belizeSelected || individual.trim();
     if (!hasTarget) { toast('Select at least one recipient or group', 'warn'); return; }
 
+    const recipients = [
+      ...selectedGroups.map(g => g.name || g.id),
+      ...(belizeSelected ? ['Belize Agents'] : []),
+      ...(individual.trim() ? [individual.trim()] : []),
+    ];
+    setConfirm({ recipients, message: message.trim() });
+  }
+
+  async function executeSend() {
+    setConfirm(null);
     setSending(true);
     const errors = [];
 
@@ -116,6 +127,7 @@ export default function SmsModule() {
   }
 
   return (
+    <>
     <div>
       <div className="page-header">
         <div>
@@ -233,5 +245,44 @@ export default function SmsModule() {
         </div>
       </div>
     </div>
+
+    {confirm && (
+      <div className="wf-overlay" onClick={() => setConfirm(null)}>
+        <div className="wf-modal wf-modal-sm" onClick={e => e.stopPropagation()}>
+          <div className="wf-modal-header">
+            <span className="wf-modal-title">Confirm SMS Send</span>
+            <button className="wf-modal-close" onClick={() => setConfirm(null)}>✕</button>
+          </div>
+          <div className="wf-modal-body">
+            <div className="wf-field">
+              <span className="field-label">To</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+                {confirm.recipients.map((r, i) => (
+                  <span key={i} style={{
+                    fontSize: 12, fontWeight: 700, padding: '3px 10px',
+                    borderRadius: 20, background: 'rgba(168,85,247,0.1)',
+                    border: '1px solid rgba(168,85,247,0.25)', color: 'var(--purple, #a855f7)',
+                  }}>{r}</span>
+                ))}
+              </div>
+            </div>
+            <div className="wf-field">
+              <span className="field-label">Message</span>
+              <div style={{
+                marginTop: 2, padding: '10px 12px', borderRadius: 8,
+                background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(168,85,247,0.12)',
+                fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                color: 'var(--text)',
+              }}>{confirm.message}</div>
+            </div>
+          </div>
+          <div className="wf-modal-footer">
+            <button className="btn btn-ghost btn-sm" onClick={() => setConfirm(null)}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={executeSend}>Send</button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
