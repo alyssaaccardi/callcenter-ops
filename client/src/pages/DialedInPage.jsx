@@ -451,13 +451,22 @@ export default function DialedInPage() {
             <div className="tv-panel-accent" style={{ background: 'linear-gradient(180deg, #fbbf24, #f59e0b)' }} />
             <div className="tv-corner tv-corner-tl" /><div className="tv-corner tv-corner-tr" />
             <div className="tv-corner tv-corner-bl" /><div className="tv-corner tv-corner-br" />
-            <div className="tv-panel-inner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
-              <div style={{ fontSize: 'clamp(48px, 5.5vw, 80px)', lineHeight: 1 }}>🛳️</div>
-              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 'clamp(32px, 4vw, 58px)', letterSpacing: '0.06em', color: '#f0f4ff', textAlign: 'center', lineHeight: 1 }}>
-                Bon Voyage, Amit!
+            <div className="tv-panel-inner">
+              <div className="tv-panel-location">Stafford Location</div>
+              <div className="tv-panel-carrier" style={{ color: '#fbbf24' }}>via Bandwidth</div>
+              <div className="tv-panel-name">Savvy Phone</div>
+              <div className="tv-orb-row">
+                <div className="tv-orb" style={{ background: '#9ca3af', boxShadow: 'none', animation: 'none' }} />
+                <div className="tv-status-word" style={{ color: '#9ca3af' }}>Offline</div>
               </div>
-              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 'clamp(14px, 1.5vw, 20px)', fontWeight: 600, letterSpacing: '0.22em', textTransform: 'uppercase', color: '#fbbf24', textAlign: 'center' }}>
-                Fair winds &amp; following seas
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, paddingTop: 8 }}>
+                <div style={{ fontSize: 'clamp(32px, 4vw, 56px)', lineHeight: 1 }}>🛳️</div>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 'clamp(18px, 2.2vw, 30px)', letterSpacing: '0.06em', color: '#fbbf24', textAlign: 'center', lineHeight: 1.1 }}>
+                  Bon Voyage, Amit!
+                </div>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 'clamp(10px, 1.1vw, 14px)', fontWeight: 600, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(240,244,255,0.4)', textAlign: 'center' }}>
+                  Fair winds &amp; following seas
+                </div>
               </div>
             </div>
           </div>
