@@ -2261,12 +2261,32 @@ function normalizeAuditorRow(raw) {
   const normalized = {};
   for (const [key, val] of Object.entries(raw)) {
     const k = String(key).toLowerCase().trim().replace(/[\s_-]+/g, '');
-    if (['accountname', 'account', 'company', 'firmname', 'firm'].includes(k)) normalized.accountName = String(val || '').trim();
-    else if (['emaildomain', 'domain', 'email_domain'].includes(k)) normalized.emailDomain = String(val || '').trim();
-    else if (['customeremail', 'email', 'contactemail', 'customer_email'].includes(k)) normalized.customerEmail = String(val || '').trim();
-    else if (['orgname', 'organizationname', 'org', 'organization', 'org_name'].includes(k)) normalized.orgName = String(val || '').trim();
+    if (['accountname','account','company','firmname','firm','name','client','clientname',
+         'business','businessname','customer','customername','lawfirm','practicename'].includes(k))
+      normalized.accountName = String(val || '').trim();
+    else if (['emaildomain','domain'].includes(k))
+      normalized.emailDomain = String(val || '').trim();
+    else if (['customeremail','email','contactemail','primaryemail','billingemail','emailaddress'].includes(k))
+      normalized.customerEmail = String(val || '').trim();
+    else if (['orgname','organizationname','org','organization'].includes(k))
+      normalized.orgName = String(val || '').trim();
+    else if (['notes','note','reason','cancellationreason','cancellationnote','comments','comment',
+              'cancellationdescription','description','details'].includes(k))
+      normalized.notes = String(val || '').trim();
   }
   return normalized;
+}
+
+// Extract explicit ticket IDs from any cell value (e.g. "See ticket #331182")
+function parseTicketIdsFromRow(raw) {
+  const ids = new Set();
+  const pattern = /(?:ticket\s*#?\s*|#\s*)(\d{5,7})\b/gi;
+  for (const val of Object.values(raw)) {
+    const text = String(val || '');
+    let m;
+    while ((m = pattern.exec(text)) !== null) ids.add(parseInt(m[1]));
+  }
+  return [...ids];
 }
 
 async function zdAuditorGet(url, params = {}) {
@@ -2385,6 +2405,17 @@ async function fetchTicketComments(ticketId) {
   }
 }
 
+async function fetchTicketById(ticketId) {
+  const base = zdBase();
+  try {
+    const data = await zdAuditorGet(`${base}/tickets/${ticketId}`);
+    await auditorDelay(200);
+    const t = data.ticket;
+    const comments = await fetchTicketComments(t.id);
+    return { id: t.id, subject: t.subject, created_at: t.created_at, status: t.status, comments };
+  } catch (e) { return null; }
+}
+
 async function getRecentSolvedTickets(match, limit) {
   const base = zdBase();
   let tickets = [];
@@ -2398,17 +2429,16 @@ async function getRecentSolvedTickets(match, limit) {
       tickets = data.tickets || [];
     } catch (e) { /* fall through */ }
   } else {
-    // No org — search across all known user IDs for this domain/email
+    // No org — use per-user /tickets/requested endpoint (avoids search query complexity)
     const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 15) : (match.zdUserId ? [match.zdUserId] : []);
     const ticketMap = new Map();
     for (const userId of userIds) {
       try {
-        const data = await zdAuditorGet(`${base}/search`, {
-          query: `requester_id:${userId} type:ticket (status:solved OR status:closed)`,
+        const data = await zdAuditorGet(`${base}/users/${userId}/tickets/requested`, {
           sort_by: 'created_at', sort_order: 'desc', per_page: limit,
         });
         await auditorDelay(300);
-        for (const t of (data.results || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
+        for (const t of (data.tickets || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
       } catch (e) { /* continue */ }
     }
     tickets = [...ticketMap.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, limit);
@@ -2430,7 +2460,7 @@ async function getCancellationKeywordTickets(match) {
   if (match.zdOrgId) {
     try {
       const data = await zdAuditorGet(`${base}/search`, {
-        query: `${keywords} organization_id:${match.zdOrgId} type:ticket (status:solved OR status:closed)`,
+        query: `${keywords} organization_id:${match.zdOrgId} type:ticket`,
         sort_by: 'created_at', sort_order: 'desc', per_page: 5,
       });
       await auditorDelay(300);
@@ -2443,7 +2473,7 @@ async function getCancellationKeywordTickets(match) {
   for (const userId of userIds) {
     try {
       const data = await zdAuditorGet(`${base}/search`, {
-        query: `${keywords} requester_id:${userId} type:ticket (status:solved OR status:closed)`,
+        query: `${keywords} requester_id:${userId} type:ticket`,
         sort_by: 'created_at', sort_order: 'desc', per_page: 5,
       });
       await auditorDelay(300);
@@ -2604,6 +2634,7 @@ async function runAuditJob(jobId, rows) {
 
   for (const rawRow of rows) {
     const row = normalizeAuditorRow(rawRow);
+    const explicitTicketIds = parseTicketIdsFromRow(rawRow);
     const baseResult = {
       accountName: row.accountName || '',
       emailDomain: row.emailDomain || '',
@@ -2624,38 +2655,51 @@ async function runAuditJob(jobId, rows) {
     };
 
     try {
+      // Phase 0 — fetch any ticket IDs explicitly referenced in notes (e.g. "See ticket #331182")
+      const ticketMap = new Map();
+      for (const tid of explicitTicketIds) {
+        const t = await fetchTicketById(tid);
+        if (t) ticketMap.set(t.id, t);
+      }
+
       // Match customer in Zendesk
       const match = await matchCustomer(row);
 
-      if (!match) {
+      if (!match && ticketMap.size === 0) {
         job.results.push({ ...baseResult, status: 'no_match' });
         job.done++;
         continue;
       }
 
-      baseResult.matchedOrg = match.zdOrgName;
-      baseResult.matchConfidence = match.matchConfidence;
-      baseResult.matchType = match.matchType;
+      if (match) {
+        baseResult.matchedOrg = match.zdOrgName;
+        baseResult.matchConfidence = match.matchConfidence;
+        baseResult.matchType = match.matchType;
 
-      // Phase 1 — recent solved tickets
-      let tickets = await getRecentSolvedTickets(match, 5);
-
-      // Phase 2 — cancellation keyword search
-      const keywordTickets = await getCancellationKeywordTickets(match);
-      // Merge by ticket id, keyword tickets first
-      const ticketMap = new Map();
-      for (const t of [...keywordTickets, ...tickets]) {
-        if (!ticketMap.has(t.id)) ticketMap.set(t.id, t);
-      }
-      tickets = Array.from(ticketMap.values());
-
-      // Phase 3 — historical sweep if we still have < 3 tickets
-      if (tickets.length < 3) {
-        const historical = await getRecentSolvedTickets(match, 10);
-        for (const t of historical) {
-          if (!ticketMap.has(t.id)) { ticketMap.set(t.id, t); tickets.push(t); }
+        // Phase 1 — recent tickets for this customer
+        for (const t of await getRecentSolvedTickets(match, 5)) {
+          if (!ticketMap.has(t.id)) ticketMap.set(t.id, t);
         }
+
+        // Phase 2 — cancellation keyword search
+        for (const t of await getCancellationKeywordTickets(match)) {
+          if (!ticketMap.has(t.id)) ticketMap.set(t.id, t);
+        }
+
+        // Phase 3 — historical sweep if still < 3 tickets
+        if (ticketMap.size < 3) {
+          for (const t of await getRecentSolvedTickets(match, 10)) {
+            if (!ticketMap.has(t.id)) ticketMap.set(t.id, t);
+          }
+        }
+      } else {
+        // No customer match but explicit ticket IDs were found — use CSV name + ticket data
+        baseResult.matchedOrg = row.accountName || row.orgName || 'Unknown';
+        baseResult.matchConfidence = 'High';
+        baseResult.matchType = 'noteTicketId';
       }
+
+      const tickets = Array.from(ticketMap.values());
 
       if (tickets.length === 0) {
         job.results.push({ ...baseResult, category: 'Unknown / Unspecified', summary: 'No tickets found in Zendesk for this customer.', confidence: 'Low', reasoning: 'No ticket data available.', status: 'done' });
