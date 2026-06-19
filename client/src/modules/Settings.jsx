@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useApp } from '../context/AppContext';
 import api from '../api';
 
 const ALL_SETTINGS_TABS = [
@@ -22,6 +23,7 @@ function useLocalSetting(key, defaultVal) {
 
 export default function Settings() {
   const { user } = useAuth();
+  const { toast } = useApp();
   const SETTINGS_TABS = ALL_SETTINGS_TABS.filter(t => t.roles.includes(user?.role));
   const [activeTab, setActiveTab] = useState(() => SETTINGS_TABS[0]?.id ?? 'general');
 
@@ -63,21 +65,21 @@ export default function Settings() {
     try {
       const r = await api.post('/api/canned-responses', { label: '', msg: '' });
       setCannedResponses(prev => [...prev, r.data]);
-    } catch {}
+    } catch { toast('Failed to add response', 'error'); }
   }
 
   async function saveCanned(id, label, msg) {
     try {
       const r = await api.put(`/api/canned-responses/${id}`, { label, msg });
       setCannedResponses(prev => prev.map(c => c.id === id ? r.data : c));
-    } catch {}
+    } catch { toast('Failed to save response', 'error'); }
   }
 
   async function removeCanned(id) {
     try {
       await api.delete(`/api/canned-responses/${id}`);
       setCannedResponses(prev => prev.filter(c => c.id !== id));
-    } catch {}
+    } catch { toast('Failed to remove response', 'error'); }
   }
 
   return (

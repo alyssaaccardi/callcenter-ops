@@ -260,6 +260,7 @@ export default function DialedInPage() {
 
   useEffect(() => {
     renderFanfareWAV().then(url => { fanfareUrl.current = url; }).catch(() => {});
+    return () => { if (fanfareUrl.current) URL.revokeObjectURL(fanfareUrl.current); };
   }, []);
 
   useEffect(() => {

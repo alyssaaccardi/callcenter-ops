@@ -12,7 +12,10 @@ function getSegments(len) {
 export default function SmsModule() {
   const { toast, addLog } = useApp();
   const [alertTypes, setAlertTypes] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('ccob_alertTypes') || '[]'); } catch { return []; }
+    try {
+      const raw = JSON.parse(localStorage.getItem('ccob_alertTypes') || '[]');
+      return raw.map((a, i) => ({ ...a, _key: a._key || `at-${i}-${a.label}` }));
+    } catch { return []; }
   });
   const [activeAlert, setActiveAlert] = useState(null);
   const [groups, setGroups] = useState([]);
@@ -47,7 +50,7 @@ export default function SmsModule() {
         return def ? [def] : prev;
       });
     } catch {
-      // silently fail — groups may not be configured
+      toast('Could not load SMS groups', 'error');
     } finally {
       setLoadingGroups(false);
     }
@@ -155,9 +158,9 @@ export default function SmsModule() {
             <div className="card mb-12">
               <div className="card-title">Alert Type</div>
               <div className="alert-type-grid">
-                {alertTypes.map((at, i) => (
+                {alertTypes.map((at) => (
                   <div
-                    key={i}
+                    key={at._key || at.label}
                     className={`alert-chip${activeAlert?.label === at.label ? ' active' : ''}`}
                     onClick={() => selectAlert(at)}
                   >

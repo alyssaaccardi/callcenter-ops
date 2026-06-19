@@ -30,7 +30,7 @@ function fmtMsg(ts) {
 export default function StatusBoard() {
   const { status, setStatus, didCounts, addLog, toast, slackConfig } = useApp();
 
-  const [activeTab, setActiveTab] = useState('savvy');
+  const [activeTab, setActiveTab] = useState('mitel');
   const [saving, setSaving] = useState(null);
   const [cannedResponses, setCannedResponses] = useState([]);
   const [mitelQueues, setMitelQueues] = useState(null);

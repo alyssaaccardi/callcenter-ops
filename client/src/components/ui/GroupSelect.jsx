@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 
 export default function GroupSelect({ groups, selected, onChange, loading }) {
   const [query, setQuery] = useState('');
@@ -15,10 +15,13 @@ export default function GroupSelect({ groups, selected, onChange, loading }) {
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  const filtered = groups.filter(g => {
-    const name = g.Name || g.name || g.GroupName || String(g);
-    return name.toLowerCase().includes(query.toLowerCase());
-  });
+  const filtered = useMemo(() => {
+    const q = query.toLowerCase();
+    return groups.filter(g => {
+      const name = g.Name || g.name || g.GroupName || String(g);
+      return name.toLowerCase().includes(q);
+    });
+  }, [groups, query]);
 
   function toggleGroup(g) {
     const id = g.ID || g.id || g.GroupID || g;

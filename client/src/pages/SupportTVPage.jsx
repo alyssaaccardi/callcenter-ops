@@ -166,14 +166,14 @@ export default function SupportTVPage() {
   const overdueCount  = tasks.length;
   const dueCount      = upcoming.length;
   const todayLabel    = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' });
-  const agents        = leaderboard.support.filter(a => a.replies > 0);
+  const agents        = (leaderboard.support || []).filter(a => a.replies > 0);
   const repliesToday  = agents.reduce((s, a) => s + a.replies, 0);
 
   const overdueClass  = overdueCount > 0 ? 'red' : 'green';
   const dueClass      = dueCount > 0 ? 'amber' : 'green';
   const staleClass    = staleCount !== null && staleCount > 0 ? 'amber' : staleCount === 0 ? 'green' : 'muted';
   const solvedClass   = repliesToday > 0 ? 'green' : 'muted';
-  const maxReplies = Math.max(...agents.map(a => a.replies), 1);
+  const maxReplies = agents.length > 0 ? Math.max(...agents.map(a => a.replies)) : 1;
   const barClass   = (i) => i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : 'default';
 
   const mobileServiceUp = sysStatus?.mobileApp?.state        !== 'DOWN';
@@ -331,7 +331,7 @@ export default function SupportTVPage() {
                 </div>
               ) : (
                 tasks.map(task => {
-                  const isPending = /(pending|in.?progress|working|in.?review)/i.test(task.status || '') || !!task.worker;
+                  const isPending = /(pending|in[\s_-]?progress|working|in[\s_-]?review)/i.test(task.status || '') || !!task.worker;
                   return (
                     <a
                       key={task.id}

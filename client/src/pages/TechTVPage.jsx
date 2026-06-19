@@ -141,8 +141,8 @@ export default function TechTVPage() {
   if (authError) return <div className="ttv-loading"><span>{authError}</span></div>;
   if (loading)   return <div className="ttv-loading"><DialingIn /></div>;
 
-  const agents     = leaderboard.support.filter(a => a.replies > 0);
-  const maxReplies = Math.max(...agents.map(a => a.replies), 1);
+  const agents     = (leaderboard.support || []).filter(a => a.replies > 0);
+  const maxReplies = agents.length > 0 ? Math.max(...agents.map(a => a.replies)) : 1;
   const staleList  = stale.tickets || [];
   const staleCount = stale.unconfigured ? null : staleList.length;
   const zdSub      = leaderboard.zdSubdomain;
