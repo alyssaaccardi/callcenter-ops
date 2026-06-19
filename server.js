@@ -2270,12 +2270,15 @@ function normalizeAuditorRow(raw) {
   return normalized;
 }
 
-// Extract explicit ticket IDs from any cell value (e.g. "See ticket #331182")
+// Extract explicit ticket IDs from any cell value
+// Catches: "ticket #331182", "#331182", "314123 is ticket number", bare 5-7 digit numbers
 function parseTicketIdsFromRow(raw) {
   const ids = new Set();
-  const pattern = /(?:ticket\s*#?\s*|#\s*)(\d{5,7})\b/gi;
   for (const val of Object.values(raw)) {
     const text = String(val || '');
+    // Match any standalone 5-7 digit number (Zendesk ticket IDs)
+    // Years are 4 digits, phone numbers are 10 — this range is safe
+    const pattern = /\b(\d{5,7})\b/g;
     let m;
     while ((m = pattern.exec(text)) !== null) ids.add(parseInt(m[1]));
   }
