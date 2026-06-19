@@ -2698,9 +2698,9 @@ Respond with ONLY valid JSON, no markdown:
 {"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>"}`;
 
   const resp = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent',
     { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 400, temperature: 0.1 } },
-    { timeout: 15000 }
+    { headers: { 'X-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, timeout: 15000 }
   );
 
   const raw = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
@@ -2944,10 +2944,11 @@ async function runAuditJob(jobId, rows) {
       baseResult.ticketSubjects = tickets.map(t => t.subject || '');
       baseResult.ticketDates = tickets.map(t => t.created_at?.slice(0, 10) || '');
 
-      // Throttle AI calls — OpenAI free tier allows ~3 RPM; 22s gap keeps us safe
-      if (process.env.OPENAI_API_KEY && !process.env.GEMINI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
-        await auditorDelay(22000);
-      }
+      // Throttle AI calls to stay within free-tier rate limits
+      if (process.env.GEMINI_API_KEY)
+        await auditorDelay(5000);   // Gemini free tier: 15 RPM
+      else if (process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY)
+        await auditorDelay(22000);  // OpenAI free tier: 3 RPM
       const analysis = await runAnalysis(row, tickets);
       baseResult.category = analysis.category;
       baseResult.competitorName = analysis.competitorName || null;
