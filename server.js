@@ -2409,7 +2409,10 @@ async function fetchTicketById(ticketId) {
     const t = data.ticket;
     const comments = await fetchTicketComments(t.id);
     return { id: t.id, subject: t.subject, created_at: t.created_at, status: t.status, comments };
-  } catch (e) { return null; }
+  } catch (e) {
+    console.error(`[auditor] fetchTicketById(${ticketId}) failed: ${e.response?.status} ${e.response?.data?.error || e.message}`);
+    return null;
+  }
 }
 
 async function getRecentSolvedTickets(match, limit) {
@@ -2824,6 +2827,7 @@ async function runAuditJob(jobId, rows) {
     try {
       // Phase 0 — fetch any ticket IDs explicitly referenced in notes (e.g. "See ticket #331182")
       const ticketMap = new Map();
+      console.log(`[auditor] row "${row.accountName || row.orgName || '?'}" — explicitTicketIds: [${explicitTicketIds.join(', ')}]`);
       for (const tid of explicitTicketIds) {
         const t = await fetchTicketById(tid);
         if (t) ticketMap.set(t.id, t);
@@ -2837,6 +2841,7 @@ async function runAuditJob(jobId, rows) {
       } else {
         // Match customer in Zendesk
         const match = await matchCustomer(row);
+        console.log(`[auditor] matchCustomer("${row.accountName || row.orgName}") → ${match ? `type:${match.matchType} org:${match.zdOrgName} orgId:${match.zdOrgId} userIds:[${match.zdUserIds?.join(',')}]` : 'null'}`);
 
         if (!match) {
           job.results.push({ ...baseResult, status: 'no_match' });
