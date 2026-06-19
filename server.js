@@ -2493,7 +2493,6 @@ const AI_SERVICE_NAMES = [
   { name: 'Goodcall',      pattern: /goodcall/i },
   { name: 'Answering.AI',  pattern: /answering\.ai/i },
   { name: 'Dialpad',       pattern: /dialpad/i },
-  { name: 'Clio',          pattern: /\bclio\b/i },
   { name: 'Convoso',       pattern: /convoso/i },
   { name: 'Rosie',         pattern: /\brosie\b/i },
   { name: 'Numa',          pattern: /\bnuma\b/i },
@@ -2518,7 +2517,7 @@ const HUMAN_COMPETITOR_NAMES = [
 const CATEGORY_RULES = [
   { category: 'Switched to AI Service', patterns: [
     [/smith\.ai/i, 5], [/\blex\b/i, 4], [/goodcall/i, 5],
-    [/answering\.ai/i, 5], [/dialpad/i, 4], [/\bclio\b/i, 4],
+    [/answering\.ai/i, 5], [/dialpad/i, 4],
     [/convoso/i, 5], [/\brosie\b/i, 5], [/\bnuma\b/i, 5],
     [/\bai\s+(answering|receptionist|service|intake|solution)/i, 4],
     [/(answering|receptionist|intake)\s+ai/i, 4],
@@ -2605,56 +2604,61 @@ const CATEGORY_RULES = [
   ]},
 ];
 
-async function claudeAnalyzeTickets(customer, ticketData) {
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-  // Build a readable transcript from all ticket comments
+function buildAuditPrompt(customer, ticketData) {
   const transcripts = ticketData.map(t => {
     const lines = [`Ticket #${t.id} — "${t.subject || '(no subject)'}"`];
     for (const c of (t.comments || [])) {
       const who = c.public === false ? '[Internal note]' : '[Message]';
-      const body = (c.body || '').slice(0, 600).trim();
+      const body = (c.body || '').slice(0, 1500).trim();
       if (body) lines.push(`${who}: ${body}`);
     }
     return lines.join('\n');
   }).join('\n\n---\n\n');
 
-  const notesContext = customer.notes ? `\nCSV notes from cancellation log: "${customer.notes}"\n` : '';
+  const notesContext = customer.notes ? `\nCSV cancellation notes: "${customer.notes}"\n` : '';
   const categoriesList = AUDITOR_CATEGORIES.map(c => `- ${c}`).join('\n');
 
-  const prompt = `You are analyzing why a customer cancelled their answering service subscription.
+  return `You are a cancellation analyst for Answering Legal and Ring Savvy.
+
+ABOUT THE BUSINESS:
+- Answering Legal (answeringlegal.com): 24/7 live answering service for law firms. U.S.-based receptionists answer calls, capture leads, handle client intake, and schedule appointments for attorneys. Rated #1 legal answering service, serving 2,000+ law firms.
+- Ring Savvy (ringsavvy.com): Sister brand — same live answering model but for trades and contractors (plumbers, HVAC, roofers, electricians, etc.).
+- Both services work by having customers forward their phone lines so our receptionists answer on their behalf.
+
+ABOUT ZENDESK TICKETS:
+- "End user" = the individual person (firm owner, attorney, office manager) who submitted the ticket.
+- "Customer" = the business account (law firm or contracting company).
+- [Message] = a public reply visible to both the customer and Answering Legal agents.
+- [Internal note] = only visible to Answering Legal staff, not the customer — often agent coordination or templates.
+- Read ALL messages in the thread. The cancellation reason is usually stated by the end user (customer), not the agent.
+
+INTEGRATIONS THAT ARE NOT COMPETITORS:
+- Clio, MyCase, PracticePanther, Filevine, Litify, Lawmatics = legal practice management software that integrates WITH Answering Legal. A ticket titled "Clio Grow Integration with Answering Legal" is a support/setup request — NOT a cancellation reason.
+- "AI intake chatbot" or "intake chatbot" = Answering Legal's own free chatbot feature, NOT an outside AI service.
+
 Customer: ${customer.accountName || customer.orgName || 'Unknown'}${notesContext}
 
-Ticket conversation(s) between the support agent and the customer:
+Full ticket conversation(s) — read the ENTIRE thread before deciding:
 ${transcripts || '(no ticket content available)'}
 
-Based on the full conversation above, determine the cancellation reason.
-
-Categories:
+Choose the single best cancellation reason from these categories:
 ${categoriesList}
 
-Rules:
-- "Switched to AI Service" = they adopted an AI answering/receptionist tool (Smith.ai, Lex, Goodcall, etc.)
-- "Went to Competitor" = switched to another HUMAN answering service (Ruby, PATLive, AnswerConnect, etc.)
-- "Hired Staff" = hired an in-house receptionist, employee, or virtual assistant (human, not AI)
-- Agent asking customer to turn off call forwarding is a post-cancellation action, NOT a reason
-- Use the customer's actual words, not the agent's template language
+Critical rules:
+- You work FOR Answering Legal/Ring Savvy. A ticket about setting up or integrating our service is NOT a cancellation reason.
+- "Switched to AI Service" = customer replaced us with an AI answering tool (Smith.ai, Lex, Goodcall, Rosie, Numa, Answering.AI, etc.)
+- "Went to Competitor" = customer switched to another HUMAN answering service (Ruby Receptionist, PATLive, AnswerConnect, MAP Communications, etc.)
+- "Hired Staff" = customer hired a human receptionist, employee, or VA — NOT an AI tool
+- Agent asking customer to turn off call forwarding is post-cancellation cleanup, NOT a reason
+- Base your answer on the end user's (customer's) own words, not agent template language or internal notes
 
 Respond with ONLY valid JSON, no markdown:
-{"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary of why they cancelled>","reasoning":"<brief note on which signals led to this category>"}`;
+{"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>"}`;
+}
 
-  const msg = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 400,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  const raw = msg.content[0]?.text?.trim() || '';
-  // Strip any accidental markdown fencing
+function parseAuditResponse(raw, ticketData) {
   const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
   const parsed = JSON.parse(jsonStr);
-
-  // Validate category is one we know
   const category = AUDITOR_CATEGORIES.includes(parsed.category) ? parsed.category : 'Unknown / Unspecified';
   return {
     category,
@@ -2664,113 +2668,39 @@ Respond with ONLY valid JSON, no markdown:
     reasoning: parsed.reasoning || '',
     supporting_ticket_ids: ticketData.slice(0, 3).map(t => t.id),
   };
+}
+
+async function claudeAnalyzeTickets(customer, ticketData) {
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const prompt = buildAuditPrompt(customer, ticketData);
+  const msg = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 500,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  return parseAuditResponse(msg.content[0]?.text?.trim() || '', ticketData);
 }
 
 async function geminiAnalyzeTickets(customer, ticketData) {
-  const transcripts = ticketData.map(t => {
-    const lines = [`Ticket #${t.id} — "${t.subject || '(no subject)'}"`];
-    for (const c of (t.comments || [])) {
-      const who = c.public === false ? '[Internal note]' : '[Message]';
-      const body = (c.body || '').slice(0, 600).trim();
-      if (body) lines.push(`${who}: ${body}`);
-    }
-    return lines.join('\n');
-  }).join('\n\n---\n\n');
-
-  const notesContext = customer.notes ? `\nCSV notes: "${customer.notes}"\n` : '';
-  const categoriesList = AUDITOR_CATEGORIES.map(c => `- ${c}`).join('\n');
-
-  const prompt = `You are analyzing why a customer cancelled their answering service subscription.
-Customer: ${customer.accountName || customer.orgName || 'Unknown'}${notesContext}
-
-Full ticket conversation (agent + customer messages):
-${transcripts || '(no ticket content available)'}
-
-Choose the cancellation reason from these categories:
-${categoriesList}
-
-Rules:
-- "Switched to AI Service" = adopted an AI answering tool (Smith.ai, Lex, Goodcall, etc.)
-- "Went to Competitor" = switched to a HUMAN answering service (Ruby, PATLive, AnswerConnect, etc.)
-- "Hired Staff" = hired a human receptionist or virtual assistant — NOT an AI tool
-- Agent asking customer to turn off call forwarding is post-cancellation cleanup, NOT a reason
-- Base your answer on the customer's own words, not agent template language
-- "I could hire a virtual assistant for $7/hour" = Price is Too High (price comparison, not AI)
-
-Respond with ONLY valid JSON, no markdown:
-{"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>"}`;
-
+  const prompt = buildAuditPrompt(customer, ticketData);
   const resp = await axios.post(
     'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent',
-    { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 400, temperature: 0.1 } },
+    { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 500, temperature: 0.1 } },
     { headers: { 'X-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, timeout: 15000 }
   );
-
   const raw = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-  const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  const parsed = JSON.parse(jsonStr);
-
-  const category = AUDITOR_CATEGORIES.includes(parsed.category) ? parsed.category : 'Unknown / Unspecified';
-  return {
-    category,
-    competitorName: parsed.competitorName || null,
-    confidence: ['High','Medium','Low'].includes(parsed.confidence) ? parsed.confidence : 'Low',
-    summary: parsed.summary || '',
-    reasoning: parsed.reasoning || '',
-    supporting_ticket_ids: ticketData.slice(0, 3).map(t => t.id),
-  };
+  return parseAuditResponse(raw, ticketData);
 }
 
 async function openaiAnalyzeTickets(customer, ticketData) {
-  const transcripts = ticketData.map(t => {
-    const lines = [`Ticket #${t.id} — "${t.subject || '(no subject)'}"`];
-    for (const c of (t.comments || [])) {
-      const who = c.public === false ? '[Internal note]' : '[Message]';
-      const body = (c.body || '').slice(0, 600).trim();
-      if (body) lines.push(`${who}: ${body}`);
-    }
-    return lines.join('\n');
-  }).join('\n\n---\n\n');
-
-  const notesContext = customer.notes ? `\nCSV notes: "${customer.notes}"\n` : '';
-  const categoriesList = AUDITOR_CATEGORIES.map(c => `- ${c}`).join('\n');
-
-  const prompt = `You are analyzing why a customer cancelled their answering service subscription.
-Customer: ${customer.accountName || customer.orgName || 'Unknown'}${notesContext}
-
-Full ticket conversation (agent + customer messages):
-${transcripts || '(no ticket content available)'}
-
-Choose the cancellation reason from these categories:
-${categoriesList}
-
-Rules:
-- "Switched to AI Service" = adopted an AI answering tool (Smith.ai, Lex, Goodcall, etc.)
-- "Went to Competitor" = switched to a HUMAN answering service (Ruby, PATLive, AnswerConnect, etc.)
-- "Hired Staff" = hired a human receptionist or virtual assistant — NOT an AI tool
-- Agent asking customer to turn off call forwarding is post-cancellation cleanup, NOT a reason
-- "I could hire a virtual assistant for $7/hour" = Price is Too High (price comparison, not AI)
-
-Respond with ONLY valid JSON, no markdown:
-{"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>"}`;
-
+  const prompt = buildAuditPrompt(customer, ticketData);
   const resp = await axios.post(
     'https://api.openai.com/v1/chat/completions',
-    { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 400, temperature: 0.1, response_format: { type: 'json_object' } },
+    { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 500, temperature: 0.1, response_format: { type: 'json_object' } },
     { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
   );
-
   const raw = resp.data?.choices?.[0]?.message?.content?.trim() || '{}';
-  const parsed = JSON.parse(raw);
-  const category = AUDITOR_CATEGORIES.includes(parsed.category) ? parsed.category : 'Unknown / Unspecified';
-  return {
-    category,
-    competitorName: parsed.competitorName || null,
-    confidence: ['High','Medium','Low'].includes(parsed.confidence) ? parsed.confidence : 'Low',
-    summary: parsed.summary || '',
-    reasoning: parsed.reasoning || '',
-    supporting_ticket_ids: ticketData.slice(0, 3).map(t => t.id),
-  };
+  return parseAuditResponse(raw, ticketData);
 }
 
 // Pick whichever AI provider key is configured; fall back to keywords on rate limit or error
