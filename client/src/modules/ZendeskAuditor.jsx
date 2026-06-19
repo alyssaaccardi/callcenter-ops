@@ -42,9 +42,10 @@ function Badge({ label, colors }) {
 
 function exportCsv(results) {
   const headers = ['Account Name', 'Email Domain', 'Matched Org', 'Match Confidence', 'Match Type', 'Category', 'Competitor / AI Name', 'Confidence', 'Summary', 'Reasoning', 'Ticket IDs', 'Ticket Subjects', 'Status'];
+  const needsCompetitor = r => r.category === 'Went to Competitor' || r.category === 'Switched to AI Service';
   const rows = results.map(r => [
     r.accountName, r.emailDomain, r.matchedOrg, r.matchConfidence, r.matchType,
-    r.category, r.competitorName,
+    r.category, needsCompetitor(r) ? (r.competitorName || 'Unknown') : (r.competitorName || ''),
     r.confidence, r.summary, r.reasoning,
     (r.supportingTicketIds || []).join('; '),
     (r.ticketSubjects || []).join('; '),
@@ -135,8 +136,10 @@ function ResultRow({ r, index }) {
         {r.category ? (
           <div>
             <Badge label={r.category} colors={CATEGORY_COLORS} />
-            {r.competitorName && (
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3, fontWeight: 500 }}>{r.competitorName}</div>
+            {(r.category === 'Went to Competitor' || r.category === 'Switched to AI Service') && (
+              <div style={{ fontSize: 11, color: r.competitorName ? 'var(--muted)' : 'rgba(156,163,175,0.7)', marginTop: 3, fontWeight: 500 }}>
+                {r.competitorName || 'Unknown'}
+              </div>
             )}
           </div>
         ) : <span style={{ color: 'var(--muted)', fontSize: 12 }}>—</span>}
