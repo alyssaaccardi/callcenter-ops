@@ -2661,6 +2661,7 @@ function parseAuditResponse(raw, ticketData) {
     summary: parsed.summary || '',
     reasoning: parsed.reasoning || '',
     supporting_ticket_ids: ticketData.slice(0, 3).map(t => t.id),
+    analysisMethod: 'ai',
   };
 }
 
@@ -2705,7 +2706,7 @@ async function runAnalysis(customer, tickets) {
       const status = e?.response?.status;
       if (status === 429 || status === 503 || status >= 500) {
         console.warn(`AI analysis rate-limited/error (${status}), falling back to keywords`);
-        return analyzeTickets(customer, tickets);
+        return { ...analyzeTickets(customer, tickets), analysisMethod: 'keywords' };
       }
       throw e;
     }
@@ -2713,7 +2714,7 @@ async function runAnalysis(customer, tickets) {
   if (process.env.GEMINI_API_KEY)     return tryAI(() => geminiAnalyzeTickets(customer, tickets));
   if (process.env.ANTHROPIC_API_KEY)  return tryAI(() => claudeAnalyzeTickets(customer, tickets));
   if (process.env.OPENAI_API_KEY)     return tryAI(() => openaiAnalyzeTickets(customer, tickets));
-  return analyzeTickets(customer, tickets);
+  return { ...analyzeTickets(customer, tickets), analysisMethod: 'keywords' };
 }
 
 function analyzeTickets(customer, ticketData) {
@@ -2885,6 +2886,7 @@ async function runAuditJob(jobId, rows) {
       baseResult.confidence = analysis.confidence;
       baseResult.reasoning = analysis.reasoning;
       baseResult.supportingTicketIds = analysis.supporting_ticket_ids || [];
+      baseResult.analysisMethod = analysis.analysisMethod || 'ai';
 
       job.results.push({ ...baseResult, status: 'done' });
     } catch (err) {
