@@ -2490,14 +2490,54 @@ async function getCancellationKeywordTickets(match) {
   return withComments;
 }
 
+// ─── Known competitor / AI service name lookup ────────────────────────────────
+const AI_SERVICE_NAMES = [
+  { name: 'Smith.ai',      pattern: /smith\.ai/i },
+  { name: 'Lex',           pattern: /\blex\b/i },
+  { name: 'Goodcall',      pattern: /goodcall/i },
+  { name: 'Answering.AI',  pattern: /answering\.ai/i },
+  { name: 'Dialpad',       pattern: /dialpad/i },
+  { name: 'Clio',          pattern: /\bclio\b/i },
+  { name: 'Convoso',       pattern: /convoso/i },
+  { name: 'Rosie',         pattern: /\brosie\b/i },
+  { name: 'Numa',          pattern: /\bnuma\b/i },
+];
+
+const HUMAN_COMPETITOR_NAMES = [
+  { name: 'Ruby',                  pattern: /\bruby\b/i },
+  { name: 'PATLive',               pattern: /patlive/i },
+  { name: 'AnswerConnect',         pattern: /answer\s*connect/i },
+  { name: 'Gabbyville',            pattern: /gabbyville/i },
+  { name: 'MAP Communications',    pattern: /map\s*communications/i },
+  { name: 'Davinci',               pattern: /\bdavinci\b/i },
+  { name: 'Moneypenny',            pattern: /moneypenny/i },
+  { name: 'Abby Connect',          pattern: /abby\s*connect/i },
+  { name: 'Alert Communications',  pattern: /alert\s*communications/i },
+  { name: 'VoiceNation',           pattern: /voicenation/i },
+  { name: 'Answering365',          pattern: /answering\s*365/i },
+  { name: 'Nexa',                  pattern: /\bnexa\b/i },
+];
+
 // ─── Keyword-based cancellation analysis (no external AI needed) ─────────────
 const CATEGORY_RULES = [
+  { category: 'Switched to AI Service', patterns: [
+    [/smith\.ai/i, 5], [/\blex\b/i, 4], [/goodcall/i, 5],
+    [/answering\.ai/i, 5], [/dialpad/i, 4], [/\bclio\b/i, 4],
+    [/convoso/i, 5], [/\brosie\b/i, 5], [/\bnuma\b/i, 5],
+    [/\bai\s+(answering|receptionist|service|intake|solution)/i, 4],
+    [/(answering|receptionist|intake)\s+ai/i, 4],
+    [/went\s+to\s+ai\b/i, 5], [/using\s+ai\b/i, 3],
+    [/trying\s+(an?\s+)?ai/i, 4], [/switched?\s+to\s+ai/i, 5],
+    [/ai\s+tool/i, 3], [/artificial intelligence/i, 3],
+    [/chatbot/i, 3], [/virtual\s+assistant/i, 2],
+  ]},
   { category: 'Went to Competitor', patterns: [
     [/competi(tor|tors|ng)/i, 4], [/switch(ing|ed|es)?\s+(to|away|service)/i, 3],
     [/going with (another|different|other|a\s+new)/i, 3],
-    [/ruby\b/i, 3], [/patlive/i, 4], [/smith\.ai/i, 4],
-    [/answer\s*connect/i, 4], [/gabbyville/i, 4],
-    [/map\s*communications/i, 4], [/davinci/i, 3],
+    [/ruby\b/i, 4], [/patlive/i, 5], [/answer\s*connect/i, 5],
+    [/gabbyville/i, 5], [/map\s*communications/i, 5], [/davinci\b/i, 4],
+    [/moneypenny/i, 5], [/abby\s*connect/i, 5], [/voicenation/i, 5],
+    [/answering\s*365/i, 5], [/\bnexa\b/i, 5],
     [/different (answering\s+)?service/i, 2], [/another (answering\s+)?service/i, 2],
     [/found (a\s+)?cheaper/i, 3],
   ]},
@@ -2544,12 +2584,6 @@ const CATEGORY_RULES = [
     [/\bfired\b/i, 4], [/\bterminat(ed|ion)\b/i, 3], [/\blet go\b/i, 3],
     [/\blaid off\b/i, 3], [/\bdismiss(ed|al)\b/i, 3],
   ]},
-  { category: 'Call Forwarding Issue', patterns: [
-    [/call forward(ing)?/i, 4], [/forward(ing)?\s+issue/i, 4],
-    [/not (receiving|getting) (our\s+)?calls/i, 3],
-    [/calls?\s+(not|aren'?t)\s+(coming through|forwarding|going through)/i, 4],
-    [/setup (issue|problem)/i, 2], [/phone (issue|problem|setup)/i, 2],
-  ]},
   { category: 'Not Enough Call Volume', patterns: [
     [/not enough (calls?|volume)/i, 4], [/low (call\s+)?volume/i, 4],
     [/too few calls/i, 4], [/(barely|rarely) (get|receive|have) calls/i, 3],
@@ -2579,13 +2613,18 @@ function analyzeTickets(customer, ticketData) {
     return { id: t.id, subject: t.subject, date: t.created_at?.slice(0, 10), text: parts.join(' ') };
   });
 
+  // Include CSV notes in analysis so "went to Lex" from the notes column is scored
+  if (customer.notes) {
+    ticketTexts.unshift({ id: 'notes', subject: 'Notes', date: null, text: customer.notes });
+  }
+
   const scores = CATEGORY_RULES.map(rule => {
     let score = 0;
     const matchedTerms = [];
     const matchedIds = new Set();
     for (const [pattern, weight] of rule.patterns) {
       for (const t of ticketTexts) {
-        if (pattern.test(t.text)) { score += weight; matchedIds.add(t.id); matchedTerms.push(pattern.source.replace(/[\\^$.*+?()[\]{}|]/g, '').slice(0, 20)); }
+        if (pattern.test(t.text)) { score += weight; if (t.id !== 'notes') matchedIds.add(t.id); matchedTerms.push(pattern.source.replace(/[\\^$.*+?()[\]{}|]/g, '').slice(0, 20)); }
       }
     }
     return { category: rule.category, score, matchedTerms: [...new Set(matchedTerms)], matchedIds: [...matchedIds] };
@@ -2598,6 +2637,15 @@ function analyzeTickets(customer, ticketData) {
   const confidence = best.score === 0 ? 'Low' : best.score >= 8 && best.score >= second.score * 2 ? 'High' : best.score >= 4 ? 'Medium' : 'Low';
   const category  = best.score > 0 ? best.category : 'Unknown / Unspecified';
 
+  // Extract specific competitor / AI company name if applicable
+  let competitorName = null;
+  if (category === 'Switched to AI Service' || category === 'Went to Competitor') {
+    const allText = ticketTexts.map(t => t.text).join(' ');
+    const nameList = category === 'Switched to AI Service' ? AI_SERVICE_NAMES : HUMAN_COMPETITOR_NAMES;
+    const found = nameList.find(n => n.pattern.test(allText));
+    if (found) competitorName = found.name;
+  }
+
   // Extract a supporting sentence
   let snippet = '';
   if (best.score > 0) {
@@ -2609,11 +2657,12 @@ function analyzeTickets(customer, ticketData) {
     }
   }
 
+  const competitorSuffix = competitorName ? ` (${competitorName})` : '';
   const summary = category === 'Unknown / Unspecified'
     ? `No clear cancellation reason identified from ${ticketData.length} ticket(s). No explicit cancellation context found in recent conversations.`
     : snippet
-      ? `Customer's cancellation is consistent with: ${category}. From ticket history: "${snippet}"`
-      : `Cancellation reason categorized as "${category}" based on keyword signals across ${ticketData.length} ticket(s).`;
+      ? `Customer's cancellation is consistent with: ${category}${competitorSuffix}. From ticket history: "${snippet}"`
+      : `Cancellation reason categorized as "${category}${competitorSuffix}" based on keyword signals across ${ticketData.length} ticket(s).`;
 
   const reasoning = best.score > 0
     ? `Score ${best.score} for "${category}"${best.matchedTerms.length ? ` (signals: ${best.matchedTerms.slice(0, 3).join(', ')})` : ''}.${second.score > 0 ? ` Runner-up: "${second.category}" (${second.score}).` : ''}`
@@ -2621,6 +2670,7 @@ function analyzeTickets(customer, ticketData) {
 
   return {
     category,
+    competitorName,
     summary,
     confidence,
     reasoning,
@@ -2643,6 +2693,7 @@ async function runAuditJob(jobId, rows) {
       matchConfidence: null,
       matchType: null,
       category: null,
+      competitorName: null,
       summary: null,
       confidence: null,
       reasoning: null,
@@ -2712,6 +2763,7 @@ async function runAuditJob(jobId, rows) {
 
       const analysis = analyzeTickets(row, tickets);
       baseResult.category = analysis.category;
+      baseResult.competitorName = analysis.competitorName || null;
       baseResult.summary = analysis.summary;
       baseResult.confidence = analysis.confidence;
       baseResult.reasoning = analysis.reasoning;

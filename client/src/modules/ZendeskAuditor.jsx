@@ -4,6 +4,7 @@ import api from '../api';
 // ─── Category color mapping ────────────────────────────────────────────────
 const CATEGORY_COLORS = {
   'Went to Competitor':                { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
+  'Switched to AI Service':            { bg: 'rgba(6,182,212,0.12)',    color: '#0891b2' },
   'Price is Too High':                 { bg: 'rgba(249,115,22,0.12)',   color: '#ea580c' },
   'Downsizing Practice':               { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
   'Hired Staff':                       { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
@@ -11,7 +12,6 @@ const CATEGORY_COLORS = {
   'Closed Practice':                   { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
   'Leaving Firm':                      { bg: 'rgba(107,114,128,0.12)', color: '#6b7280' },
   'Fired':                             { bg: 'rgba(107,114,128,0.12)', color: '#6b7280' },
-  'Call Forwarding Issue':             { bg: 'rgba(59,130,246,0.12)',   color: '#2563eb' },
   'Not Enough Call Volume':            { bg: 'rgba(234,179,8,0.12)',    color: '#b45309' },
   'Wanted Features/Services Not Offered': { bg: 'rgba(99,102,241,0.12)', color: '#4338ca' },
   'Does Not See Value in Service':     { bg: 'rgba(249,115,22,0.12)',   color: '#ea580c' },
@@ -41,10 +41,11 @@ function Badge({ label, colors }) {
 }
 
 function exportCsv(results) {
-  const headers = ['Account Name', 'Email Domain', 'Matched Org', 'Match Confidence', 'Match Type', 'Category', 'Confidence', 'Summary', 'Reasoning', 'Ticket IDs', 'Ticket Subjects', 'Status'];
+  const headers = ['Account Name', 'Email Domain', 'Matched Org', 'Match Confidence', 'Match Type', 'Category', 'Competitor / AI Name', 'Confidence', 'Summary', 'Reasoning', 'Ticket IDs', 'Ticket Subjects', 'Status'];
   const rows = results.map(r => [
     r.accountName, r.emailDomain, r.matchedOrg, r.matchConfidence, r.matchType,
-    r.category, r.confidence, r.summary, r.reasoning,
+    r.category, r.competitorName,
+    r.confidence, r.summary, r.reasoning,
     (r.supportingTicketIds || []).join('; '),
     (r.ticketSubjects || []).join('; '),
     r.status,
@@ -127,7 +128,14 @@ function ResultRow({ r, index }) {
         )}
       </td>
       <td style={{ padding: '10px 12px' }}>
-        {r.category ? <Badge label={r.category} colors={CATEGORY_COLORS} /> : <span style={{ color: 'var(--muted)', fontSize: 12 }}>—</span>}
+        {r.category ? (
+          <div>
+            <Badge label={r.category} colors={CATEGORY_COLORS} />
+            {r.competitorName && (
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3, fontWeight: 500 }}>{r.competitorName}</div>
+            )}
+          </div>
+        ) : <span style={{ color: 'var(--muted)', fontSize: 12 }}>—</span>}
       </td>
       <td style={{ padding: '10px 12px' }}>
         {r.confidence ? <Badge label={r.confidence} colors={CONFIDENCE_COLORS} /> : <span style={{ color: 'var(--muted)', fontSize: 12 }}>—</span>}
