@@ -10,6 +10,9 @@ const session = require('express-session');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { passport, requireAuth, requireRole, listUsers, addUser, removeUser } = require('./auth');
+const multer = require('multer');
+const XLSX   = require('xlsx');
+const Anthropic = require('@anthropic-ai/sdk');
 
 https.globalAgent.setMaxListeners(50);
 require('events').EventEmitter.defaultMaxListeners = 50;
@@ -20,6 +23,8 @@ const PORT = process.env.PORT || 3001;
 let mitelQueueCache = null;
 let mitelLastPush   = 0;
 const mitelSseClients = new Set();
+
+const auditorJobs = new Map(); // jobId → { status, results, total, done, error }
 
 // Cache for Zendesk incremental public-reply maps (avoids hammering the 10 req/min limit)
 // Key is start timestamp so "today" and "this-week" share the same entry on Monday.
@@ -2229,22 +2234,411 @@ app.get('/api/mitel/cloudlink/calls', async (req, res) => {
 });
 
 // ─── Zendesk Auditor ─────────────────────────────────────────────────────────
+
+const AUDITOR_CATEGORIES = [
+  'Went to Competitor',
+  'Price is Too High',
+  'Downsizing Practice',
+  'Hired Staff',
+  'Quality Issues',
+  'Closed Practice',
+  'Leaving Firm',
+  'Fired',
+  'Call Forwarding Issue',
+  'Not Enough Call Volume',
+  'Wanted Features/Services Not Offered',
+  'Does Not See Value in Service',
+  'Unknown / Unspecified',
+];
+
+const auditorUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+function auditorDelay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Normalize spreadsheet column names to known fields
+function normalizeAuditorRow(raw) {
+  const normalized = {};
+  for (const [key, val] of Object.entries(raw)) {
+    const k = String(key).toLowerCase().trim().replace(/[\s_-]+/g, '');
+    if (['accountname', 'account', 'company', 'firmname', 'firm'].includes(k)) normalized.accountName = String(val || '').trim();
+    else if (['emaildomain', 'domain', 'email_domain'].includes(k)) normalized.emailDomain = String(val || '').trim();
+    else if (['customeremail', 'email', 'contactemail', 'customer_email'].includes(k)) normalized.customerEmail = String(val || '').trim();
+    else if (['orgname', 'organizationname', 'org', 'organization', 'org_name'].includes(k)) normalized.orgName = String(val || '').trim();
+  }
+  return normalized;
+}
+
+async function zdAuditorGet(url, params = {}) {
+  const headers = zdHeaders();
+  const resp = await axios.get(url, { headers, params, timeout: 15000 });
+  return resp.data;
+}
+
+async function matchCustomer(row) {
+  const base = zdBase();
+
+  // 1. Exact org name match via orgName
+  if (row.orgName) {
+    try {
+      const data = await zdAuditorGet(`${base}/organizations/search`, { query: `name:${row.orgName}` });
+      await auditorDelay(300);
+      const orgs = data.organizations || [];
+      const exact = orgs.find(o => o.name.toLowerCase() === row.orgName.toLowerCase());
+      if (exact) {
+        return { zdOrgId: exact.id, zdOrgName: exact.name, zdUserId: null, zdUserEmail: null, matchType: 'orgName', matchConfidence: 'High' };
+      }
+    } catch (e) { /* fall through */ }
+  }
+
+  // 2. Exact org name match via accountName
+  if (row.accountName) {
+    try {
+      const data = await zdAuditorGet(`${base}/organizations/search`, { query: `name:${row.accountName}` });
+      await auditorDelay(300);
+      const orgs = data.organizations || [];
+      const exact = orgs.find(o => o.name.toLowerCase() === row.accountName.toLowerCase());
+      if (exact) {
+        return { zdOrgId: exact.id, zdOrgName: exact.name, zdUserId: null, zdUserEmail: null, matchType: 'accountName', matchConfidence: 'High' };
+      }
+      // Partial match — lower confidence
+      if (orgs.length > 0) {
+        return { zdOrgId: orgs[0].id, zdOrgName: orgs[0].name, zdUserId: null, zdUserEmail: null, matchType: 'accountName', matchConfidence: 'Low' };
+      }
+    } catch (e) { /* fall through */ }
+  }
+
+  // 3. Email domain search
+  if (row.emailDomain) {
+    const domain = row.emailDomain.replace(/^@/, '');
+    try {
+      const data = await zdAuditorGet(`${base}/users/search`, { query: `email:*@${domain} role:end-user` });
+      await auditorDelay(300);
+      const users = data.users || [];
+      if (users.length > 0) {
+        const user = users[0];
+        if (user.organization_id) {
+          try {
+            const orgData = await zdAuditorGet(`${base}/organizations/${user.organization_id}`);
+            await auditorDelay(300);
+            const org = orgData.organization;
+            return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: user.id, zdUserEmail: user.email, matchType: 'emailDomain', matchConfidence: 'Medium' };
+          } catch (e) { /* fall through */ }
+        }
+        return { zdOrgId: null, zdOrgName: null, zdUserId: user.id, zdUserEmail: user.email, matchType: 'emailDomain', matchConfidence: 'Medium' };
+      }
+    } catch (e) { /* fall through */ }
+  }
+
+  // 4. Direct email search
+  if (row.customerEmail) {
+    try {
+      const data = await zdAuditorGet(`${base}/users/search`, { query: `email:${row.customerEmail}` });
+      await auditorDelay(300);
+      const users = data.users || [];
+      if (users.length > 0) {
+        const user = users[0];
+        if (user.organization_id) {
+          try {
+            const orgData = await zdAuditorGet(`${base}/organizations/${user.organization_id}`);
+            await auditorDelay(300);
+            const org = orgData.organization;
+            return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: user.id, zdUserEmail: user.email, matchType: 'customerEmail', matchConfidence: 'High' };
+          } catch (e) { /* fall through */ }
+        }
+        return { zdOrgId: null, zdOrgName: null, zdUserId: user.id, zdUserEmail: user.email, matchType: 'customerEmail', matchConfidence: 'Medium' };
+      }
+    } catch (e) { /* fall through */ }
+  }
+
+  return null;
+}
+
+async function fetchTicketComments(ticketId) {
+  const base = zdBase();
+  try {
+    const data = await zdAuditorGet(`${base}/tickets/${ticketId}/comments`);
+    await auditorDelay(300);
+    return (data.comments || []).map(c => ({ body: c.body, public: c.public }));
+  } catch (e) {
+    return [];
+  }
+}
+
+async function getRecentSolvedTickets(match, limit) {
+  const base = zdBase();
+  let tickets = [];
+
+  if (match.zdOrgId) {
+    try {
+      const data = await zdAuditorGet(`${base}/organizations/${match.zdOrgId}/tickets`, {
+        status: 'solved', sort_by: 'created_at', sort_order: 'desc', per_page: limit,
+      });
+      await auditorDelay(300);
+      tickets = data.tickets || [];
+    } catch (e) { /* fall through */ }
+  } else if (match.zdUserId) {
+    try {
+      const data = await zdAuditorGet(`${base}/search`, {
+        query: `requester_id:${match.zdUserId} type:ticket status:solved`,
+        sort_by: 'created_at', sort_order: 'desc', per_page: limit,
+      });
+      await auditorDelay(300);
+      tickets = data.results || [];
+    } catch (e) { /* fall through */ }
+  }
+
+  const withComments = [];
+  for (const t of tickets) {
+    const comments = await fetchTicketComments(t.id);
+    withComments.push({ id: t.id, subject: t.subject, created_at: t.created_at, comments });
+  }
+  return withComments;
+}
+
+async function getCancellationKeywordTickets(match) {
+  const base = zdBase();
+  let query;
+  if (match.zdOrgId) {
+    query = `(cancel OR cancellation OR terminate OR "close account") organization_id:${match.zdOrgId} type:ticket status:solved`;
+  } else if (match.zdUserId) {
+    query = `(cancel OR cancellation OR terminate OR "close account" OR competitor OR refund) requester_id:${match.zdUserId} type:ticket status:solved`;
+  } else {
+    return [];
+  }
+
+  try {
+    const data = await zdAuditorGet(`${base}/search`, {
+      query, sort_by: 'created_at', sort_order: 'desc', per_page: 5,
+    });
+    await auditorDelay(300);
+    const tickets = data.results || [];
+    const withComments = [];
+    for (const t of tickets) {
+      const comments = await fetchTicketComments(t.id);
+      withComments.push({ id: t.id, subject: t.subject, created_at: t.created_at, comments });
+    }
+    return withComments;
+  } catch (e) {
+    return [];
+  }
+}
+
+async function analyzeWithClaude(customer, ticketData, phase) {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY is not configured');
+  }
+
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+  const ticketSummary = ticketData.map(t =>
+    `Ticket #${t.id} (${t.created_at?.slice(0, 10)}): ${t.subject}\n` +
+    t.comments.slice(-6).map(c => `  [${c.public ? 'public' : 'internal'}] ${c.body?.slice(0, 400)}`).join('\n')
+  ).join('\n\n');
+
+  const prompt = `You are analyzing why a customer canceled their service. Review these Zendesk support tickets.
+
+Customer: ${customer.accountName || customer.emailDomain || 'Unknown'}
+Email Domain: ${customer.emailDomain || 'unknown'}
+
+TICKETS:
+${ticketSummary}
+
+Choose exactly one cancellation reason category from this list:
+- Went to Competitor
+- Price is Too High
+- Downsizing Practice
+- Hired Staff
+- Quality Issues
+- Closed Practice
+- Leaving Firm
+- Fired
+- Call Forwarding Issue
+- Not Enough Call Volume
+- Wanted Features/Services Not Offered
+- Does Not See Value in Service
+- Unknown / Unspecified
+
+Respond with ONLY a JSON object, no markdown, no explanation outside the JSON:
+{
+  "category": "<exact category from list>",
+  "summary": "<1-3 sentences explaining the cancellation reason>",
+  "confidence": "<High|Medium|Low>",
+  "reasoning": "<why you chose this category>",
+  "supporting_ticket_ids": [<ticket ids used as evidence>]
+}
+
+High = explicit cancellation conversation found. Medium = strong indirect evidence. Low = weak signals only.`;
+
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 600,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  const text = response.content[0].text.trim();
+  const json = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  return JSON.parse(json);
+}
+
+async function runAuditJob(jobId, rows) {
+  const job = auditorJobs.get(jobId);
+  if (!job) return;
+
+  for (const rawRow of rows) {
+    const row = normalizeAuditorRow(rawRow);
+    const baseResult = {
+      accountName: row.accountName || '',
+      emailDomain: row.emailDomain || '',
+      customerEmail: row.customerEmail || '',
+      matchedOrg: null,
+      matchConfidence: null,
+      matchType: null,
+      category: null,
+      summary: null,
+      confidence: null,
+      reasoning: null,
+      supportingTicketIds: [],
+      ticketSubjects: [],
+      ticketDates: [],
+      status: 'done',
+      error: null,
+      zdSubdomain: process.env.ZENDESK_SUBDOMAIN || '',
+    };
+
+    try {
+      // Match customer in Zendesk
+      const match = await matchCustomer(row);
+
+      if (!match) {
+        job.results.push({ ...baseResult, status: 'no_match' });
+        job.done++;
+        continue;
+      }
+
+      baseResult.matchedOrg = match.zdOrgName;
+      baseResult.matchConfidence = match.matchConfidence;
+      baseResult.matchType = match.matchType;
+
+      // Phase 1 — recent solved tickets
+      let tickets = await getRecentSolvedTickets(match, 5);
+
+      // Phase 2 — cancellation keyword search
+      const keywordTickets = await getCancellationKeywordTickets(match);
+      // Merge by ticket id, keyword tickets first
+      const ticketMap = new Map();
+      for (const t of [...keywordTickets, ...tickets]) {
+        if (!ticketMap.has(t.id)) ticketMap.set(t.id, t);
+      }
+      tickets = Array.from(ticketMap.values());
+
+      // Phase 3 — historical sweep if we still have < 3 tickets
+      if (tickets.length < 3) {
+        const historical = await getRecentSolvedTickets(match, 10);
+        for (const t of historical) {
+          if (!ticketMap.has(t.id)) { ticketMap.set(t.id, t); tickets.push(t); }
+        }
+      }
+
+      if (tickets.length === 0) {
+        job.results.push({ ...baseResult, category: 'Unknown / Unspecified', summary: 'No tickets found in Zendesk for this customer.', confidence: 'Low', reasoning: 'No ticket data available.', status: 'done' });
+        job.done++;
+        continue;
+      }
+
+      baseResult.ticketSubjects = tickets.map(t => t.subject || '');
+      baseResult.ticketDates = tickets.map(t => t.created_at?.slice(0, 10) || '');
+
+      const analysis = await analyzeWithClaude(row, tickets, 'full');
+      baseResult.category = analysis.category;
+      baseResult.summary = analysis.summary;
+      baseResult.confidence = analysis.confidence;
+      baseResult.reasoning = analysis.reasoning;
+      baseResult.supportingTicketIds = analysis.supporting_ticket_ids || [];
+
+      job.results.push({ ...baseResult, status: 'done' });
+    } catch (err) {
+      job.results.push({ ...baseResult, status: 'error', error: err.message });
+    }
+
+    job.done++;
+  }
+
+  job.status = 'done';
+}
+
 app.get('/api/zendesk-auditor/categories', requireRole('super_admin', 'zendesk_auditor'), (req, res) => {
-  res.json({ categories: [
-    'Went to Competitor',
-    'Price is Too High',
-    'Downsizing Practice',
-    'Hired Staff',
-    'Quality Issues',
-    'Closed Practice',
-    'Leaving Firm',
-    'Fired',
-    'Call Forwarding Issue',
-    'Not Enough Call Volume',
-    'Wanted Features/Services Not Offered',
-    'Does Not See Value in Service',
-    'Unknown / Unspecified',
-  ]});
+  res.json({ categories: AUDITOR_CATEGORIES });
+});
+
+app.post('/api/zendesk-auditor/run', requireRole('super_admin', 'zendesk_auditor'), auditorUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  let rows;
+  try {
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  } catch (e) {
+    return res.status(400).json({ error: 'Failed to parse file: ' + e.message });
+  }
+
+  if (!rows || rows.length === 0) return res.status(400).json({ error: 'Spreadsheet is empty or could not be parsed' });
+
+  const jobId = Date.now().toString(36);
+  auditorJobs.set(jobId, { status: 'running', results: [], total: rows.length, done: 0, error: null });
+
+  // Fire and forget — results stream via SSE
+  runAuditJob(jobId, rows).catch(err => {
+    const job = auditorJobs.get(jobId);
+    if (job) { job.status = 'error'; job.error = err.message; }
+  });
+
+  res.json({ jobId, total: rows.length });
+});
+
+app.get('/api/zendesk-auditor/stream/:jobId', requireRole('super_admin', 'zendesk_auditor'), (req, res) => {
+  const { jobId } = req.params;
+  const job = auditorJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  let sentCount = 0;
+
+  const interval = setInterval(() => {
+    const current = auditorJobs.get(jobId);
+    if (!current) { clearInterval(interval); res.end(); return; }
+
+    // Send any new results
+    while (sentCount < current.results.length) {
+      const result = current.results[sentCount];
+      res.write(`data: ${JSON.stringify({ type: 'result', result, done: current.done, total: current.total })}\n\n`);
+      sentCount++;
+    }
+
+    // Also send progress even if no new result
+    res.write(`data: ${JSON.stringify({ type: 'progress', done: current.done, total: current.total, status: current.status })}\n\n`);
+
+    if (current.status === 'done' || current.status === 'error') {
+      res.write(`data: ${JSON.stringify({ type: 'done', done: current.done, total: current.total, status: current.status, error: current.error })}\n\n`);
+      clearInterval(interval);
+      res.end();
+    }
+  }, 800);
+
+  req.on('close', () => clearInterval(interval));
+});
+
+app.get('/api/zendesk-auditor/results/:jobId', requireRole('super_admin', 'zendesk_auditor'), (req, res) => {
+  const { jobId } = req.params;
+  const job = auditorJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job);
 });
 
 // ─── React SPA Catch-All ─────────────────────────────────────────────────────

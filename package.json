@@ -10,6 +10,7 @@
     "tunnel": "~/cloudflared tunnel --url http://localhost:3001"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.105.0",
     "axios": "^1.7.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -18,8 +19,10 @@
     "express-session": "^1.19.0",
     "helmet": "^8.1.0",
     "mssql": "^12.5.2",
+    "multer": "^2.2.0",
     "passport": "^0.7.0",
-    "passport-google-oauth20": "^2.0.0"
+    "passport-google-oauth20": "^2.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
