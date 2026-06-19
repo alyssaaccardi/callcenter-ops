@@ -2288,9 +2288,15 @@ async function matchCustomer(row) {
     } catch (e) { return null; }
   }
 
+  // Derive domain from customerEmail if no explicit emailDomain column
+  const effectiveDomain = row.emailDomain ||
+    (row.customerEmail?.includes('@') ? row.customerEmail.split('@')[1] : null);
+
   // 1. Email domain — most reliable, no typo risk
-  if (row.emailDomain) {
-    const domain = row.emailDomain.replace(/^@/, '');
+  // Skip generic domains (gmail, yahoo, hotmail, outlook) — they match thousands of unrelated users
+  const genericDomains = ['gmail.com','yahoo.com','hotmail.com','outlook.com','icloud.com','aol.com','msn.com','live.com','me.com','mac.com'];
+  if (effectiveDomain && !genericDomains.includes(effectiveDomain.toLowerCase())) {
+    const domain = effectiveDomain.replace(/^@/, '');
     try {
       const data = await zdAuditorGet(`${base}/users/search`, { query: `email:*@${domain}`, per_page: 25 });
       await auditorDelay(300);
@@ -2393,7 +2399,7 @@ async function getRecentSolvedTickets(match, limit) {
     } catch (e) { /* fall through */ }
   } else {
     // No org — search across all known user IDs for this domain/email
-    const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 6) : (match.zdUserId ? [match.zdUserId] : []);
+    const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 15) : (match.zdUserId ? [match.zdUserId] : []);
     const ticketMap = new Map();
     for (const userId of userIds) {
       try {
@@ -2433,7 +2439,7 @@ async function getCancellationKeywordTickets(match) {
   }
 
   // Always also search across all user IDs — catches cases where org search misses tickets
-  const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 6) : (match.zdUserId ? [match.zdUserId] : []);
+  const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 15) : (match.zdUserId ? [match.zdUserId] : []);
   for (const userId of userIds) {
     try {
       const data = await zdAuditorGet(`${base}/search`, {
