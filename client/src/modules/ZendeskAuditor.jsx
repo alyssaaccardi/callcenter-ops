@@ -490,7 +490,7 @@ export default function ZendeskAuditor() {
               AI quota reached — {keywordCount} {keywordCount === 1 ? 'row was' : 'rows were'} categorized using keyword matching
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
-              Keyword matching scans ticket text for known terms and patterns — it works well for clear-cut cases but lacks the context and nuance of AI analysis. Results marked <strong style={{ color: '#b45309' }}>KEYWORD MATCH</strong> should be reviewed manually for accuracy. AI will resume on the next audit once the daily quota resets.
+              Keyword matching scans ticket text for known terms and patterns — it works well for clear-cut cases but lacks the context and nuance of AI analysis. Results marked <strong style={{ color: '#b45309' }}>KEYWORD MATCH</strong> should be reviewed manually for accuracy. The Gemini free tier quota resets daily at midnight Pacific Time — re-run the audit after midnight and AI analysis will resume automatically.
             </div>
           </div>
         </div>
