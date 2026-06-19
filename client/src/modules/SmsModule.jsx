@@ -101,6 +101,7 @@ export default function SmsModule() {
       try {
         await api.post('/api/eztexting/send', {
           groups: selectedGroups.map(g => g.id),
+          groupNames: selectedGroups.map(g => g.name),
           message: message.trim(),
         });
         addSmsLog(`SMS sent via EZTexting to ${selectedGroups.length} group(s)`, 'ok');

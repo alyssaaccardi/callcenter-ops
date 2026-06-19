@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Call Center Status</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%;
+  background: transparent;
+  font-family: 'Nunito Sans', sans-serif;
+  color: #1a1a3e;
+  overflow-x: hidden;
+}
+
+/* ── Status Card ─────────────────────────────────────── */
+#status-card {
+  width: 100%;
+  padding: 20px 24px 22px;
+  border-radius: 14px;
+  border: 1.5px solid transparent;
+  transition: all 0.5s ease;
+  margin-bottom: 16px;
+}
+
+#status-card.operational {
+  background: rgba(34,197,94,0.06);
+  border-color: rgba(34,197,94,0.3);
+}
+#status-card.down {
+  background: rgba(239,68,68,0.05);
+  border-color: rgba(239,68,68,0.28);
+  animation: down-pulse 3s ease-in-out infinite;
+}
+#status-card.loading, #status-card.error {
+  background: rgba(107,122,153,0.05);
+  border-color: rgba(107,122,153,0.15);
+}
+
+@keyframes down-pulse {
+  0%, 100% { border-color: rgba(239,68,68,0.28); }
+  50%       { border-color: rgba(239,68,68,0.08); }
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.status-dot {
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+#status-card.operational .status-dot {
+  background: #22c55e;
+  box-shadow: 0 0 10px rgba(34,197,94,0.7);
+  animation: breathe 3s ease-in-out infinite;
+}
+#status-card.down .status-dot {
+  background: #ef4444;
+  box-shadow: 0 0 10px rgba(239,68,68,0.7);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+#status-card.loading .status-dot,
+#status-card.error   .status-dot { background: #9ca3af; }
+
+@keyframes breathe   { 0%,100% { box-shadow: 0 0 4px rgba(34,197,94,0.4); } 50% { box-shadow: 0 0 16px rgba(34,197,94,1); } }
+@keyframes pulse-dot { 0%,100% { box-shadow: 0 0 4px rgba(239,68,68,0.4); } 50% { box-shadow: 0 0 16px rgba(239,68,68,1); } }
+
+.status-label {
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  flex: 1;
+}
+#status-card.operational .status-label { color: #15803d; }
+#status-card.down        .status-label { color: #dc2626; }
+#status-card.loading     .status-label,
+#status-card.error       .status-label { color: #9ca3af; font-weight: 700; }
+
+.updated-time {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: #9ca3af;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.status-message {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  padding-left: 25px;
+  margin-top: 4px;
+}
+#status-card.operational .status-message { color: #16a34a; }
+#status-card.down        .status-message { color: #b91c1c; }
+
+.standby-sub {
+  font-size: 12px;
+  font-weight: 600;
+  padding-left: 25px;
+  margin-top: 3px;
+  color: #b91c1c;
+  opacity: 0.72;
+  display: none;
+}
+
+.spinner {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border: 2px solid rgba(107,122,153,0.2);
+  border-top-color: #9ca3af;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── SMS Log ─────────────────────────────────────────── */
+#sms-section {
+  width: 100%;
+}
+
+.sms-section-header {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #6b7a99;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(107,122,153,0.15);
+}
+
+.sms-empty {
+  font-size: 13px;
+  color: #9ca3af;
+  text-align: center;
+  padding: 20px 0;
+  font-style: italic;
+}
+
+.sms-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(107,122,153,0.1);
+}
+.sms-entry:last-child { border-bottom: none; }
+
+.sms-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sms-time {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: #9ca3af;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.sms-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sms-group-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: rgba(99,102,241,0.1);
+  border: 1px solid rgba(99,102,241,0.22);
+  color: #4f46e5;
+  letter-spacing: 0.03em;
+}
+
+.sms-body {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a3e;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sms-sender {
+  font-size: 11px;
+  color: #9ca3af;
+  font-weight: 600;
+}
+
+#sms-error {
+  font-size: 12px;
+  color: #9ca3af;
+  text-align: center;
+  padding: 12px 0;
+  display: none;
+}
+</style>
+</head>
+<body>
+
+<!-- Status Card -->
+<div id="status-card" class="loading">
+  <div class="card-header">
+    <span class="status-dot"></span>
+    <span class="status-label" id="status-label"><span class="spinner"></span></span>
+    <span class="updated-time" id="updated-time"></span>
+  </div>
+  <div class="status-message" id="status-message"></div>
+  <div class="standby-sub" id="standby-sub">for text message updates</div>
+</div>
+
+<!-- SMS Log -->
+<div id="sms-section">
+  <div class="sms-section-header">Staff Text Message Updates</div>
+  <div id="sms-list"><div class="sms-empty">Loading…</div></div>
+  <div id="sms-error">Could not load message history.</div>
+</div>
+
+<script>
+const params  = new URLSearchParams(window.location.search);
+const CC      = params.get('cc') || 'mitel';
+const BACKEND = (params.get('backend') || window.location.origin).replace(/\/$/, '');
+const POLL_MS = 30000;
+
+const CC_NAMES = { savvy: 'Savvy Phone', mitel: 'Mitel Classic' };
+const CC_NAME  = params.has('name') ? params.get('name') : (CC_NAMES[CC] ?? CC);
+const PREFIX   = CC_NAME ? `${CC_NAME} — ` : '';
+
+// ── Status ────────────────────────────────────────────
+function renderStatus(state, message, updatedAt) {
+  const card     = document.getElementById('status-card');
+  const labelEl  = document.getElementById('status-label');
+  const msgEl    = document.getElementById('status-message');
+  const timeEl   = document.getElementById('updated-time');
+  const subEl    = document.getElementById('standby-sub');
+
+  card.className = state;
+
+  const labels = {
+    operational: `${PREFIX}Operational`,
+    down:        `${PREFIX}Standby`,
+    loading:     'Checking status…',
+    error:       'Status unavailable',
+  };
+
+  labelEl.textContent = labels[state] || labels.error;
+  msgEl.textContent   = (state === 'operational' || state === 'down') ? (message || '') : '';
+  subEl.style.display = state === 'down' ? 'block' : 'none';
+
+  if (updatedAt) {
+    const t = new Date(updatedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    timeEl.textContent = `Updated ${t}`;
+  } else {
+    timeEl.textContent = '';
+  }
+}
+
+async function fetchStatus() {
+  try {
+    const resp = await fetch(`${BACKEND}/api/status`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const cc    = CC === 'savvy' ? data.savvyPhone : data.mitelClassic;
+    const state = cc?.state === 'UP' ? 'operational' : 'down';
+    renderStatus(state, cc?.message || '', data.updatedAt);
+  } catch {
+    renderStatus('error', '', null);
+  }
+}
+
+// ── SMS History ───────────────────────────────────────
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/New_York' })
+    + ' · '
+    + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' })
+    + ' ET';
+}
+
+function renderSms(entries) {
+  const list = document.getElementById('sms-list');
+  const errEl = document.getElementById('sms-error');
+
+  if (!entries || entries.length === 0) {
+    list.innerHTML = '<div class="sms-empty">No staff messages sent yet.</div>';
+    return;
+  }
+
+  errEl.style.display = 'none';
+  list.innerHTML = entries.map(e => {
+    const tags = (e.groups || []).map(g =>
+      `<span class="sms-group-tag">${g}</span>`
+    ).join('');
+    const sender = e.sentBy ? `<span class="sms-sender">Sent by ${e.sentBy}</span>` : '';
+    return `
+      <div class="sms-entry">
+        <div class="sms-meta">
+          <span class="sms-time">${fmtDate(e.sentAt)}</span>
+          <div class="sms-groups">${tags}</div>
+        </div>
+        <div class="sms-body">${e.message.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+        ${sender}
+      </div>`;
+  }).join('');
+}
+
+async function fetchSms() {
+  try {
+    const resp = await fetch(`${BACKEND}/api/sms-history?limit=25`);
+    if (!resp.ok) throw new Error();
+    const data = await resp.json();
+    // Filter to entries that include agents/supervisors group
+    const filtered = data.filter(e =>
+      (e.groups || []).some(g => /agents|supervisors/i.test(g))
+    );
+    renderSms(filtered);
+  } catch {
+    document.getElementById('sms-error').style.display = 'block';
+    document.getElementById('sms-list').innerHTML = '';
+  }
+}
+
+// ── Init ──────────────────────────────────────────────
+renderStatus('loading', '', null);
+fetchStatus();
+fetchSms();
+setInterval(fetchStatus, POLL_MS);
+setInterval(fetchSms, POLL_MS);
+</script>
+</body>
+</html>

@@ -112,6 +112,12 @@ app.get('/widget', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'CCOB_Widget.html'));
 });
 
+app.get('/site-widget', (req, res) => {
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('Content-Security-Policy', "frame-ancestors *");
+  res.sendFile(path.join(__dirname, 'public', 'CCOB_SiteWidget.html'));
+});
+
 // ─── TV Session Token Store ───────────────────────────────────────────────────
 const TV_SESSIONS_FILE = path.join(__dirname, 'tv-sessions.json');
 
@@ -271,6 +277,18 @@ const STATUS_FILE = path.join(__dirname, 'status-store.json');
 const LOG_FILE = path.join(__dirname, 'activity-log.json');
 const LOG_MAX  = 500;
 
+// ─── SMS History Store ────────────────────────────────────────────────────────
+const SMS_HISTORY_FILE = path.join(__dirname, 'sms-history.json');
+const SMS_HISTORY_MAX  = 200;
+
+function loadSmsHistory() {
+  try { return JSON.parse(fs.readFileSync(SMS_HISTORY_FILE, 'utf8')); } catch { return []; }
+}
+function saveSmsHistory(entries) {
+  fs.writeFileSync(SMS_HISTORY_FILE, JSON.stringify(entries));
+}
+let smsHistory = loadSmsHistory();
+
 function loadLog() {
   try { return JSON.parse(fs.readFileSync(LOG_FILE, 'utf8')); } catch { return []; }
 }
@@ -297,6 +315,12 @@ app.post('/api/activity-log', requireAuth, (req, res) => {
   activityLog = [entry, ...activityLog].slice(0, LOG_MAX);
   saveLog(activityLog);
   res.json({ ok: true });
+});
+
+// Public SMS history — readable by the Wix site widget with API key
+app.get('/api/sms-history', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+  res.json(smsHistory.slice(0, limit));
 });
 
 // ─── Canned Responses ─────────────────────────────────────────────────────────
@@ -561,7 +585,7 @@ app.get('/api/eztexting/groups', requireAuth, async (req, res) => {
 // ─── EZTexting: Send SMS ───────────────────────────────────────────────────────
 app.post('/api/eztexting/send', requireAuth, async (req, res) => {
   try {
-    const { groups, phoneNumber, message } = req.body;
+    const { groups, groupNames, phoneNumber, message } = req.body;
 
     if ((!groups || !groups.length) && !phoneNumber) {
       return res.status(400).json({ error: 'groups or phoneNumber and message are required' });
@@ -599,7 +623,22 @@ app.post('/api/eztexting/send', requireAuth, async (req, res) => {
       }
     );
 
-    res.json({ success: true, result: response.data, sentAt: new Date().toISOString() });
+    const sentAt = new Date().toISOString();
+
+    // Record group sends to the SMS history store
+    if (groups && groups.length) {
+      const names = groupNames && groupNames.length ? groupNames : groups.map(String);
+      const entry = {
+        sentAt,
+        message,
+        groups: names,
+        sentBy: req.user?.name || req.user?.email || 'Unknown',
+      };
+      smsHistory = [entry, ...smsHistory].slice(0, SMS_HISTORY_MAX);
+      saveSmsHistory(smsHistory);
+    }
+
+    res.json({ success: true, result: response.data, sentAt });
   } catch (err) {
     console.error('EZTexting send error:', err.response?.data || err.message);
     res.status(500).json({ error: 'Failed to send SMS', details: err.message });
