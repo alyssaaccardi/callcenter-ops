@@ -175,30 +175,15 @@ html, body {
 
 .msg-datetime {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
-  color: #6b7a99;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-}
-
-.msg-group-tag {
-  font-size: 10px;
-  font-weight: 800;
-  padding: 3px 10px;
-  border-radius: 20px;
-  background: rgba(99,102,241,0.08);
-  border: 1px solid rgba(99,102,241,0.2);
-  color: #4f46e5;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.msg-sender {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
-  color: #9ca3af;
-  margin-left: auto;
-  font-style: italic;
+  color: #4f46e5;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  background: rgba(99,102,241,0.07);
+  border: 1px solid rgba(99,102,241,0.18);
+  padding: 4px 12px;
+  border-radius: 6px;
 }
 
 .sms-empty {
@@ -290,14 +275,10 @@ function renderSms(entries) {
     return;
   }
   list.innerHTML = entries.map((e, i) => {
-    const tags   = (e.groups || []).map(g => '<span class="msg-group-tag">' + escape(g) + '</span>').join('');
-    const sender = e.sentBy ? '<span class="msg-sender">— ' + escape(e.sentBy) + '</span>' : '';
     return '<div class="msg-card">'
       + '<div class="msg-body">' + escape(e.message) + '</div>'
       + '<div class="msg-footer">'
       + '<span class="msg-datetime">' + fmtDatetime(e.sentAt) + '</span>'
-      + tags
-      + sender
       + '</div>'
       + '</div>';
   }).join('');
