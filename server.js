@@ -12,7 +12,6 @@ const rateLimit = require('express-rate-limit');
 const { passport, requireAuth, requireRole, listUsers, addUser, removeUser } = require('./auth');
 const multer = require('multer');
 const XLSX   = require('xlsx');
-const Anthropic = require('@anthropic-ai/sdk');
 
 https.globalAgent.setMaxListeners(50);
 require('events').EventEmitter.defaultMaxListeners = 50;
@@ -2425,61 +2424,142 @@ async function getCancellationKeywordTickets(match) {
   }
 }
 
-async function analyzeWithClaude(customer, ticketData, phase) {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_API_KEY is not configured');
-  }
+// ─── Keyword-based cancellation analysis (no external AI needed) ─────────────
+const CATEGORY_RULES = [
+  { category: 'Went to Competitor', patterns: [
+    [/competi(tor|tors|ng)/i, 4], [/switch(ing|ed|es)?\s+(to|away|service)/i, 3],
+    [/going with (another|different|other|a\s+new)/i, 3],
+    [/ruby\b/i, 3], [/patlive/i, 4], [/smith\.ai/i, 4],
+    [/answer\s*connect/i, 4], [/gabbyville/i, 4],
+    [/map\s*communications/i, 4], [/davinci/i, 3],
+    [/different (answering\s+)?service/i, 2], [/another (answering\s+)?service/i, 2],
+    [/found (a\s+)?cheaper/i, 3],
+  ]},
+  { category: 'Price is Too High', patterns: [
+    [/too expensive/i, 4], [/can'?t afford/i, 4], [/overpriced/i, 4],
+    [/over\s*budget/i, 3], [/cheaper (option|alternative|service|provider)/i, 4],
+    [/rate increase/i, 3], [/price(s)? (too |are )?(high|much)/i, 4],
+    [/cost(ing|s)? too much/i, 4], [/cut(ting)?\s+(back\s+)?cost/i, 3],
+    [/reduc(e|ing)\s+(our\s+)?cost/i, 3], [/save money/i, 2], [/billing concern/i, 2],
+  ]},
+  { category: 'Downsizing Practice', patterns: [
+    [/downsiz(ing|e|ed)/i, 4], [/scaling (back|down)/i, 4],
+    [/reducing (staff|size|team|office)/i, 3], [/smaller (practice|firm|office)/i, 3],
+    [/cutting back/i, 3], [/shrink(ing)?\s+(the\s+)?(practice|firm)/i, 3],
+    [/slow(er|ing)\s+(business|down)/i, 2], [/less (call|client|business) volume/i, 2],
+  ]},
+  { category: 'Hired Staff', patterns: [
+    [/hired (a\s+)?(receptionist|staff|assistant|employee|secretary)/i, 4],
+    [/hire(d|ing)\s+(someone|a\s+person|in-?house)/i, 3],
+    [/new (receptionist|staff|assistant|employee|hire)/i, 3],
+    [/in(-|\s*)house (receptionist|staff|coverage|answering)/i, 4],
+    [/front\s*desk (person|staff|coverage)/i, 3],
+    [/have (someone|staff) (now|to answer)/i, 3], [/no longer need/i, 2],
+  ]},
+  { category: 'Quality Issues', patterns: [
+    [/quality (issue|problem|concern)/i, 4], [/miss(ing|ed) calls?/i, 4],
+    [/wrong (message|information|number)/i, 3], [/incorrect (message|information)/i, 3],
+    [/(bad|poor) (service|quality|experience)/i, 4], [/unprofessional/i, 4],
+    [/complaint/i, 3], [/not (satisfied|happy) with (the\s+)?service/i, 3],
+    [/dissatisf(ied|action)/i, 4], [/terrible service/i, 3],
+  ]},
+  { category: 'Closed Practice', patterns: [
+    [/clos(ing|ed|e) (the\s+)?(practice|firm|office|business)/i, 4],
+    [/shut(ting)?\s+(down|the\s+practice)/i, 4], [/retir(ing|ed|ement)/i, 4],
+    [/no longer practicing/i, 4], [/dissolv(ing|ed)\s+(the\s+)?(firm|practice)/i, 4],
+    [/going out of business/i, 4], [/winding down/i, 3],
+  ]},
+  { category: 'Leaving Firm', patterns: [
+    [/leaving (the\s+)?(firm|company|practice)/i, 4], [/left (the\s+)?(firm|company)/i, 4],
+    [/no longer (at|with) (the\s+)?(firm|company)/i, 4],
+    [/moving on/i, 3], [/parting ways/i, 3], [/transition(ing)? (out|away)/i, 3],
+  ]},
+  { category: 'Fired', patterns: [
+    [/\bfired\b/i, 4], [/\bterminat(ed|ion)\b/i, 3], [/\blet go\b/i, 3],
+    [/\blaid off\b/i, 3], [/\bdismiss(ed|al)\b/i, 3],
+  ]},
+  { category: 'Call Forwarding Issue', patterns: [
+    [/call forward(ing)?/i, 4], [/forward(ing)?\s+issue/i, 4],
+    [/not (receiving|getting) (our\s+)?calls/i, 3],
+    [/calls?\s+(not|aren'?t)\s+(coming through|forwarding|going through)/i, 4],
+    [/setup (issue|problem)/i, 2], [/phone (issue|problem|setup)/i, 2],
+  ]},
+  { category: 'Not Enough Call Volume', patterns: [
+    [/not enough (calls?|volume)/i, 4], [/low (call\s+)?volume/i, 4],
+    [/too few calls/i, 4], [/(barely|rarely) (get|receive|have) calls/i, 3],
+    [/don'?t (receive|get) enough calls/i, 3],
+    [/calls? (have\s+)?(slowed|decreased|dropped)/i, 3],
+  ]},
+  { category: 'Wanted Features/Services Not Offered', patterns: [
+    [/feature (request|not available|missing)/i, 4],
+    [/doesn'?t (have|offer|support)\s+.{0,30}(need|want|require)/i, 3],
+    [/can'?t (integrate|connect|sync)/i, 3],
+    [/need(s|ed)?\s+(a\s+)?(feature|integration|capability)/i, 3],
+    [/wish (you|it)\s+(had|offer(ed)?|support(ed)?)/i, 3],
+    [/(intake|scheduling|crm)\s+(integration|software)/i, 3],
+  ]},
+  { category: 'Does Not See Value in Service', patterns: [
+    [/not worth (it|the cost|the price)/i, 4], [/don'?t (see|find)\s+(the\s+)?value/i, 4],
+    [/no (longer\s+)?benefit/i, 3], [/doesn'?t (justify|make sense)/i, 3],
+    [/\broi\b/i, 3], [/return on investment/i, 3],
+    [/not getting (enough\s+)?(return|value|benefit)/i, 4], [/waste of money/i, 4],
+  ]},
+];
 
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-  const ticketSummary = ticketData.map(t =>
-    `Ticket #${t.id} (${t.created_at?.slice(0, 10)}): ${t.subject}\n` +
-    t.comments.slice(-6).map(c => `  [${c.public ? 'public' : 'internal'}] ${c.body?.slice(0, 400)}`).join('\n')
-  ).join('\n\n');
-
-  const prompt = `You are analyzing why a customer canceled their service. Review these Zendesk support tickets.
-
-Customer: ${customer.accountName || customer.emailDomain || 'Unknown'}
-Email Domain: ${customer.emailDomain || 'unknown'}
-
-TICKETS:
-${ticketSummary}
-
-Choose exactly one cancellation reason category from this list:
-- Went to Competitor
-- Price is Too High
-- Downsizing Practice
-- Hired Staff
-- Quality Issues
-- Closed Practice
-- Leaving Firm
-- Fired
-- Call Forwarding Issue
-- Not Enough Call Volume
-- Wanted Features/Services Not Offered
-- Does Not See Value in Service
-- Unknown / Unspecified
-
-Respond with ONLY a JSON object, no markdown, no explanation outside the JSON:
-{
-  "category": "<exact category from list>",
-  "summary": "<1-3 sentences explaining the cancellation reason>",
-  "confidence": "<High|Medium|Low>",
-  "reasoning": "<why you chose this category>",
-  "supporting_ticket_ids": [<ticket ids used as evidence>]
-}
-
-High = explicit cancellation conversation found. Medium = strong indirect evidence. Low = weak signals only.`;
-
-  const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 600,
-    messages: [{ role: 'user', content: prompt }],
+function analyzeTickets(customer, ticketData) {
+  const ticketTexts = ticketData.map(t => {
+    const parts = [t.subject || ''];
+    for (const c of (t.comments || [])) { if (c.body) parts.push(c.body.slice(0, 800)); }
+    return { id: t.id, subject: t.subject, date: t.created_at?.slice(0, 10), text: parts.join(' ') };
   });
 
-  const text = response.content[0].text.trim();
-  const json = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  return JSON.parse(json);
+  const scores = CATEGORY_RULES.map(rule => {
+    let score = 0;
+    const matchedTerms = [];
+    const matchedIds = new Set();
+    for (const [pattern, weight] of rule.patterns) {
+      for (const t of ticketTexts) {
+        if (pattern.test(t.text)) { score += weight; matchedIds.add(t.id); matchedTerms.push(pattern.source.replace(/[\\^$.*+?()[\]{}|]/g, '').slice(0, 20)); }
+      }
+    }
+    return { category: rule.category, score, matchedTerms: [...new Set(matchedTerms)], matchedIds: [...matchedIds] };
+  });
+
+  scores.sort((a, b) => b.score - a.score);
+  const best = scores[0];
+  const second = scores[1];
+
+  const confidence = best.score === 0 ? 'Low' : best.score >= 8 && best.score >= second.score * 2 ? 'High' : best.score >= 4 ? 'Medium' : 'Low';
+  const category  = best.score > 0 ? best.category : 'Unknown / Unspecified';
+
+  // Extract a supporting sentence
+  let snippet = '';
+  if (best.score > 0) {
+    const rule = CATEGORY_RULES.find(r => r.category === category);
+    outer: for (const t of ticketTexts) {
+      for (const s of t.text.split(/[.!?\n]+/).filter(s => s.trim().length > 20)) {
+        if (rule.patterns.some(([p]) => p.test(s))) { snippet = s.trim().slice(0, 180); break outer; }
+      }
+    }
+  }
+
+  const summary = category === 'Unknown / Unspecified'
+    ? `No clear cancellation reason identified from ${ticketData.length} ticket(s). No explicit cancellation context found in recent conversations.`
+    : snippet
+      ? `Customer's cancellation is consistent with: ${category}. From ticket history: "${snippet}"`
+      : `Cancellation reason categorized as "${category}" based on keyword signals across ${ticketData.length} ticket(s).`;
+
+  const reasoning = best.score > 0
+    ? `Score ${best.score} for "${category}"${best.matchedTerms.length ? ` (signals: ${best.matchedTerms.slice(0, 3).join(', ')})` : ''}.${second.score > 0 ? ` Runner-up: "${second.category}" (${second.score}).` : ''}`
+    : 'No keyword signals matched any category.';
+
+  return {
+    category,
+    summary,
+    confidence,
+    reasoning,
+    supporting_ticket_ids: best.matchedIds.length ? best.matchedIds : ticketData.slice(0, 2).map(t => t.id),
+  };
 }
 
 async function runAuditJob(jobId, rows) {
@@ -2550,7 +2630,7 @@ async function runAuditJob(jobId, rows) {
       baseResult.ticketSubjects = tickets.map(t => t.subject || '');
       baseResult.ticketDates = tickets.map(t => t.created_at?.slice(0, 10) || '');
 
-      const analysis = await analyzeWithClaude(row, tickets, 'full');
+      const analysis = analyzeTickets(row, tickets);
       baseResult.category = analysis.category;
       baseResult.summary = analysis.summary;
       baseResult.confidence = analysis.confidence;
