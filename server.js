@@ -2291,42 +2291,40 @@ async function matchCustomer(row) {
     } catch (e) { /* fall through */ }
   }
 
-  // 2. Exact org name match via accountName
+  // 2. Org name match via accountName
   if (row.accountName) {
     try {
-      const data = await zdAuditorGet(`${base}/organizations/search`, { query: `name:${row.accountName}` });
+      const data = await zdAuditorGet(`${base}/organizations/search`, { query: row.accountName });
       await auditorDelay(300);
       const orgs = data.organizations || [];
-      const exact = orgs.find(o => o.name.toLowerCase() === row.accountName.toLowerCase());
-      if (exact) {
-        return { zdOrgId: exact.id, zdOrgName: exact.name, zdUserId: null, zdUserEmail: null, matchType: 'accountName', matchConfidence: 'High' };
-      }
-      // Partial match — lower confidence
-      if (orgs.length > 0) {
-        return { zdOrgId: orgs[0].id, zdOrgName: orgs[0].name, zdUserId: null, zdUserEmail: null, matchType: 'accountName', matchConfidence: 'Low' };
+      const nameLow = row.accountName.toLowerCase();
+      const exact = orgs.find(o => o.name.toLowerCase() === nameLow);
+      const partial = orgs.find(o => o.name.toLowerCase().includes(nameLow) || nameLow.includes(o.name.toLowerCase()));
+      const hit = exact || partial;
+      if (hit) {
+        return { zdOrgId: hit.id, zdOrgName: hit.name, zdUserId: null, zdUserEmail: null, zdUserIds: [], matchType: 'accountName', matchConfidence: exact ? 'High' : 'Medium' };
       }
     } catch (e) { /* fall through */ }
   }
 
-  // 3. Email domain search — collect ALL users with this domain, resolve org from any
+  // 3. Email domain search — no role filter, collect ALL users at domain
   if (row.emailDomain) {
     const domain = row.emailDomain.replace(/^@/, '');
     try {
-      const data = await zdAuditorGet(`${base}/users/search`, { query: `email:*@${domain} role:end-user`, per_page: 25 });
+      const data = await zdAuditorGet(`${base}/users/search`, { query: `email:*@${domain}`, per_page: 25 });
       await auditorDelay(300);
       const users = data.users || [];
       if (users.length > 0) {
-        const userWithOrg = users.find(u => u.organization_id);
         const allUserIds  = users.map(u => u.id);
+        const userWithOrg = users.find(u => u.organization_id);
         if (userWithOrg) {
           try {
             const orgData = await zdAuditorGet(`${base}/organizations/${userWithOrg.organization_id}`);
             await auditorDelay(300);
             const org = orgData.organization;
             return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: userWithOrg.id, zdUserEmail: userWithOrg.email, zdUserIds: allUserIds, matchType: 'emailDomain', matchConfidence: 'Medium' };
-          } catch (e) { /* fall through to no-org path */ }
+          } catch (e) { /* fall through */ }
         }
-        // No org found — keep all user IDs so ticket search covers everyone at the domain
         return { zdOrgId: null, zdOrgName: null, zdUserId: users[0].id, zdUserEmail: users[0].email, zdUserIds: allUserIds, matchType: 'emailDomain', matchConfidence: 'Medium' };
       }
     } catch (e) { /* fall through */ }
@@ -2353,6 +2351,29 @@ async function matchCustomer(row) {
     } catch (e) { /* fall through */ }
   }
 
+  // 5. User name search — catches cases where account name matches a user record but no org exists
+  const nameQuery = row.accountName || row.orgName;
+  if (nameQuery) {
+    try {
+      const data = await zdAuditorGet(`${base}/users/search`, { query: nameQuery, per_page: 10 });
+      await auditorDelay(300);
+      const users = (data.users || []).filter(u => u.role !== 'agent' && u.role !== 'admin');
+      if (users.length > 0) {
+        const allUserIds = users.map(u => u.id);
+        const userWithOrg = users.find(u => u.organization_id);
+        if (userWithOrg) {
+          try {
+            const orgData = await zdAuditorGet(`${base}/organizations/${userWithOrg.organization_id}`);
+            await auditorDelay(300);
+            const org = orgData.organization;
+            return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: userWithOrg.id, zdUserEmail: userWithOrg.email, zdUserIds: allUserIds, matchType: 'userName', matchConfidence: 'Medium' };
+          } catch (e) { /* fall through */ }
+        }
+        return { zdOrgId: null, zdOrgName: users[0].name, zdUserId: users[0].id, zdUserEmail: users[0].email, zdUserIds: allUserIds, matchType: 'userName', matchConfidence: 'Low' };
+      }
+    } catch (e) { /* fall through */ }
+  }
+
   return null;
 }
 
@@ -2374,7 +2395,7 @@ async function getRecentSolvedTickets(match, limit) {
   if (match.zdOrgId) {
     try {
       const data = await zdAuditorGet(`${base}/organizations/${match.zdOrgId}/tickets`, {
-        status: 'solved', sort_by: 'created_at', sort_order: 'desc', per_page: limit,
+        sort_by: 'created_at', sort_order: 'desc', per_page: limit,
       });
       await auditorDelay(300);
       tickets = data.tickets || [];
@@ -2386,7 +2407,7 @@ async function getRecentSolvedTickets(match, limit) {
     for (const userId of userIds) {
       try {
         const data = await zdAuditorGet(`${base}/search`, {
-          query: `requester_id:${userId} type:ticket status:solved`,
+          query: `requester_id:${userId} type:ticket (status:solved OR status:closed)`,
           sort_by: 'created_at', sort_order: 'desc', per_page: limit,
         });
         await auditorDelay(300);
@@ -2412,7 +2433,7 @@ async function getCancellationKeywordTickets(match) {
   if (match.zdOrgId) {
     try {
       const data = await zdAuditorGet(`${base}/search`, {
-        query: `${keywords} organization_id:${match.zdOrgId} type:ticket status:solved`,
+        query: `${keywords} organization_id:${match.zdOrgId} type:ticket (status:solved OR status:closed)`,
         sort_by: 'created_at', sort_order: 'desc', per_page: 5,
       });
       await auditorDelay(300);
@@ -2425,7 +2446,7 @@ async function getCancellationKeywordTickets(match) {
   for (const userId of userIds) {
     try {
       const data = await zdAuditorGet(`${base}/search`, {
-        query: `${keywords} requester_id:${userId} type:ticket status:solved`,
+        query: `${keywords} requester_id:${userId} type:ticket (status:solved OR status:closed)`,
         sort_by: 'created_at', sort_order: 'desc', per_page: 5,
       });
       await auditorDelay(300);
