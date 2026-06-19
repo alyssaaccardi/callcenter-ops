@@ -2417,34 +2417,34 @@ async function fetchTicketById(ticketId) {
 
 async function getRecentSolvedTickets(match, limit) {
   const base = zdBase();
-  let tickets = [];
+  const ticketMap = new Map();
 
+  // Org-level endpoint — fast but often returns 0 for accounts whose tickets are indexed under users
   if (match.zdOrgId) {
     try {
       const data = await zdAuditorGet(`${base}/organizations/${match.zdOrgId}/tickets`, {
         sort_by: 'created_at', sort_order: 'desc', per_page: limit,
       });
       await auditorDelay(80);
-      tickets = data.tickets || [];
+      for (const t of (data.tickets || [])) ticketMap.set(t.id, t);
     } catch (e) { /* fall through */ }
-  } else {
-    // No org — use per-user /tickets/requested endpoint (avoids search query complexity)
-    const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 5) : (match.zdUserId ? [match.zdUserId] : []);
-    const ticketMap = new Map();
-    for (const userId of userIds) {
-      try {
-        const data = await zdAuditorGet(`${base}/users/${userId}/tickets/requested`, {
-          sort_by: 'created_at', sort_order: 'desc', per_page: limit,
-        });
-        await auditorDelay(80);
-        for (const t of (data.tickets || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
-      } catch (e) { /* continue */ }
-    }
-    tickets = [...ticketMap.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, limit);
   }
 
+  // Always also query per-user — catches cases where org endpoint returns 0 (common for Ring Savvy / older accounts)
+  const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 5) : (match.zdUserId ? [match.zdUserId] : []);
+  for (const userId of userIds) {
+    try {
+      const data = await zdAuditorGet(`${base}/users/${userId}/tickets/requested`, {
+        sort_by: 'created_at', sort_order: 'desc', per_page: limit,
+      });
+      await auditorDelay(80);
+      for (const t of (data.tickets || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
+    } catch (e) { /* continue */ }
+  }
+
+  const sorted = [...ticketMap.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, limit);
   const withComments = [];
-  for (const t of tickets) {
+  for (const t of sorted) {
     const comments = await fetchTicketComments(t.id);
     withComments.push({ id: t.id, subject: t.subject, created_at: t.created_at, comments });
   }
