@@ -2278,36 +2278,17 @@ async function zdAuditorGet(url, params = {}) {
 async function matchCustomer(row) {
   const base = zdBase();
 
-  // 1. Exact org name match via orgName
-  if (row.orgName) {
+  // Helper: resolve org from a user record
+  async function resolveOrg(user) {
+    if (!user.organization_id) return null;
     try {
-      const data = await zdAuditorGet(`${base}/organizations/search`, { query: `name:${row.orgName}` });
+      const orgData = await zdAuditorGet(`${base}/organizations/${user.organization_id}`);
       await auditorDelay(300);
-      const orgs = data.organizations || [];
-      const exact = orgs.find(o => o.name.toLowerCase() === row.orgName.toLowerCase());
-      if (exact) {
-        return { zdOrgId: exact.id, zdOrgName: exact.name, zdUserId: null, zdUserEmail: null, matchType: 'orgName', matchConfidence: 'High' };
-      }
-    } catch (e) { /* fall through */ }
+      return orgData.organization;
+    } catch (e) { return null; }
   }
 
-  // 2. Org name match via accountName
-  if (row.accountName) {
-    try {
-      const data = await zdAuditorGet(`${base}/organizations/search`, { query: row.accountName });
-      await auditorDelay(300);
-      const orgs = data.organizations || [];
-      const nameLow = row.accountName.toLowerCase();
-      const exact = orgs.find(o => o.name.toLowerCase() === nameLow);
-      const partial = orgs.find(o => o.name.toLowerCase().includes(nameLow) || nameLow.includes(o.name.toLowerCase()));
-      const hit = exact || partial;
-      if (hit) {
-        return { zdOrgId: hit.id, zdOrgName: hit.name, zdUserId: null, zdUserEmail: null, zdUserIds: [], matchType: 'accountName', matchConfidence: exact ? 'High' : 'Medium' };
-      }
-    } catch (e) { /* fall through */ }
-  }
-
-  // 3. Email domain search — no role filter, collect ALL users at domain
+  // 1. Email domain — most reliable, no typo risk
   if (row.emailDomain) {
     const domain = row.emailDomain.replace(/^@/, '');
     try {
@@ -2317,20 +2298,14 @@ async function matchCustomer(row) {
       if (users.length > 0) {
         const allUserIds  = users.map(u => u.id);
         const userWithOrg = users.find(u => u.organization_id);
-        if (userWithOrg) {
-          try {
-            const orgData = await zdAuditorGet(`${base}/organizations/${userWithOrg.organization_id}`);
-            await auditorDelay(300);
-            const org = orgData.organization;
-            return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: userWithOrg.id, zdUserEmail: userWithOrg.email, zdUserIds: allUserIds, matchType: 'emailDomain', matchConfidence: 'Medium' };
-          } catch (e) { /* fall through */ }
-        }
-        return { zdOrgId: null, zdOrgName: null, zdUserId: users[0].id, zdUserEmail: users[0].email, zdUserIds: allUserIds, matchType: 'emailDomain', matchConfidence: 'Medium' };
+        const org = userWithOrg ? await resolveOrg(userWithOrg) : null;
+        if (org) return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: userWithOrg.id, zdUserEmail: userWithOrg.email, zdUserIds: allUserIds, matchType: 'emailDomain', matchConfidence: 'High' };
+        return { zdOrgId: null, zdOrgName: users[0].name, zdUserId: users[0].id, zdUserEmail: users[0].email, zdUserIds: allUserIds, matchType: 'emailDomain', matchConfidence: 'High' };
       }
     } catch (e) { /* fall through */ }
   }
 
-  // 4. Direct email search
+  // 2. Direct customer email
   if (row.customerEmail) {
     try {
       const data = await zdAuditorGet(`${base}/users/search`, { query: `email:${row.customerEmail}` });
@@ -2338,20 +2313,29 @@ async function matchCustomer(row) {
       const users = data.users || [];
       if (users.length > 0) {
         const user = users[0];
-        if (user.organization_id) {
-          try {
-            const orgData = await zdAuditorGet(`${base}/organizations/${user.organization_id}`);
-            await auditorDelay(300);
-            const org = orgData.organization;
-            return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: user.id, zdUserEmail: user.email, zdUserIds: [user.id], matchType: 'customerEmail', matchConfidence: 'High' };
-          } catch (e) { /* fall through */ }
-        }
-        return { zdOrgId: null, zdOrgName: null, zdUserId: user.id, zdUserEmail: user.email, zdUserIds: [user.id], matchType: 'customerEmail', matchConfidence: 'Medium' };
+        const org = await resolveOrg(user);
+        if (org) return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: user.id, zdUserEmail: user.email, zdUserIds: [user.id], matchType: 'customerEmail', matchConfidence: 'High' };
+        return { zdOrgId: null, zdOrgName: user.name, zdUserId: user.id, zdUserEmail: user.email, zdUserIds: [user.id], matchType: 'customerEmail', matchConfidence: 'High' };
       }
     } catch (e) { /* fall through */ }
   }
 
-  // 5. User name search with progressive word fallback
+  // 3. Org name (exact then partial)
+  const orgQuery = row.orgName || row.accountName;
+  if (orgQuery) {
+    try {
+      const data = await zdAuditorGet(`${base}/organizations/search`, { query: orgQuery });
+      await auditorDelay(300);
+      const orgs  = data.organizations || [];
+      const qLow  = orgQuery.toLowerCase();
+      const exact  = orgs.find(o => o.name.toLowerCase() === qLow);
+      const partial = orgs.find(o => o.name.toLowerCase().includes(qLow) || qLow.includes(o.name.toLowerCase()));
+      const hit = exact || partial;
+      if (hit) return { zdOrgId: hit.id, zdOrgName: hit.name, zdUserId: null, zdUserEmail: null, zdUserIds: [], matchType: 'orgName', matchConfidence: exact ? 'High' : 'Medium' };
+    } catch (e) { /* fall through */ }
+  }
+
+  // 4. User name search with progressive word fallback
   // e.g. "Davalos Defendes" → try full → no match → try "Davalos" → finds "Davalos Defense Law Firm"
   const nameQuery = row.accountName || row.orgName;
   if (nameQuery) {
