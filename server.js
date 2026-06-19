@@ -2351,27 +2351,34 @@ async function matchCustomer(row) {
     } catch (e) { /* fall through */ }
   }
 
-  // 5. User name search — catches cases where account name matches a user record but no org exists
+  // 5. User name search with progressive word fallback
+  // e.g. "Davalos Defendes" → try full → no match → try "Davalos" → finds "Davalos Defense Law Firm"
   const nameQuery = row.accountName || row.orgName;
   if (nameQuery) {
-    try {
-      const data = await zdAuditorGet(`${base}/users/search`, { query: nameQuery, per_page: 10 });
-      await auditorDelay(300);
-      const users = (data.users || []).filter(u => u.role !== 'agent' && u.role !== 'admin');
-      if (users.length > 0) {
-        const allUserIds = users.map(u => u.id);
-        const userWithOrg = users.find(u => u.organization_id);
-        if (userWithOrg) {
-          try {
-            const orgData = await zdAuditorGet(`${base}/organizations/${userWithOrg.organization_id}`);
-            await auditorDelay(300);
-            const org = orgData.organization;
-            return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: userWithOrg.id, zdUserEmail: userWithOrg.email, zdUserIds: allUserIds, matchType: 'userName', matchConfidence: 'Medium' };
-          } catch (e) { /* fall through */ }
+    const words = nameQuery.trim().split(/\s+/);
+    for (let len = words.length; len >= 1; len--) {
+      const q = words.slice(0, len).join(' ');
+      if (q.length < 3) break;
+      try {
+        const data = await zdAuditorGet(`${base}/users/search`, { query: q, per_page: 10 });
+        await auditorDelay(300);
+        const users = (data.users || []).filter(u => u.role !== 'agent' && u.role !== 'admin');
+        if (users.length > 0) {
+          const allUserIds  = users.map(u => u.id);
+          const userWithOrg = users.find(u => u.organization_id);
+          const confidence  = len === words.length ? 'Medium' : 'Low';
+          if (userWithOrg) {
+            try {
+              const orgData = await zdAuditorGet(`${base}/organizations/${userWithOrg.organization_id}`);
+              await auditorDelay(300);
+              const org = orgData.organization;
+              return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: userWithOrg.id, zdUserEmail: userWithOrg.email, zdUserIds: allUserIds, matchType: 'userName', matchConfidence: confidence };
+            } catch (e) { /* fall through */ }
+          }
+          return { zdOrgId: null, zdOrgName: users[0].name, zdUserId: users[0].id, zdUserEmail: users[0].email, zdUserIds: allUserIds, matchType: 'userName', matchConfidence: confidence };
         }
-        return { zdOrgId: null, zdOrgName: users[0].name, zdUserId: users[0].id, zdUserEmail: users[0].email, zdUserIds: allUserIds, matchType: 'userName', matchConfidence: 'Low' };
-      }
-    } catch (e) { /* fall through */ }
+      } catch (e) { /* try next */ }
+    }
   }
 
   return null;
