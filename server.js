@@ -2294,100 +2294,70 @@ async function zdAuditorGet(url, params = {}) {
 async function matchCustomer(row) {
   const base = zdBase();
 
-  // Helper: resolve org from a user record
-  async function resolveOrg(user) {
-    if (!user.organization_id) return null;
-    try {
-      const orgData = await zdAuditorGet(`${base}/organizations/${user.organization_id}`);
-      await auditorDelay(80);
-      return orgData.organization;
-    } catch (e) { return null; }
-  }
+  // Learnings from production data:
+  // - Domain wildcard search (email:*@domain.com) returns 0 for ALL domains in this Zendesk instance — skip it
+  // - Org search (organizations/search) also returns 0 consistently — skip it
+  // - The CSV email often belongs to a secondary contact at the firm; the cancellation ticket
+  //   may have been filed by a different person. Searching by BOTH email AND firm name and
+  //   collecting all matched users is the only reliable approach.
 
-  // Derive domain from customerEmail if no explicit emailDomain column
-  const effectiveDomain = row.emailDomain ||
-    (row.customerEmail?.includes('@') ? row.customerEmail.split('@')[1] : null);
+  const genericDomains = new Set(['gmail.com','yahoo.com','hotmail.com','outlook.com','icloud.com','aol.com','msn.com','live.com','me.com','mac.com']);
+  const userSet = new Map(); // userId -> user object (deduplicates across both searches)
 
-  // 1. Email domain — most reliable, no typo risk
-  // Skip generic domains (gmail, yahoo, hotmail, outlook) — they match thousands of unrelated users
-  const genericDomains = ['gmail.com','yahoo.com','hotmail.com','outlook.com','icloud.com','aol.com','msn.com','live.com','me.com','mac.com'];
-  if (effectiveDomain && !genericDomains.includes(effectiveDomain.toLowerCase())) {
-    const domain = effectiveDomain.replace(/^@/, '');
-    try {
-      const data = await zdAuditorGet(`${base}/users/search`, { query: `email:*@${domain}`, per_page: 25 });
-      await auditorDelay(80);
-      const users = data.users || [];
-      if (users.length > 0) {
-        const allUserIds  = users.map(u => u.id);
-        const userWithOrg = users.find(u => u.organization_id);
-        const org = userWithOrg ? await resolveOrg(userWithOrg) : null;
-        if (org) return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: userWithOrg.id, zdUserEmail: userWithOrg.email, zdUserIds: allUserIds, matchType: 'emailDomain', matchConfidence: 'High' };
-        return { zdOrgId: null, zdOrgName: users[0].name, zdUserId: users[0].id, zdUserEmail: users[0].email, zdUserIds: allUserIds, matchType: 'emailDomain', matchConfidence: 'High' };
-      }
-    } catch (e) { /* fall through */ }
-  }
-
-  // 2. Direct customer email
+  // 1. Exact email search
   if (row.customerEmail) {
-    try {
-      const data = await zdAuditorGet(`${base}/users/search`, { query: `email:${row.customerEmail}` });
-      await auditorDelay(80);
-      const users = data.users || [];
-      if (users.length > 0) {
-        const user = users[0];
-        const org = await resolveOrg(user);
-        if (org) return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: user.id, zdUserEmail: user.email, zdUserIds: [user.id], matchType: 'customerEmail', matchConfidence: 'High' };
-        return { zdOrgId: null, zdOrgName: user.name, zdUserId: user.id, zdUserEmail: user.email, zdUserIds: [user.id], matchType: 'customerEmail', matchConfidence: 'High' };
-      }
-    } catch (e) { /* fall through */ }
-  }
-
-  // 3. Org name (exact then partial)
-  const orgQuery = row.orgName || row.accountName;
-  if (orgQuery) {
-    try {
-      const data = await zdAuditorGet(`${base}/organizations/search`, { query: orgQuery });
-      await auditorDelay(80);
-      const orgs  = data.organizations || [];
-      const qLow  = orgQuery.toLowerCase();
-      const exact  = orgs.find(o => o.name.toLowerCase() === qLow);
-      const partial = orgs.find(o => o.name.toLowerCase().includes(qLow) || qLow.includes(o.name.toLowerCase()));
-      const hit = exact || partial;
-      if (hit) return { zdOrgId: hit.id, zdOrgName: hit.name, zdUserId: null, zdUserEmail: null, zdUserIds: [], matchType: 'orgName', matchConfidence: exact ? 'High' : 'Medium' };
-    } catch (e) { /* fall through */ }
-  }
-
-  // 4. User name search with progressive word fallback
-  // e.g. "Davalos Defendes" → try full → no match → try "Davalos" → finds "Davalos Defense Law Firm"
-  const nameQuery = row.accountName || row.orgName;
-  if (nameQuery) {
-    const words = nameQuery.trim().split(/\s+/);
-    for (let len = words.length; len >= 1; len--) {
-      const q = words.slice(0, len).join(' ');
-      if (q.length < 3) break;
+    const domain = row.customerEmail.split('@')[1]?.toLowerCase();
+    if (domain) {
       try {
-        const data = await zdAuditorGet(`${base}/users/search`, { query: q, per_page: 10 });
+        const data = await zdAuditorGet(`${base}/users/search`, { query: `email:${row.customerEmail}` });
         await auditorDelay(80);
-        const users = (data.users || []).filter(u => u.role !== 'agent' && u.role !== 'admin');
-        if (users.length > 0) {
-          const allUserIds  = users.map(u => u.id);
-          const userWithOrg = users.find(u => u.organization_id);
-          const confidence  = len === words.length ? 'Medium' : 'Low';
-          if (userWithOrg) {
-            try {
-              const orgData = await zdAuditorGet(`${base}/organizations/${userWithOrg.organization_id}`);
-              await auditorDelay(80);
-              const org = orgData.organization;
-              return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: userWithOrg.id, zdUserEmail: userWithOrg.email, zdUserIds: allUserIds, matchType: 'userName', matchConfidence: confidence };
-            } catch (e) { /* fall through */ }
-          }
-          return { zdOrgId: null, zdOrgName: users[0].name, zdUserId: users[0].id, zdUserEmail: users[0].email, zdUserIds: allUserIds, matchType: 'userName', matchConfidence: confidence };
-        }
-      } catch (e) { /* try next */ }
+        for (const u of (data.users || [])) userSet.set(u.id, u);
+      } catch (e) { /* fall through */ }
     }
   }
 
-  return null;
+  // 2. Firm/account name search — catches cases where the CSV email is a secondary contact
+  //    but the cancellation ticket was filed by someone else at the same firm.
+  //    Strip special chars (&, commas, parens, quotes) that break Zendesk search.
+  const nameQuery = row.accountName || row.orgName;
+  if (nameQuery) {
+    const clean = nameQuery.replace(/[&,.()"'\/\\]/g, ' ').replace(/\s+/g, ' ').trim();
+    const words = clean.split(' ').filter(w => w.length > 2);
+    const q = words.slice(0, 4).join(' ');
+    if (q.length >= 3) {
+      try {
+        const data = await zdAuditorGet(`${base}/users/search`, { query: q, per_page: 10 });
+        await auditorDelay(80);
+        for (const u of (data.users || [])) {
+          if (u.role !== 'agent' && u.role !== 'admin') userSet.set(u.id, u);
+        }
+      } catch (e) { /* fall through */ }
+    }
+  }
+
+  if (userSet.size === 0) return null;
+
+  const users = [...userSet.values()];
+  const userWithOrg = users.find(u => u.organization_id);
+  const zdOrgId = userWithOrg?.organization_id || null;
+
+  let zdOrgName = nameQuery || users[0].name;
+  if (zdOrgId) {
+    try {
+      const orgData = await zdAuditorGet(`${base}/organizations/${zdOrgId}`);
+      await auditorDelay(80);
+      zdOrgName = orgData.organization?.name || zdOrgName;
+    } catch (e) { /* fall through */ }
+  }
+
+  return {
+    zdOrgId,
+    zdOrgName,
+    zdUserId: users[0].id,
+    zdUserIds: users.map(u => u.id).slice(0, 5),
+    matchType: userSet.size > 1 ? 'emailAndName' : 'singleSearch',
+    matchConfidence: 'Medium',
+  };
 }
 
 async function fetchTicketComments(ticketId) {
@@ -2624,20 +2594,39 @@ function buildAuditPrompt(customer, ticketData) {
   return `You are a cancellation analyst for Answering Legal and Ring Savvy.
 
 ABOUT THE BUSINESS:
-- Answering Legal (answeringlegal.com): 24/7 live answering service for law firms. U.S.-based receptionists answer calls, capture leads, handle client intake, and schedule appointments for attorneys. Rated #1 legal answering service, serving 2,000+ law firms.
-- Ring Savvy (ringsavvy.com): Sister brand — same live answering model but for trades and contractors (plumbers, HVAC, roofers, electricians, etc.).
-- Both services work by having customers forward their phone lines so our receptionists answer on their behalf.
+- Answering Legal (answeringlegal.com): 24/7 live answering service for law firms. U.S.-based receptionists answer calls, capture leads, handle client intake, and schedule appointments for attorneys. Rated #1 legal answering service, 2,000+ law firms.
+- Ring Savvy (ringsavvy.com): Sister brand — same service for trades/contractors (plumbers, HVAC, roofers, mechanical, electricians, etc.).
+- Customers forward their phone lines to us so our receptionists answer calls on their behalf.
 
-ABOUT ZENDESK TICKETS:
-- "End user" = the individual person (firm owner, attorney, office manager) who submitted the ticket.
-- "Customer" = the business account (law firm or contracting company).
-- [Message] = a public reply visible to both the customer and Answering Legal agents.
-- [Internal note] = only visible to Answering Legal staff, not the customer — often agent coordination or templates.
-- Read ALL messages in the thread. The cancellation reason is usually stated by the end user (customer), not the agent.
+ABOUT ZENDESK TICKETS IN THIS SYSTEM:
+- The requester on a ticket can be either the customer or an Answering Legal/Ring Savvy agent filing a follow-up.
+- [Message] = public reply, visible to both parties — the actual customer conversation.
+- [Internal note] = agent-only, not visible to customer — coordination, templates, read receipts. Ignore for determining reason.
+- Read ALL messages in every ticket thread. The cancellation reason is almost always in the customer's own words in a [Message], not in the subject line.
+
+COMMON TICKET SUBJECT PATTERNS (do NOT use the subject as the reason — read the body):
+- "Account Cancellation Confirmation" = agent template confirming the cancellation. Reason is in the thread.
+- "We're Sorry to See You Go" = farewell template sent after cancellation. Not a reason.
+- "Cancellation Request - [Firm]" = agent-filed ticket. Customer reason is in the comments.
+- "30 Day cancellation request" / "Cancelation notice" = customer giving notice. Reason usually in the body.
+- "Termination of Answering Services" = strong customer cancellation notice.
+- "Reached Allotted Minutes" = customer hit usage cap — may relate to price or value complaint.
+- "Misinformation" / complaint tickets = can escalate to cancellation. Look for cancellation language in thread.
+- "Account Update" = generic subject; read body for context.
+- "Turn Off Call Forwarding" = post-cancellation cleanup task. NOT a reason.
+- "Welcome to [Service] App!" / "New Ticket Created" = onboarding tickets. Not relevant.
+- "RE: [Answering Legal] Re: ..." = reply in a thread. Read full body.
+
+KNOWN COMPETITORS AND AI SERVICES:
+- AI answering tools (use "Switched to AI Service"): Smith.ai, Lex, LEX Reception, Goodcall, Rosie, Numa, Answering.AI, Dialpad AI, Ruby AI, Convoso
+- Human answering services (use "Went to Competitor"): Ruby Receptionist, PATLive, AnswerConnect, MAP Communications, Gabbyville, VoiceNation, Alert Communications
+- "Lex" / "LEX" is an AI legal receptionist tool — NOT a law firm
+- Hiring a virtual assistant (VA) for $X/hour = "Price is Too High" (price comparison) OR "Hired Staff" if they actually plan to hire, NOT "Switched to AI Service"
 
 INTEGRATIONS THAT ARE NOT COMPETITORS:
-- Clio, MyCase, PracticePanther, Filevine, Litify, Lawmatics = legal practice management software that integrates WITH Answering Legal. A ticket titled "Clio Grow Integration with Answering Legal" is a support/setup request — NOT a cancellation reason.
-- "AI intake chatbot" or "intake chatbot" = Answering Legal's own free chatbot feature, NOT an outside AI service.
+- Clio, MyCase, PracticePanther, Filevine, Litify, Lawmatics = legal practice management software that integrates WITH Answering Legal. Tickets about these are support/setup requests, NOT cancellations.
+- "AI intake chatbot" / "intake chatbot" = Answering Legal's own free feature. NOT an outside service.
+- Ring Savvy / Answering Legal themselves are NOT competitors.
 
 Customer: ${customer.accountName || customer.orgName || 'Unknown'}${notesContext}
 
@@ -2648,12 +2637,14 @@ Choose the single best cancellation reason from these categories:
 ${categoriesList}
 
 Critical rules:
-- You work FOR Answering Legal/Ring Savvy. A ticket about setting up or integrating our service is NOT a cancellation reason.
-- "Switched to AI Service" = customer replaced us with an AI answering tool (Smith.ai, Lex, Goodcall, Rosie, Numa, Answering.AI, etc.)
-- "Went to Competitor" = customer switched to another HUMAN answering service (Ruby Receptionist, PATLive, AnswerConnect, MAP Communications, etc.)
-- "Hired Staff" = customer hired a human receptionist, employee, or VA — NOT an AI tool
-- Agent asking customer to turn off call forwarding is post-cancellation cleanup, NOT a reason
-- Base your answer on the end user's (customer's) own words, not agent template language or internal notes
+- A ticket about integrating with or setting up our service is NOT a cancellation reason.
+- "Switched to AI Service" = replaced us with an AI answering/receptionist tool
+- "Went to Competitor" = switched to another HUMAN answering service
+- "Hired Staff" = hired a human in-house receptionist or employee — NOT an AI tool
+- "Wanted Features/Services Not Offered" = wanted outbound calling, specific integrations, or capabilities we don't have
+- "Does Not See Value in Service" = not enough calls to justify cost, or service didn't meet expectations
+- Agent asking to turn off call forwarding = post-cancellation cleanup. NOT a reason.
+- Base your answer on the customer's actual words in [Message] blocks, not agent templates or [Internal note] blocks.
 
 Respond with ONLY valid JSON, no markdown:
 {"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>"}`;
