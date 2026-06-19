@@ -308,8 +308,10 @@ async function fetchSms() {
     const r = await fetch(BACKEND + '/api/sms-history?limit=50');
     if (!r.ok) throw new Error();
     const data = await r.json();
+    const cutoff = Date.now() - 48 * 60 * 60 * 1000;
     const filtered = data
       .filter(e => (e.groups || []).some(g => /agents|supervisors/i.test(g)))
+      .filter(e => new Date(e.sentAt).getTime() >= cutoff)
       .slice(0, LIMIT);
     renderSms(filtered);
   } catch {
