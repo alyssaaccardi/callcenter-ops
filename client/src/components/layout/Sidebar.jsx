@@ -16,15 +16,17 @@ const ALL_NAV_ITEMS = [
   { id: 'tech-center',      icon: '🔧', label: 'Tech Center',      roles: ['super_admin', 'tech'], section: 'Tech'           },
   { id: 'tech-leaderboard', icon: '🏆', label: 'Team Leaderboard', roles: ['super_admin', 'tech'], section: 'Tech'           },
   { id: 'app-portal',       icon: '🌐', label: 'App Portal',       roles: ['super_admin', 'tech'], section: 'Tech'           },
-  { id: 'user-management',  icon: '👥', label: 'User Management',  roles: ['super_admin'],         section: 'Administration' },
+  { id: 'user-management',  icon: '👥', label: 'User Management',  roles: ['super_admin'],                          section: 'Administration' },
+  { id: 'zendesk-auditor', icon: '🔎', label: 'Cancellation Auditor', roles: ['super_admin', 'zendesk_auditor'], section: 'Analytics'      },
 ];
 
 const ROLE_LABELS = {
-  super_admin:     'Super Admin',
-  call_center_ops: 'Call Center Ops',
-  support:         'Support',
-  tech:            'Tech Team',
-  tv_display:      'TV Display',
+  super_admin:      'Super Admin',
+  call_center_ops:  'Call Center Ops',
+  support:          'Support',
+  tech:             'Tech Team',
+  tv_display:       'TV Display',
+  zendesk_auditor:  'Zendesk Auditor',
 };
 
 const NAV_SECTION_LABEL = {
@@ -32,6 +34,7 @@ const NAV_SECTION_LABEL = {
   call_center_ops: 'Operations',
   support:         'Support',
   tv_display:      'Displays',
+  zendesk_auditor: 'Analytics',
 };
 
 export default function Sidebar({ activeModule, onModuleChange }) {
@@ -63,7 +66,8 @@ export default function Sidebar({ activeModule, onModuleChange }) {
 
   // const savvyUp  = status?.savvyPhone?.state !== 'DOWN'; // RESERVED - SAVVY PHONE
   const savvyUp  = status?.mitelClassic?.state !== 'DOWN';
-  const navItems = ALL_NAV_ITEMS.filter(item => item.roles.includes(user?.role));
+  const userRoles = [user?.role, ...(user?.additionalRoles || [])].filter(Boolean);
+  const navItems = ALL_NAV_ITEMS.filter(item => item.roles.some(r => userRoles.includes(r)));
 
   async function openDialedIn() {
     try {

@@ -24,12 +24,14 @@ import LoginPage from './pages/LoginPage';
 import DialedInPage from './pages/DialedInPage';
 import SupportTVPage from './pages/SupportTVPage';
 import WhatsNew from './components/WhatsNew';
+import ZendeskAuditor from './modules/ZendeskAuditor';
 
 function Dashboard() {
   const { user } = useAuth();
   const defaultModule =
-    user?.role === 'support' ? 'support-center' :
-    user?.role === 'tech'    ? 'tech-center'    :
+    user?.role === 'support'         ? 'support-center'   :
+    user?.role === 'tech'            ? 'tech-center'      :
+    user?.role === 'zendesk_auditor' ? 'zendesk-auditor'  :
     'status';
   return <DashboardInner user={user} defaultModule={defaultModule} />;
 }
@@ -37,9 +39,12 @@ function Dashboard() {
 function DashboardInner({ user, defaultModule }) {
   const [activeModule, setActiveModule] = useState(defaultModule);
 
-  const isOps     = user?.role === 'super_admin' || user?.role === 'call_center_ops';
-  const isSupport = user?.role === 'super_admin'  || user?.role === 'support';
-  const isTech    = user?.role === 'super_admin'  || user?.role === 'tech';
+  const userRoles  = [user?.role, ...(user?.additionalRoles || [])].filter(Boolean);
+  const hasRole    = (...r) => r.some(x => userRoles.includes(x));
+  const isOps      = hasRole('super_admin', 'call_center_ops');
+  const isSupport  = hasRole('super_admin', 'support');
+  const isTech     = hasRole('super_admin', 'tech');
+  const isAuditor  = hasRole('super_admin', 'zendesk_auditor');
 
   const moduleMap = {
     status:             isOps     ? <StatusBoard />             : null,
@@ -55,6 +60,7 @@ function DashboardInner({ user, defaultModule }) {
     'staff-broadcast':  isOps ? <StaffBroadcast /> : null,
     settings:           (user?.role === 'super_admin' || user?.role === 'call_center_ops') ? <Settings /> : null,
     'user-management':  user?.role === 'super_admin' ? <UserManagementModule /> : null,
+    'zendesk-auditor':  isAuditor ? <ZendeskAuditor /> : null,
   };
 
   const fallback = isSupport ? <SupportCenter /> : isTech ? <TechCenter /> : <StatusBoard />;

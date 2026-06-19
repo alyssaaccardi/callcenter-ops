@@ -38,7 +38,7 @@ if (process.env.GOOGLE_CLIENT_ID) {
       saveUsers(users);
     }
 
-    done(null, { email, name: record.name || profile.displayName, role: record.role, picture });
+    done(null, { email, name: record.name || profile.displayName, role: record.role, additionalRoles: record.additionalRoles || [], picture });
   }));
 }
 
@@ -48,10 +48,10 @@ passport.deserializeUser((email, done) => {
   const users = loadUsers();
   const record = users[email];
   if (!record) return done(null, false);
-  done(null, { email, name: record.name, role: record.role, picture: record.picture || '' });
+  done(null, { email, name: record.name, role: record.role, additionalRoles: record.additionalRoles || [], picture: record.picture || '' });
 });
 
-const DEV_USER = { email: 'dev@local', name: 'Dev User', role: 'super_admin' };
+const DEV_USER = { email: 'dev@local', name: 'Dev User', role: 'super_admin', additionalRoles: [] };
 
 function requireAuth(req, res, next) {
   if (isDev && !process.env.GOOGLE_CLIENT_ID) {
@@ -69,7 +69,8 @@ function requireRole(...roles) {
       return next();
     }
     if (!req.isAuthenticated()) return res.status(401).json({ error: 'Unauthorized' });
-    if (!roles.includes(req.user?.role)) return res.status(403).json({ error: 'Forbidden' });
+    const userRoles = [req.user?.role, ...(req.user?.additionalRoles || [])];
+    if (!roles.some(r => userRoles.includes(r))) return res.status(403).json({ error: 'Forbidden' });
     next();
   };
 }
@@ -78,9 +79,9 @@ function listUsers() {
   return loadUsers();
 }
 
-function addUser(email, name, role) {
+function addUser(email, name, role, additionalRoles = []) {
   const users = loadUsers();
-  users[email.toLowerCase()] = { role, name, addedAt: new Date().toISOString() };
+  users[email.toLowerCase()] = { role, name, additionalRoles, addedAt: new Date().toISOString() };
   saveUsers(users);
 }
 

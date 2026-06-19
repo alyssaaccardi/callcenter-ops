@@ -176,7 +176,7 @@ app.get('/auth/logout', (req, res, next) => {
 app.get('/api/me', (req, res) => {
   const isDev = process.env.NODE_ENV !== 'production' && !process.env.GOOGLE_CLIENT_ID;
   if (isDev) {
-    return res.json({ authenticated: true, user: { email: 'dev@local', name: 'Dev User', role: 'super_admin' } });
+    return res.json({ authenticated: true, user: { email: 'dev@local', name: 'Dev User', role: 'super_admin', additionalRoles: [] } });
   }
   if (req.isAuthenticated()) {
     return res.json({ authenticated: true, user: req.user });
@@ -200,11 +200,15 @@ app.get('/api/users', requireRole('super_admin'), (req, res) => {
   res.json({ users: Object.entries(users).map(([email, u]) => ({ email, ...u })) });
 });
 
+const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor'];
+const ADDITIONAL_ROLES = ['zendesk_auditor'];
+
 app.post('/api/users', requireRole('super_admin'), (req, res) => {
-  const { email, name, role } = req.body;
+  const { email, name, role, additionalRoles = [] } = req.body;
   if (!email || !name || !role) return res.status(400).json({ error: 'email, name, and role are required' });
-  if (!['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech'].includes(role)) return res.status(400).json({ error: 'invalid role' });
-  addUser(email, name, role);
+  if (!VALID_ROLES.includes(role)) return res.status(400).json({ error: 'invalid role' });
+  const validExtra = additionalRoles.filter(r => ADDITIONAL_ROLES.includes(r));
+  addUser(email, name, role, validExtra);
   res.json({ success: true });
 });
 
@@ -2222,6 +2226,25 @@ app.get('/api/mitel/cloudlink/calls', async (req, res) => {
     console.error('Mitel CloudLink calls error:', err.message);
     res.status(502).json({ error: 'Failed to fetch CloudLink calls', details: err.message });
   }
+});
+
+// ─── Zendesk Auditor ─────────────────────────────────────────────────────────
+app.get('/api/zendesk-auditor/categories', requireRole('super_admin', 'zendesk_auditor'), (req, res) => {
+  res.json({ categories: [
+    'Went to Competitor',
+    'Price is Too High',
+    'Downsizing Practice',
+    'Hired Staff',
+    'Quality Issues',
+    'Closed Practice',
+    'Leaving Firm',
+    'Fired',
+    'Call Forwarding Issue',
+    'Not Enough Call Volume',
+    'Wanted Features/Services Not Offered',
+    'Does Not See Value in Service',
+    'Unknown / Unspecified',
+  ]});
 });
 
 // ─── React SPA Catch-All ─────────────────────────────────────────────────────

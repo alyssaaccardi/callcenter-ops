@@ -109,10 +109,9 @@ async function fetchQueueStats() {
         AND CallStartTime >= DATEADD(MINUTE, -15, GETDATE())
       GROUP BY Queue
     `),
-    // Last 3 complete hours with meaningful data — DB lags ~2hrs so we let the
-    // data tell us which hours are available rather than assuming "now minus N"
+    // All hours today — we'll pick the correct clock-based 3 hours in JS
     p.request().query(`
-      SELECT TOP 3
+      SELECT
         DATEPART(HOUR, CallStartTime) AS HourOfDay,
         COUNT(*)                      AS answered,
         AVG(CAST(TimeToAnswer AS float)) AS avgWait
@@ -123,8 +122,6 @@ async function fetchQueueStats() {
         AND TimeToAnswer > 0
         AND CallStartTime >= CAST(GETDATE() AS DATE)
       GROUP BY DATEPART(HOUR, CallStartTime)
-      HAVING COUNT(*) >= 20
-      ORDER BY HourOfDay DESC
     `),
   ]);
 
@@ -144,14 +141,20 @@ async function fetchQueueStats() {
     };
   });
 
-  // Build hourly stats from whatever 3 complete hours the DB has (newest first)
-  const hourlyStats = hourlyResult.recordset.map(row => {
-    const d = new Date();
-    d.setHours(row.HourOfDay, 0, 0, 0);
+  // Clock-based: always show previous 3 EST hours regardless of DB lag
+  const estHour = parseInt(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour: 'numeric', hour12: false,
+  }).format(new Date()), 10);
+  const hourMap = new Map(hourlyResult.recordset.map(r => [r.HourOfDay, r]));
+  const hourlyStats = [1, 2, 3].map(h => {
+    const hr  = estHour - h;
+    const row = hourMap.get(hr);
+    const d   = new Date();
+    d.setHours(hr, 0, 0, 0);
     return {
       label:    d.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true }),
-      avgWait:  row.avgWait != null ? Math.round(row.avgWait) : null,
-      answered: row.answered ?? 0,
+      avgWait:  row?.avgWait != null ? Math.round(row.avgWait) : null,
+      answered: row?.answered ?? 0,
     };
   });
 

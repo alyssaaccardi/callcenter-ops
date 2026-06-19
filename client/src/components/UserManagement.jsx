@@ -2,19 +2,21 @@ import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
 
 const ROLES = [
-  { value: 'super_admin', label: 'Super Admin' },
+  { value: 'super_admin',     label: 'Super Admin' },
   { value: 'call_center_ops', label: 'Call Center Ops' },
-  { value: 'support', label: 'Support' },
-  { value: 'tech', label: 'Tech Team' },
-  { value: 'tv_display', label: 'TV Display' },
+  { value: 'support',         label: 'Support' },
+  { value: 'tech',            label: 'Tech Team' },
+  { value: 'tv_display',      label: 'TV Display' },
+  { value: 'zendesk_auditor', label: 'Zendesk Auditor' },
 ];
 
 const ROLE_STYLE = {
-  super_admin:    { background: 'rgba(99,102,241,0.2)',  color: '#a5b4fc' },
-  call_center_ops:{ background: 'rgba(0,201,177,0.15)',  color: '#00c9b1' },
-  support:        { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
-  tech:           { background: 'rgba(16,185,129,0.15)', color: '#34d399' },
-  tv_display:     { background: 'rgba(251,146,60,0.15)', color: '#fb923c' },
+  super_admin:     { background: 'rgba(99,102,241,0.2)',  color: '#a5b4fc' },
+  call_center_ops: { background: 'rgba(0,201,177,0.15)',  color: '#00c9b1' },
+  support:         { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
+  tech:            { background: 'rgba(16,185,129,0.15)', color: '#34d399' },
+  tv_display:      { background: 'rgba(251,146,60,0.15)', color: '#fb923c' },
+  zendesk_auditor: { background: 'rgba(239,68,68,0.15)',  color: '#f87171' },
 };
 
 const ROLE_LABEL = {
@@ -24,6 +26,7 @@ const ROLE_LABEL = {
   support:         'Support',
   tech:            'Tech Team',
   tv_display:      'TV Display',
+  zendesk_auditor: 'Zendesk Auditor',
 };
 
 function TutorialRow({ t, onToggle, onReset }) {
@@ -124,6 +127,7 @@ export default function UserManagement() {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState('call_center_ops');
+  const [zdAuditor, setZdAuditor] = useState(false);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -149,9 +153,11 @@ export default function UserManagement() {
     if (!email || !name) { setError('Email and name are required'); return; }
     setAdding(true);
     try {
-      await api.post('/api/users', { email: email.trim().toLowerCase(), name: name.trim(), role });
+      const additionalRoles = (zdAuditor && role !== 'zendesk_auditor') ? ['zendesk_auditor'] : [];
+      await api.post('/api/users', { email: email.trim().toLowerCase(), name: name.trim(), role, additionalRoles });
       setEmail('');
       setName('');
+      setZdAuditor(false);
       setSuccess(`${name} added successfully`);
       await fetchUsers();
     } catch (err) {
@@ -200,6 +206,14 @@ export default function UserManagement() {
                     }}>
                       {ROLES.find(r => r.value === u.role)?.label || u.role}
                     </span>
+                    {(u.additionalRoles || []).map(r => (
+                      <span key={r} style={{
+                        marginLeft: 4, fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
+                        ...(ROLE_STYLE[r] || {}),
+                      }}>
+                        + {ROLES.find(x => x.value === r)?.label || r}
+                      </span>
+                    ))}
                   </td>
                   <td style={{ padding: '10px 0', textAlign: 'right' }}>
                     {confirmEmail === u.email ? (
@@ -251,13 +265,19 @@ export default function UserManagement() {
             </div>
             <div className="form-row">
               <label className="field-label">Role</label>
-              <select value={role} onChange={e => setRole(e.target.value)}>
+              <select value={role} onChange={e => { setRole(e.target.value); if (e.target.value === 'zendesk_auditor') setZdAuditor(false); }}>
                 {ROLES.map(r => (
                   <option key={r.value} value={r.value}>{r.label}</option>
                 ))}
               </select>
             </div>
           </div>
+          {role !== 'zendesk_auditor' && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13, color: 'var(--text)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={zdAuditor} onChange={e => setZdAuditor(e.target.checked)} />
+              Also grant Zendesk Auditor access
+            </label>
+          )}
           <button className="btn btn-primary btn-sm mt-12" type="submit" disabled={adding}>
             {adding ? 'Adding...' : 'Add User'}
           </button>
