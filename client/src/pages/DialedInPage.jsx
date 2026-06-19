@@ -447,6 +447,20 @@ export default function DialedInPage() {
         </div>
 
         <div className="tv-panels">
+          <div className="tv-panel tv-bon-voyage">
+            <div className="tv-panel-accent" />
+            <div className="tv-corner tv-corner-tl" /><div className="tv-corner tv-corner-tr" />
+            <div className="tv-corner tv-corner-bl" /><div className="tv-corner tv-corner-br" />
+            <div className="tv-panel-inner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18, padding: '40px 24px' }}>
+              <div style={{ fontSize: 64 }}>🛳️</div>
+              <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '0.04em', color: 'var(--text)', textAlign: 'center', lineHeight: 1.2 }}>
+                Bon Voyage, Amit!
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                Fair winds &amp; following seas
+              </div>
+            </div>
+          </div>
           {/* RESERVED - SAVVY PHONE
           <CcPanel
             isUp={savvyUp} locationLabel="Stafford Location" carrierLabel="via Bandwidth"
