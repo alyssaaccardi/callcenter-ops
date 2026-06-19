@@ -2679,6 +2679,121 @@ Respond with ONLY valid JSON, no markdown:
   };
 }
 
+async function geminiAnalyzeTickets(customer, ticketData) {
+  const transcripts = ticketData.map(t => {
+    const lines = [`Ticket #${t.id} — "${t.subject || '(no subject)'}"`];
+    for (const c of (t.comments || [])) {
+      const who = c.public === false ? '[Internal note]' : '[Message]';
+      const body = (c.body || '').slice(0, 600).trim();
+      if (body) lines.push(`${who}: ${body}`);
+    }
+    return lines.join('\n');
+  }).join('\n\n---\n\n');
+
+  const notesContext = customer.notes ? `\nCSV notes: "${customer.notes}"\n` : '';
+  const categoriesList = AUDITOR_CATEGORIES.map(c => `- ${c}`).join('\n');
+
+  const prompt = `You are analyzing why a customer cancelled their answering service subscription.
+Customer: ${customer.accountName || customer.orgName || 'Unknown'}${notesContext}
+
+Full ticket conversation (agent + customer messages):
+${transcripts || '(no ticket content available)'}
+
+Choose the cancellation reason from these categories:
+${categoriesList}
+
+Rules:
+- "Switched to AI Service" = adopted an AI answering tool (Smith.ai, Lex, Goodcall, etc.)
+- "Went to Competitor" = switched to a HUMAN answering service (Ruby, PATLive, AnswerConnect, etc.)
+- "Hired Staff" = hired a human receptionist or virtual assistant — NOT an AI tool
+- Agent asking customer to turn off call forwarding is post-cancellation cleanup, NOT a reason
+- Base your answer on the customer's own words, not agent template language
+- "I could hire a virtual assistant for $7/hour" = Price is Too High (price comparison, not AI)
+
+Respond with ONLY valid JSON, no markdown:
+{"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>"}`;
+
+  const resp = await axios.post(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 400, temperature: 0.1 } },
+    { timeout: 15000 }
+  );
+
+  const raw = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+  const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  const parsed = JSON.parse(jsonStr);
+
+  const category = AUDITOR_CATEGORIES.includes(parsed.category) ? parsed.category : 'Unknown / Unspecified';
+  return {
+    category,
+    competitorName: parsed.competitorName || null,
+    confidence: ['High','Medium','Low'].includes(parsed.confidence) ? parsed.confidence : 'Low',
+    summary: parsed.summary || '',
+    reasoning: parsed.reasoning || '',
+    supporting_ticket_ids: ticketData.slice(0, 3).map(t => t.id),
+  };
+}
+
+async function openaiAnalyzeTickets(customer, ticketData) {
+  const transcripts = ticketData.map(t => {
+    const lines = [`Ticket #${t.id} — "${t.subject || '(no subject)'}"`];
+    for (const c of (t.comments || [])) {
+      const who = c.public === false ? '[Internal note]' : '[Message]';
+      const body = (c.body || '').slice(0, 600).trim();
+      if (body) lines.push(`${who}: ${body}`);
+    }
+    return lines.join('\n');
+  }).join('\n\n---\n\n');
+
+  const notesContext = customer.notes ? `\nCSV notes: "${customer.notes}"\n` : '';
+  const categoriesList = AUDITOR_CATEGORIES.map(c => `- ${c}`).join('\n');
+
+  const prompt = `You are analyzing why a customer cancelled their answering service subscription.
+Customer: ${customer.accountName || customer.orgName || 'Unknown'}${notesContext}
+
+Full ticket conversation (agent + customer messages):
+${transcripts || '(no ticket content available)'}
+
+Choose the cancellation reason from these categories:
+${categoriesList}
+
+Rules:
+- "Switched to AI Service" = adopted an AI answering tool (Smith.ai, Lex, Goodcall, etc.)
+- "Went to Competitor" = switched to a HUMAN answering service (Ruby, PATLive, AnswerConnect, etc.)
+- "Hired Staff" = hired a human receptionist or virtual assistant — NOT an AI tool
+- Agent asking customer to turn off call forwarding is post-cancellation cleanup, NOT a reason
+- "I could hire a virtual assistant for $7/hour" = Price is Too High (price comparison, not AI)
+
+Respond with ONLY valid JSON, no markdown:
+{"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>"}`;
+
+  const resp = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 400, temperature: 0.1, response_format: { type: 'json_object' } },
+    { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+  );
+
+  const raw = resp.data?.choices?.[0]?.message?.content?.trim() || '{}';
+  const parsed = JSON.parse(raw);
+  const category = AUDITOR_CATEGORIES.includes(parsed.category) ? parsed.category : 'Unknown / Unspecified';
+  return {
+    category,
+    competitorName: parsed.competitorName || null,
+    confidence: ['High','Medium','Low'].includes(parsed.confidence) ? parsed.confidence : 'Low',
+    summary: parsed.summary || '',
+    reasoning: parsed.reasoning || '',
+    supporting_ticket_ids: ticketData.slice(0, 3).map(t => t.id),
+  };
+}
+
+// Pick whichever AI provider key is configured; fall back to keywords
+async function runAnalysis(customer, tickets) {
+  if (process.env.GEMINI_API_KEY)     return geminiAnalyzeTickets(customer, tickets);
+  if (process.env.ANTHROPIC_API_KEY)  return claudeAnalyzeTickets(customer, tickets);
+  if (process.env.OPENAI_API_KEY)     return openaiAnalyzeTickets(customer, tickets);
+  return analyzeTickets(customer, tickets);
+}
+
 function analyzeTickets(customer, ticketData) {
   const ticketTexts = ticketData.map(t => {
     const parts = [t.subject || ''];
@@ -2834,9 +2949,7 @@ async function runAuditJob(jobId, rows) {
       baseResult.ticketSubjects = tickets.map(t => t.subject || '');
       baseResult.ticketDates = tickets.map(t => t.created_at?.slice(0, 10) || '');
 
-      const analysis = process.env.ANTHROPIC_API_KEY
-        ? await claudeAnalyzeTickets(row, tickets)
-        : analyzeTickets(row, tickets);
+      const analysis = await runAnalysis(row, tickets);
       baseResult.category = analysis.category;
       baseResult.competitorName = analysis.competitorName || null;
       baseResult.summary = analysis.summary;
