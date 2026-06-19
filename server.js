@@ -183,8 +183,8 @@ app.get('/api/slack-config', requireAuth, (req, res) => {
   res.json({
     didsUnavailable: process.env.SLACK_DID_UNAVAILABLE_URL || '',
     didsAvailable:   process.env.SLACK_DID_AVAILABLE_URL   || '',
-    savvyActive:     process.env.SLACK_SAVVY_ACTIVE_URL    || '',
-    savvyInactive:   process.env.SLACK_SAVVY_INACTIVE_URL  || '',
+    // savvyActive:     process.env.SLACK_SAVVY_ACTIVE_URL    || '',   // RESERVED - SAVVY PHONE
+    // savvyInactive:   process.env.SLACK_SAVVY_INACTIVE_URL  || '',   // RESERVED - SAVVY PHONE
   });
 });
 
@@ -400,10 +400,10 @@ app.post('/api/status', requireAuth, async (req, res) => {
 const WORKFLOWS_FILE = path.join(__dirname, 'slack-workflows.json');
 
 const BUILTIN_WORKFLOWS = [
-  { id: 'builtin_didsUnavailable', name: 'DIDs Unavailable',     scope: 'DID Status',  icon: '🔴', builtin: true, envKey: 'SLACK_DID_UNAVAILABLE_URL' },
-  { id: 'builtin_didsAvailable',   name: 'DIDs Available',       scope: 'DID Status',  icon: '🟢', builtin: true, envKey: 'SLACK_DID_AVAILABLE_URL'   },
-  { id: 'builtin_savvyActive',     name: 'Savvy Phone Active',   scope: 'Savvy Phone', icon: '✅', builtin: true, envKey: 'SLACK_SAVVY_ACTIVE_URL'    },
-  { id: 'builtin_savvyInactive',   name: 'Savvy Phone Inactive', scope: 'Savvy Phone', icon: '⚠️', builtin: true, envKey: 'SLACK_SAVVY_INACTIVE_URL'  },
+  { id: 'builtin_didsUnavailable', name: 'DIDs Unavailable', scope: 'DID Status', icon: '🔴', builtin: true, envKey: 'SLACK_DID_UNAVAILABLE_URL' },
+  { id: 'builtin_didsAvailable',   name: 'DIDs Available',   scope: 'DID Status', icon: '🟢', builtin: true, envKey: 'SLACK_DID_AVAILABLE_URL'   },
+  // { id: 'builtin_savvyActive',   name: 'Savvy Phone Active',   scope: 'Savvy Phone', icon: '✅', builtin: true, envKey: 'SLACK_SAVVY_ACTIVE_URL'   }, // RESERVED - SAVVY PHONE
+  // { id: 'builtin_savvyInactive', name: 'Savvy Phone Inactive', scope: 'Savvy Phone', icon: '⚠️', builtin: true, envKey: 'SLACK_SAVVY_INACTIVE_URL' }, // RESERVED - SAVVY PHONE
 ];
 
 function loadWorkflows() {

@@ -44,7 +44,7 @@ function WorkflowModal({ workflow, onSave, onClose }) {
           </div>
           <div className="wf-field">
             <label className="field-label">Category / Scope</label>
-            <input value={scope} onChange={e => setScope(e.target.value)} placeholder="e.g. DID Status, Savvy Phone, General" />
+            <input value={scope} onChange={e => setScope(e.target.value)} placeholder="e.g. DID Status, Mitel, General" />
           </div>
           <div className="wf-field">
             <label className="field-label">Slack Webhook / Workflow URL</label>
