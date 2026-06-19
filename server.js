@@ -2413,12 +2413,10 @@ async function getRecentSolvedTickets(match, limit) {
   }
 
   const sorted = [...ticketMap.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, limit);
-  const withComments = [];
-  for (const t of sorted) {
+  return Promise.all(sorted.map(async t => {
     const comments = await fetchTicketComments(t.id);
-    withComments.push({ id: t.id, subject: t.subject, created_at: t.created_at, comments });
-  }
-  return withComments;
+    return { id: t.id, subject: t.subject, created_at: t.created_at, comments };
+  }));
 }
 
 async function getCancellationKeywordTickets(match) {
@@ -2451,12 +2449,10 @@ async function getCancellationKeywordTickets(match) {
   }
 
   const tickets = [...ticketMap.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8);
-  const withComments = [];
-  for (const t of tickets) {
+  return Promise.all(tickets.map(async t => {
     const comments = await fetchTicketComments(t.id);
-    withComments.push({ id: t.id, subject: t.subject, created_at: t.created_at, comments });
-  }
-  return withComments;
+    return { id: t.id, subject: t.subject, created_at: t.created_at, comments };
+  }));
 }
 
 // ─── Known competitor / AI service name lookup ────────────────────────────────
@@ -2876,9 +2872,7 @@ async function runAuditJob(jobId, rows) {
       baseResult.ticketDates = tickets.map(t => t.created_at?.slice(0, 10) || '');
 
       // Throttle AI calls to stay within free-tier rate limits
-      if (process.env.GEMINI_API_KEY)
-        await auditorDelay(5000);   // Gemini free tier: 15 RPM
-      else if (process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY)
+      if (process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY)
         await auditorDelay(22000);  // OpenAI free tier: 3 RPM
       const analysis = await runAnalysis(row, tickets);
       baseResult.category = analysis.category;
