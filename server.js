@@ -2526,10 +2526,9 @@ const CATEGORY_RULES = [
     [/convoso/i, 5], [/\brosie\b/i, 5], [/\bnuma\b/i, 5],
     [/\bai\s+(answering|receptionist|service|intake|solution)/i, 4],
     [/(answering|receptionist|intake)\s+ai/i, 4],
-    [/went\s+to\s+ai\b/i, 5], [/using\s+ai\b/i, 3],
-    [/trying\s+(an?\s+)?ai/i, 4], [/switched?\s+to\s+ai/i, 5],
-    [/ai\s+tool/i, 3], [/artificial intelligence/i, 3],
-    [/chatbot/i, 3], [/virtual\s+assistant/i, 2],
+    [/went\s+to\s+ai\b/i, 5], [/switched?\s+to\s+ai/i, 5],
+    [/trying\s+(an?\s+)?ai\s+(answering|service|receptionist)/i, 4],
+    [/artificial intelligence/i, 3],
   ]},
   { category: 'Went to Competitor', patterns: [
     [/competi(tor|tors|ng)/i, 4], [/switch(ing|ed|es)?\s+(to|away|service)/i, 3],
