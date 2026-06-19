@@ -41,7 +41,7 @@ function Badge({ label, colors }) {
 }
 
 function exportCsv(results) {
-  const headers = ['Account Name', 'Email Domain', 'Matched Org', 'Match Confidence', 'Match Type', 'Category', 'Competitor / AI Name', 'Confidence', 'Summary', 'Reasoning', 'Ticket IDs', 'Ticket Subjects', 'Status'];
+  const headers = ['Account Name', 'Email Domain', 'Matched Org', 'Match Confidence', 'Match Type', 'Category', 'Competitor / AI Name', 'Confidence', 'Summary', 'Reasoning', 'Ticket IDs', 'Ticket Subjects', 'Ticket Dates', 'Analysis Method', 'Status'];
   const needsCompetitor = r => r.category === 'Went to Competitor' || r.category === 'Switched to AI Service';
   const rows = results.map(r => [
     r.accountName, r.emailDomain, r.matchedOrg, r.matchConfidence, r.matchType,
@@ -49,6 +49,8 @@ function exportCsv(results) {
     r.confidence, r.summary, r.reasoning,
     (r.supportingTicketIds || []).join('; '),
     (r.ticketSubjects || []).join('; '),
+    (r.ticketDates || []).join('; '),
+    r.analysisMethod || 'ai',
     r.status,
   ].map(v => `"${String(v || '').replace(/"/g, '""')}"`).join(','));
   const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv' });
@@ -391,69 +393,12 @@ export default function ZendeskAuditor() {
     );
   }
 
-  // ── Running view ────────────────────────────────────────────────────────────
-  if (view === 'running') {
-    return (
-      <div>
-        <div className="page-header">
-          <div>
-            <div className="page-title">Cancellation Auditor</div>
-            <div className="page-sub">Zendesk AI · Analyzing customers…</div>
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <button className="btn btn-ghost btn-sm" onClick={handleCancel}>Stop &amp; View Results</button>
-          </div>
-        </div>
-
-        {/* Progress */}
-        <div className="card" style={{ marginBottom: 20 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <span style={{ fontSize: 14, fontWeight: 600 }}>
-              {progress.done} / {progress.total} customers analyzed
-            </span>
-            <span style={{ fontSize: 13, color: 'var(--muted)' }}>{pct}%</span>
-          </div>
-          <div style={{ background: 'var(--border, rgba(0,0,0,0.1))', borderRadius: 99, height: 8, overflow: 'hidden' }}>
-            <div style={{
-              height: '100%', borderRadius: 99,
-              background: 'var(--accent, #6366f1)',
-              width: `${pct}%`,
-              transition: 'width 0.4s ease',
-            }} />
-          </div>
-        </div>
-
-        {/* Live results table */}
-        {(results.length > 0 || progress.total > 0) && (
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: 'var(--surface2, rgba(0,0,0,0.03))' }}>
-                    {['Customer', 'Matched Org', 'Category', 'Confidence', 'Summary', 'Tickets', 'Status'].map(h => (
-                      <th key={h} style={{ padding: '10px 12px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.map((r, i) => <ResultRow key={i} r={r} index={i} />)}
-                  {progress.done < progress.total && <SpinnerRow index={progress.done} />}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
-  }
-
-  // ── Results view ────────────────────────────────────────────────────────────
-  const doneCount      = results.filter(r => r.status === 'done').length;
-  const noMatchCount   = results.filter(r => r.status === 'no_match').length;
-  const errorCount     = results.filter(r => r.status === 'error').length;
-  const keywordCount   = results.filter(r => r.analysisMethod === 'keywords').length;
+  // ── Running + Results view (unified — results appear live as they come in) ───
+  const doneCount    = results.filter(r => r.status === 'done').length;
+  const noMatchCount = results.filter(r => r.status === 'no_match').length;
+  const errorCount   = results.filter(r => r.status === 'error').length;
+  const keywordCount = results.filter(r => r.analysisMethod === 'keywords').length;
+  const isRunning    = view === 'running';
 
   return (
     <div>
@@ -461,7 +406,9 @@ export default function ZendeskAuditor() {
         <div>
           <div className="page-title">Cancellation Auditor</div>
           <div className="page-sub">
-            {results.length} customers · {doneCount} analyzed · {noMatchCount} no match · {errorCount} error
+            {isRunning
+              ? `Analyzing… ${progress.done} of ${progress.total} complete`
+              : `${results.length} customers · ${doneCount} analyzed · ${noMatchCount} no match · ${errorCount} error`}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -470,11 +417,26 @@ export default function ZendeskAuditor() {
               Export CSV
             </button>
           )}
-          <button className="btn btn-primary btn-sm" onClick={handleReset}>
-            New Audit
-          </button>
+          {isRunning
+            ? <button className="btn btn-ghost btn-sm" onClick={handleCancel}>Stop</button>
+            : <button className="btn btn-primary btn-sm" onClick={handleReset}>New Audit</button>
+          }
         </div>
       </div>
+
+      {/* Slim progress bar — only shown while running */}
+      {isRunning && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ background: 'var(--border, rgba(0,0,0,0.1))', borderRadius: 99, height: 5, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', borderRadius: 99,
+              background: 'var(--accent, #6366f1)',
+              width: `${pct}%`,
+              transition: 'width 0.4s ease',
+            }} />
+          </div>
+        </div>
+      )}
 
       {error && (
         <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#dc2626', marginBottom: 16 }}>
@@ -496,7 +458,7 @@ export default function ZendeskAuditor() {
         </div>
       )}
 
-      {results.length === 0 ? (
+      {results.length === 0 && !isRunning ? (
         <div className="card" style={{ textAlign: 'center', padding: '60px 40px', color: 'var(--muted)' }}>
           No results to display.
         </div>
@@ -513,11 +475,14 @@ export default function ZendeskAuditor() {
               </thead>
               <tbody>
                 {results.map((r, i) => <ResultRow key={i} r={r} index={i} />)}
+                {isRunning && progress.done < progress.total && <SpinnerRow index={progress.done} />}
               </tbody>
             </table>
           </div>
         </div>
       )}
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

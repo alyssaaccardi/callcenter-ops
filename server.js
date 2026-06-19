@@ -2301,19 +2301,15 @@ async function matchCustomer(row) {
   //   may have been filed by a different person. Searching by BOTH email AND firm name and
   //   collecting all matched users is the only reliable approach.
 
-  const genericDomains = new Set(['gmail.com','yahoo.com','hotmail.com','outlook.com','icloud.com','aol.com','msn.com','live.com','me.com','mac.com']);
   const userSet = new Map(); // userId -> user object (deduplicates across both searches)
 
   // 1. Exact email search
   if (row.customerEmail) {
-    const domain = row.customerEmail.split('@')[1]?.toLowerCase();
-    if (domain) {
-      try {
-        const data = await zdAuditorGet(`${base}/users/search`, { query: `email:${row.customerEmail}` });
-        await auditorDelay(80);
-        for (const u of (data.users || [])) userSet.set(u.id, u);
-      } catch (e) { /* fall through */ }
-    }
+    try {
+      const data = await zdAuditorGet(`${base}/users/search`, { query: `email:${row.customerEmail}` });
+      await auditorDelay(80);
+      for (const u of (data.users || [])) userSet.set(u.id, u);
+    } catch (e) { /* fall through */ }
   }
 
   // 2. Firm/account name search — catches cases where the CSV email is a secondary contact
@@ -2576,7 +2572,8 @@ const CATEGORY_RULES = [
 
 function buildAuditPrompt(customer, ticketData) {
   const transcripts = ticketData.map(t => {
-    const lines = [`Ticket #${t.id} — "${t.subject || '(no subject)'}"`];
+    const date = t.created_at ? ` (${t.created_at.slice(0, 10)})` : '';
+    const lines = [`Ticket #${t.id}${date} — "${t.subject || '(no subject)'}"`];
     for (const c of (t.comments || [])) {
       const who = c.public === false ? '[Internal note]' : '[Message]';
       const body = (c.body || '').slice(0, 1500).trim();
@@ -2587,8 +2584,10 @@ function buildAuditPrompt(customer, ticketData) {
 
   const notesContext = customer.notes ? `\nCSV cancellation notes: "${customer.notes}"\n` : '';
   const categoriesList = AUDITOR_CATEGORIES.map(c => `- ${c}`).join('\n');
+  const today = new Date().toISOString().slice(0, 10);
 
   return `You are a cancellation analyst for Answering Legal and Ring Savvy.
+Today's date: ${today}
 
 ABOUT THE BUSINESS:
 - Answering Legal (answeringlegal.com): 24/7 live answering service for law firms. U.S.-based receptionists answer calls, capture leads, handle client intake, and schedule appointments for attorneys. Rated #1 legal answering service, 2,000+ law firms.
@@ -2644,20 +2643,32 @@ Critical rules:
 - Base your answer on the customer's actual words in [Message] blocks, not agent templates or [Internal note] blocks.
 
 Respond with ONLY valid JSON, no markdown:
-{"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>"}`;
+{"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>","relevantTicketIds":[<1-2 ticket IDs from above that most clearly show the reason, e.g. 12345>]}`;
 }
 
 function parseAuditResponse(raw, ticketData) {
   const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  const parsed = JSON.parse(jsonStr);
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch (e) {
+    throw new Error(`AI returned non-JSON: ${raw.slice(0, 120)}`);
+  }
   const category = AUDITOR_CATEGORIES.includes(parsed.category) ? parsed.category : 'Unknown / Unspecified';
+
+  // Use AI-identified ticket IDs if they reference tickets we actually have; fall back to first 3
+  const aiIds = Array.isArray(parsed.relevantTicketIds)
+    ? parsed.relevantTicketIds.map(Number).filter(id => ticketData.some(t => t.id === id)).slice(0, 3)
+    : [];
+  const supporting_ticket_ids = aiIds.length > 0 ? aiIds : ticketData.slice(0, 3).map(t => t.id);
+
   return {
     category,
     competitorName: parsed.competitorName || null,
     confidence: ['High','Medium','Low'].includes(parsed.confidence) ? parsed.confidence : 'Low',
     summary: parsed.summary || '',
     reasoning: parsed.reasoning || '',
-    supporting_ticket_ids: ticketData.slice(0, 3).map(t => t.id),
+    supporting_ticket_ids,
     analysisMethod: 'ai',
   };
 }
@@ -2668,6 +2679,7 @@ async function claudeAnalyzeTickets(customer, ticketData) {
   const msg = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 500,
+    temperature: 0.1,
     messages: [{ role: 'user', content: prompt }],
   });
   return parseAuditResponse(msg.content[0]?.text?.trim() || '', ticketData);
@@ -2695,17 +2707,17 @@ async function openaiAnalyzeTickets(customer, ticketData) {
   return parseAuditResponse(raw, ticketData);
 }
 
-// Pick whichever AI provider key is configured; fall back to keywords on rate limit or error
+// Pick whichever AI provider key is configured; fall back to keywords on any error
 async function runAnalysis(customer, tickets) {
   const tryAI = async (fn) => {
     try { return await fn(); }
     catch (e) {
       const status = e?.response?.status;
-      if (status === 429 || status === 503 || status >= 500) {
-        console.warn(`AI analysis rate-limited/error (${status}), falling back to keywords`);
-        return { ...analyzeTickets(customer, tickets), analysisMethod: 'keywords' };
-      }
-      throw e;
+      // Fall back for rate limits, server errors, network failures, JSON parse errors, etc.
+      // Only re-throw for auth errors (401/403) which indicate a misconfigured key
+      if (status === 401 || status === 403) throw e;
+      console.warn(`[auditor] AI error (${status || e.message}), falling back to keywords`);
+      return { ...analyzeTickets(customer, tickets), analysisMethod: 'keywords' };
     }
   };
   if (process.env.GEMINI_API_KEY)     return tryAI(() => geminiAnalyzeTickets(customer, tickets));
@@ -2892,6 +2904,8 @@ async function runAuditJob(jobId, rows) {
   }
 
   job.status = 'done';
+  // Clean up completed job after 2 hours to prevent memory leak
+  setTimeout(() => auditorJobs.delete(jobId), 2 * 60 * 60 * 1000);
 }
 
 app.get('/api/zendesk-auditor/categories', requireRole('super_admin', 'zendesk_auditor'), (req, res) => {
