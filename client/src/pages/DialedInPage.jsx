@@ -297,11 +297,11 @@ export default function DialedInPage() {
         const hs = hsRes.ok ? await hsRes.json() : null;
         const xc = xcRes.ok ? await xcRes.json() : null;
         if (s) {
-          const savvyNow = s.savvyPhone?.state !== 'DOWN';
+          // const savvyNow = s.savvyPhone?.state !== 'DOWN'; // RESERVED - SAVVY PHONE
           const mitelNow = s.mitelClassic?.state !== 'DOWN';
-          if (prevStates.current.savvy !== null && prevStates.current.savvy && !savvyNow) spawnRainDown();
+          // if (prevStates.current.savvy !== null && prevStates.current.savvy && !savvyNow) spawnRainDown(); // RESERVED
           if (prevStates.current.mitel !== null && prevStates.current.mitel && !mitelNow) spawnRainDown();
-          prevStates.current.savvy = savvyNow;
+          // prevStates.current.savvy = savvyNow; // RESERVED
           prevStates.current.mitel = mitelNow;
         }
         setStatus(s);
@@ -398,13 +398,13 @@ export default function DialedInPage() {
   const mitel   = status?.mitelClassic;
   const mobile  = status?.mobileApp;
   const integr  = status?.integrations;
-  const savvyUp = savvy?.state !== 'DOWN';
+  // const savvyUp = savvy?.state !== 'DOWN'; // RESERVED - SAVVY PHONE
   const mitelUp = mitel?.state !== 'DOWN';
   const mobileUp = mobile?.state !== 'DOWN';
   const mobileMessagesOk = !mobile?.messagesDown;
   const integrMessagesOk = !integr?.messagesDown;
   const didUp   = (status?.didStatus || 'UP') === 'UP';
-  const allOp   = savvyUp && mitelUp && mobileUp && mobileMessagesOk && integrMessagesOk && didUp;
+  const allOp   = mitelUp && mobileUp && mobileMessagesOk && integrMessagesOk && didUp;
 
   const mobileAlert = !mobileUp ? 'Mobile App is DOWN — messages cannot reach it.'
     : (!mobileMessagesOk ? 'App is up, but messages are NOT routing into it.' : null);
@@ -447,12 +447,14 @@ export default function DialedInPage() {
         </div>
 
         <div className="tv-panels">
+          {/* RESERVED - SAVVY PHONE
           <CcPanel
             isUp={savvyUp} locationLabel="Stafford Location" carrierLabel="via Bandwidth"
             name="Savvy Phone" didCount={dids?.savvy} didPop={didPop.savvy}
             message={savvy?.message} changedBy={savvy?.changedBy} changedAt={savvy?.changedAt}
             counts={agents.savvy} xcally={xcally}
           />
+          */}
           <CcPanel
             isUp={mitelUp} locationLabel="Mitel Location" carrierLabel="via Bandwidth"
             name="Mitel Classic" didCount={dids?.mitel} didPop={didPop.mitel}

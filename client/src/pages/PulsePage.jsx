@@ -87,20 +87,20 @@ export default function PulsePage() {
           const didUp    = (s.didStatus || 'UP') === 'UP';
           const mobileOk = s.mobileApp?.state !== 'DOWN' && !s.mobileApp?.messagesDown;
           const integrOk = !s.integrations?.messagesDown;
-          const savvyUp  = s.savvyPhone?.state !== 'DOWN';
+          // const savvyUp  = s.savvyPhone?.state !== 'DOWN'; // RESERVED - SAVVY PHONE
           const mitelUp  = s.mitelClassic?.state !== 'DOWN';
 
           if (prevDidStatus.current !== null && prevDidStatus.current && !didUp) spawnRainDown();
           if (prevDidStatus.current !== null && !prevDidStatus.current && didUp) spawnMuscleRain();
           if (prevMobileOk.current !== null && prevMobileOk.current && !mobileOk) spawnRainDown();
           if (prevIntegrOk.current !== null && prevIntegrOk.current && !integrOk) spawnRainDown();
-          if (prevSavvyUp.current  !== null && prevSavvyUp.current  && !savvyUp)  spawnRainDown();
+          // if (prevSavvyUp.current  !== null && prevSavvyUp.current  && !savvyUp)  spawnRainDown(); // RESERVED
           if (prevMitelUp.current  !== null && prevMitelUp.current  && !mitelUp)  spawnRainDown();
 
           prevDidStatus.current = didUp;
           prevMobileOk.current  = mobileOk;
           prevIntegrOk.current  = integrOk;
-          prevSavvyUp.current   = savvyUp;
+          // prevSavvyUp.current   = savvyUp; // RESERVED
           prevMitelUp.current   = mitelUp;
         }
 
@@ -136,9 +136,9 @@ export default function PulsePage() {
   const mobileUp = status?.mobileApp?.state !== 'DOWN';
   const mobileMsgsOk = !status?.mobileApp?.messagesDown;
   const integrMsgsOk = !status?.integrations?.messagesDown;
-  const savvyUp  = status?.savvyPhone?.state !== 'DOWN';
+  // const savvyUp  = status?.savvyPhone?.state !== 'DOWN'; // RESERVED - SAVVY PHONE
   const mitelUp  = status?.mitelClassic?.state !== 'DOWN';
-  const allOp    = savvyUp && mitelUp && mobileUp && mobileMsgsOk && integrMsgsOk && didUp;
+  const allOp    = mitelUp && mobileUp && mobileMsgsOk && integrMsgsOk && didUp;
 
   const mobileOk = mobileUp && mobileMsgsOk;
   const mobileStatusWord = mobileOk ? 'Operational' : ((!mobileUp && !mobileMsgsOk) ? 'Down' : 'Degraded');

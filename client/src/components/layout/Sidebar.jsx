@@ -61,7 +61,8 @@ export default function Sidebar({ activeModule, onModuleChange }) {
     setTooltip({ text, top: rect.top + rect.height / 2 });
   }
 
-  const savvyUp  = status?.savvyPhone?.state !== 'DOWN';
+  // const savvyUp  = status?.savvyPhone?.state !== 'DOWN'; // RESERVED - SAVVY PHONE
+  const savvyUp  = status?.mitelClassic?.state !== 'DOWN';
   const navItems = ALL_NAV_ITEMS.filter(item => item.roles.includes(user?.role));
 
   async function openDialedIn() {

@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { BigToggle, PillToggle } from '../components/ui/Toggle';
 import api from '../api';
 
-const CC_TABS = ['savvy', 'mitel', 'systems'];
+const CC_TABS = [/* 'savvy', // RESERVED - SAVVY PHONE */ 'mitel', 'systems'];
 
 function fmtSecs(s) {
   if (s == null || s <= 0) return '0s';
@@ -169,11 +169,13 @@ export default function StatusBoard() {
           <div className="page-sub">Declare call center status · Sync to public endpoint · Fire Slack workflows</div>
         </div>
         <div className="ab-stat-strip">
+          {/* RESERVED - SAVVY PHONE
           <div className={`ab-stat-chip${savvyOn ? '' : ' ab-chip-standby'}`}>
             <span className={`cc-tab-dot${savvyOn ? '' : ' down'}`} />
             <span className="ab-chip-label">Savvy</span>
             <span className="ab-chip-val">{savvyOn ? 'Operational' : 'Down'}</span>
           </div>
+          */}
           <div className={`ab-stat-chip${mitelOn ? '' : ' ab-chip-standby'}`}>
             <span className={`cc-tab-dot${mitelOn ? '' : ' down'}`} />
             <span className="ab-chip-label">Mitel</span>
@@ -197,23 +199,23 @@ export default function StatusBoard() {
 
         {/* CC Tabs */}
         <div className="ab-tab-bar">
-          {['savvy', 'mitel', 'systems'].map(tab => (
+          {CC_TABS.map(tab => (
             <button
               key={tab}
               className={`ab-tab${activeTab === tab ? ' active' : ''}`}
               onClick={() => setActiveTab(tab)}
             >
               <span className={`cc-tab-dot${
-                tab === 'savvy' ? (savvyOn ? '' : ' down') :
+                // tab === 'savvy' ? (savvyOn ? '' : ' down') : // RESERVED - SAVVY PHONE
                 tab === 'mitel' ? (mitelOn ? '' : ' down') :
                 (mobileOn && mobileMessagesOk && integrMessagesOk ? '' : ' down')
               }`} />
-              {tab === 'savvy' ? 'Savvy Phone' : tab === 'mitel' ? 'Mitel Classic' : 'Systems'}
+              {tab === 'mitel' ? 'Mitel Classic' : 'Systems'}
             </button>
           ))}
         </div>
 
-        {/* Savvy Phone Panel */}
+        {/* RESERVED - SAVVY PHONE PANEL
         {activeTab === 'savvy' && (
           <div className={`sb-panel ${savvyOn ? 'up' : 'down'}`}>
             <div className="sb-main-row">
@@ -239,11 +241,7 @@ export default function StatusBoard() {
             <div className="sb-msg-section">
               <label className="field-label">Status Message</label>
               <div className="msg-row">
-                <select
-                  className="form-select"
-                  value=""
-                  onChange={e => fillCanned('savvy', e.target.value)}
-                >
+                <select className="form-select" value="" onChange={e => fillCanned('savvy', e.target.value)}>
                   <option value="">— Select Canned Response —</option>
                   {cannedResponses.map((c, i) => (
                     <option key={i} value={c.msg}>{c.label}</option>
@@ -259,9 +257,7 @@ export default function StatusBoard() {
                 placeholder="Status message..."
               />
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => saveMessage('savvy')}>
-                  Save Message
-                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => saveMessage('savvy')}>Save Message</button>
                 {status?.savvyPhone?.message && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--green, #34d399)' }}>
                     <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green, #34d399)', display: 'inline-block', flexShrink: 0 }} />
@@ -278,6 +274,7 @@ export default function StatusBoard() {
             </div>
           </div>
         )}
+        */}
 
         {/* Mitel Panel */}
         {activeTab === 'mitel' && (

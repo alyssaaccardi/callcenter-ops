@@ -104,6 +104,7 @@ export default function Settings() {
       {/* Call Centers */}
       {activeTab === 'general' && (
         <>
+          {/* RESERVED - SAVVY PHONE
           <div className="settings-card">
             <h3>Savvy Phone</h3>
             <div className="settings-grid">
@@ -117,6 +118,7 @@ export default function Settings() {
               </div>
             </div>
           </div>
+          */}
           <div className="settings-card">
             <h3>Mitel Classic</h3>
             <div className="settings-grid">
@@ -238,7 +240,7 @@ function PortalWidgets() {
   const apiKey = 'ccops2024secret';
 
   const widgets = [
-    { id: 'savvy', label: 'Savvy Phone', cc: 'savvy' },
+    // { id: 'savvy', label: 'Savvy Phone', cc: 'savvy' }, // RESERVED - SAVVY PHONE
     { id: 'mitel', label: 'Mitel Classic', cc: 'mitel' },
   ];
 

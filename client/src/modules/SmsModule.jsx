@@ -22,8 +22,14 @@ export default function SmsModule() {
   const [individual, setIndividual] = useState('');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
-  const [smsLog, setSmsLog] = useState([]);
+  const [smsLog, setSmsLog] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ccob_smsLog') || '[]'); } catch { return []; }
+  });
   const [confirm, setConfirm] = useState(null);
+
+  useEffect(() => {
+    localStorage.setItem('ccob_smsLog', JSON.stringify(smsLog));
+  }, [smsLog]);
 
   useEffect(() => {
     fetchGroups();
@@ -33,7 +39,13 @@ export default function SmsModule() {
     setLoadingGroups(true);
     try {
       const res = await api.get('/api/eztexting/groups');
-      setGroups(res.data?.groups || []);
+      const fetched = res.data?.groups || [];
+      setGroups(fetched);
+      setSelectedGroups(prev => {
+        if (prev.length > 0) return prev;
+        const def = fetched.find(g => /agents.*(supervisors|sup)|supervisors.*agents/i.test(g.name) || /agents\s*\/\s*supervisors/i.test(g.name));
+        return def ? [def] : prev;
+      });
     } catch {
       // silently fail — groups may not be configured
     } finally {

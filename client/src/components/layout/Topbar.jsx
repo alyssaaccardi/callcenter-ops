@@ -68,7 +68,7 @@ export default function Topbar() {
   const bzTime  = useClock('America/Belize');
 
   const allOp = status ? (
-    status.savvyPhone?.state !== 'DOWN' &&
+    // status.savvyPhone?.state !== 'DOWN' && // RESERVED - SAVVY PHONE
     status.mitelClassic?.state !== 'DOWN' &&
     status.mobileApp?.state !== 'DOWN' &&
     !status.mobileApp?.messagesDown &&

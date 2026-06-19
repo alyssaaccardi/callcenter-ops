@@ -129,10 +129,12 @@ export default function AgentBoard() {
         <div className="flex" style={{ gap: 10, flexWrap: 'wrap' }}>
           <UserBadge user={user} />
           <div className="ab-stat-strip">
+            {/* RESERVED - SAVVY PHONE
             <div className="ab-stat-chip">
               <span className="ab-chip-label">Savvy Here</span>
               <span className="ab-chip-val">{savvyHere}</span>
             </div>
+            */}
             <div className="ab-stat-chip">
               <span className="ab-chip-label">Mitel Here</span>
               <span className="ab-chip-val">{mitelHere}</span>
