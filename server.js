@@ -12,6 +12,7 @@ const rateLimit = require('express-rate-limit');
 const { passport, requireAuth, requireRole, listUsers, addUser, removeUser } = require('./auth');
 const multer = require('multer');
 const XLSX   = require('xlsx');
+const Anthropic = require('@anthropic-ai/sdk');
 
 https.globalAgent.setMaxListeners(50);
 require('events').EventEmitter.defaultMaxListeners = 50;
@@ -2546,6 +2547,10 @@ const CATEGORY_RULES = [
     [/rate increase/i, 3], [/price(s)? (too |are )?(high|much)/i, 4],
     [/cost(ing|s)? too much/i, 4], [/cut(ting)?\s+(back\s+)?cost/i, 3],
     [/reduc(e|ing)\s+(our\s+)?cost/i, 3], [/save money/i, 2], [/billing concern/i, 2],
+    [/what (i'?m|we'?re) pay(ing)?/i, 3], [/for what (i|we) pay/i, 3],
+    [/could (hire|get|find|pay) .{0,40}(\$\d|\d+\s*dollar|\bless\b)/i, 4],
+    [/\$\d+\s*(\/|per|a)\s*(hour|hr|month|mo)/i, 3],
+    [/not worth (the price|what (i|we) pay)/i, 4],
   ]},
   { category: 'Downsizing Practice', patterns: [
     [/downsiz(ing|e|ed)/i, 4], [/scaling (back|down)/i, 4],
@@ -2604,6 +2609,75 @@ const CATEGORY_RULES = [
     [/not getting (enough\s+)?(return|value|benefit)/i, 4], [/waste of money/i, 4],
   ]},
 ];
+
+const AUDITOR_CATEGORIES = [
+  'Switched to AI Service', 'Went to Competitor', 'Price is Too High',
+  'Downsizing Practice', 'Hired Staff', 'Quality Issues', 'Closed Practice',
+  'Leaving Firm', 'Fired', 'Not Enough Call Volume',
+  'Wanted Features/Services Not Offered', 'Does Not See Value in Service',
+  'Unknown / Unspecified',
+];
+
+async function claudeAnalyzeTickets(customer, ticketData) {
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+  // Build a readable transcript from all ticket comments
+  const transcripts = ticketData.map(t => {
+    const lines = [`Ticket #${t.id} — "${t.subject || '(no subject)'}"`];
+    for (const c of (t.comments || [])) {
+      const who = c.public === false ? '[Internal note]' : '[Message]';
+      const body = (c.body || '').slice(0, 600).trim();
+      if (body) lines.push(`${who}: ${body}`);
+    }
+    return lines.join('\n');
+  }).join('\n\n---\n\n');
+
+  const notesContext = customer.notes ? `\nCSV notes from cancellation log: "${customer.notes}"\n` : '';
+  const categoriesList = AUDITOR_CATEGORIES.map(c => `- ${c}`).join('\n');
+
+  const prompt = `You are analyzing why a customer cancelled their answering service subscription.
+Customer: ${customer.accountName || customer.orgName || 'Unknown'}${notesContext}
+
+Ticket conversation(s) between the support agent and the customer:
+${transcripts || '(no ticket content available)'}
+
+Based on the full conversation above, determine the cancellation reason.
+
+Categories:
+${categoriesList}
+
+Rules:
+- "Switched to AI Service" = they adopted an AI answering/receptionist tool (Smith.ai, Lex, Goodcall, etc.)
+- "Went to Competitor" = switched to another HUMAN answering service (Ruby, PATLive, AnswerConnect, etc.)
+- "Hired Staff" = hired an in-house receptionist, employee, or virtual assistant (human, not AI)
+- Agent asking customer to turn off call forwarding is a post-cancellation action, NOT a reason
+- Use the customer's actual words, not the agent's template language
+
+Respond with ONLY valid JSON, no markdown:
+{"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary of why they cancelled>","reasoning":"<brief note on which signals led to this category>"}`;
+
+  const msg = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 400,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  const raw = msg.content[0]?.text?.trim() || '';
+  // Strip any accidental markdown fencing
+  const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  const parsed = JSON.parse(jsonStr);
+
+  // Validate category is one we know
+  const category = AUDITOR_CATEGORIES.includes(parsed.category) ? parsed.category : 'Unknown / Unspecified';
+  return {
+    category,
+    competitorName: parsed.competitorName || null,
+    confidence: ['High','Medium','Low'].includes(parsed.confidence) ? parsed.confidence : 'Low',
+    summary: parsed.summary || '',
+    reasoning: parsed.reasoning || '',
+    supporting_ticket_ids: ticketData.slice(0, 3).map(t => t.id),
+  };
+}
 
 function analyzeTickets(customer, ticketData) {
   const ticketTexts = ticketData.map(t => {
@@ -2760,7 +2834,9 @@ async function runAuditJob(jobId, rows) {
       baseResult.ticketSubjects = tickets.map(t => t.subject || '');
       baseResult.ticketDates = tickets.map(t => t.created_at?.slice(0, 10) || '');
 
-      const analysis = analyzeTickets(row, tickets);
+      const analysis = process.env.ANTHROPIC_API_KEY
+        ? await claudeAnalyzeTickets(row, tickets)
+        : analyzeTickets(row, tickets);
       baseResult.category = analysis.category;
       baseResult.competitorName = analysis.competitorName || null;
       baseResult.summary = analysis.summary;
