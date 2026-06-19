@@ -2770,11 +2770,22 @@ Respond with ONLY valid JSON, no markdown:
   };
 }
 
-// Pick whichever AI provider key is configured; fall back to keywords
+// Pick whichever AI provider key is configured; fall back to keywords on rate limit or error
 async function runAnalysis(customer, tickets) {
-  if (process.env.GEMINI_API_KEY)     return geminiAnalyzeTickets(customer, tickets);
-  if (process.env.ANTHROPIC_API_KEY)  return claudeAnalyzeTickets(customer, tickets);
-  if (process.env.OPENAI_API_KEY)     return openaiAnalyzeTickets(customer, tickets);
+  const tryAI = async (fn) => {
+    try { return await fn(); }
+    catch (e) {
+      const status = e?.response?.status;
+      if (status === 429 || status === 503 || status >= 500) {
+        console.warn(`AI analysis rate-limited/error (${status}), falling back to keywords`);
+        return analyzeTickets(customer, tickets);
+      }
+      throw e;
+    }
+  };
+  if (process.env.GEMINI_API_KEY)     return tryAI(() => geminiAnalyzeTickets(customer, tickets));
+  if (process.env.ANTHROPIC_API_KEY)  return tryAI(() => claudeAnalyzeTickets(customer, tickets));
+  if (process.env.OPENAI_API_KEY)     return tryAI(() => openaiAnalyzeTickets(customer, tickets));
   return analyzeTickets(customer, tickets);
 }
 
@@ -2933,6 +2944,10 @@ async function runAuditJob(jobId, rows) {
       baseResult.ticketSubjects = tickets.map(t => t.subject || '');
       baseResult.ticketDates = tickets.map(t => t.created_at?.slice(0, 10) || '');
 
+      // Throttle AI calls — OpenAI free tier allows ~3 RPM; 22s gap keeps us safe
+      if (process.env.OPENAI_API_KEY && !process.env.GEMINI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
+        await auditorDelay(22000);
+      }
       const analysis = await runAnalysis(row, tickets);
       baseResult.category = analysis.category;
       baseResult.competitorName = analysis.competitorName || null;
