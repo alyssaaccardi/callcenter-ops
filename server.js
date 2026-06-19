@@ -2236,18 +2236,10 @@ app.get('/api/mitel/cloudlink/calls', async (req, res) => {
 // ─── Zendesk Auditor ─────────────────────────────────────────────────────────
 
 const AUDITOR_CATEGORIES = [
-  'Went to Competitor',
-  'Price is Too High',
-  'Downsizing Practice',
-  'Hired Staff',
-  'Quality Issues',
-  'Closed Practice',
-  'Leaving Firm',
-  'Fired',
-  'Call Forwarding Issue',
-  'Not Enough Call Volume',
-  'Wanted Features/Services Not Offered',
-  'Does Not See Value in Service',
+  'Switched to AI Service', 'Went to Competitor', 'Price is Too High',
+  'Downsizing Practice', 'Hired Staff', 'Quality Issues', 'Closed Practice',
+  'Leaving Firm', 'Fired', 'Not Enough Call Volume',
+  'Wanted Features/Services Not Offered', 'Does Not See Value in Service',
   'Unknown / Unspecified',
 ];
 
@@ -2608,14 +2600,6 @@ const CATEGORY_RULES = [
     [/\broi\b/i, 3], [/return on investment/i, 3],
     [/not getting (enough\s+)?(return|value|benefit)/i, 4], [/waste of money/i, 4],
   ]},
-];
-
-const AUDITOR_CATEGORIES = [
-  'Switched to AI Service', 'Went to Competitor', 'Price is Too High',
-  'Downsizing Practice', 'Hired Staff', 'Quality Issues', 'Closed Practice',
-  'Leaving Firm', 'Fired', 'Not Enough Call Volume',
-  'Wanted Features/Services Not Offered', 'Does Not See Value in Service',
-  'Unknown / Unspecified',
 ];
 
 async function claudeAnalyzeTickets(customer, ticketData) {
