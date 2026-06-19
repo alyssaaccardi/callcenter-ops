@@ -2291,7 +2291,7 @@ function parseTicketIdsFromRow(raw) {
 
 async function zdAuditorGet(url, params = {}) {
   const headers = zdHeaders();
-  const resp = await axios.get(url, { headers, params, timeout: 15000 });
+  const resp = await axios.get(url, { headers, params, timeout: 8000 });
   return resp.data;
 }
 
@@ -2303,7 +2303,7 @@ async function matchCustomer(row) {
     if (!user.organization_id) return null;
     try {
       const orgData = await zdAuditorGet(`${base}/organizations/${user.organization_id}`);
-      await auditorDelay(300);
+      await auditorDelay(80);
       return orgData.organization;
     } catch (e) { return null; }
   }
@@ -2319,7 +2319,7 @@ async function matchCustomer(row) {
     const domain = effectiveDomain.replace(/^@/, '');
     try {
       const data = await zdAuditorGet(`${base}/users/search`, { query: `email:*@${domain}`, per_page: 25 });
-      await auditorDelay(300);
+      await auditorDelay(80);
       const users = data.users || [];
       if (users.length > 0) {
         const allUserIds  = users.map(u => u.id);
@@ -2335,7 +2335,7 @@ async function matchCustomer(row) {
   if (row.customerEmail) {
     try {
       const data = await zdAuditorGet(`${base}/users/search`, { query: `email:${row.customerEmail}` });
-      await auditorDelay(300);
+      await auditorDelay(80);
       const users = data.users || [];
       if (users.length > 0) {
         const user = users[0];
@@ -2351,7 +2351,7 @@ async function matchCustomer(row) {
   if (orgQuery) {
     try {
       const data = await zdAuditorGet(`${base}/organizations/search`, { query: orgQuery });
-      await auditorDelay(300);
+      await auditorDelay(80);
       const orgs  = data.organizations || [];
       const qLow  = orgQuery.toLowerCase();
       const exact  = orgs.find(o => o.name.toLowerCase() === qLow);
@@ -2371,7 +2371,7 @@ async function matchCustomer(row) {
       if (q.length < 3) break;
       try {
         const data = await zdAuditorGet(`${base}/users/search`, { query: q, per_page: 10 });
-        await auditorDelay(300);
+        await auditorDelay(80);
         const users = (data.users || []).filter(u => u.role !== 'agent' && u.role !== 'admin');
         if (users.length > 0) {
           const allUserIds  = users.map(u => u.id);
@@ -2380,7 +2380,7 @@ async function matchCustomer(row) {
           if (userWithOrg) {
             try {
               const orgData = await zdAuditorGet(`${base}/organizations/${userWithOrg.organization_id}`);
-              await auditorDelay(300);
+              await auditorDelay(80);
               const org = orgData.organization;
               return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: userWithOrg.id, zdUserEmail: userWithOrg.email, zdUserIds: allUserIds, matchType: 'userName', matchConfidence: confidence };
             } catch (e) { /* fall through */ }
@@ -2398,7 +2398,7 @@ async function fetchTicketComments(ticketId) {
   const base = zdBase();
   try {
     const data = await zdAuditorGet(`${base}/tickets/${ticketId}/comments`);
-    await auditorDelay(300);
+    await auditorDelay(80);
     return (data.comments || []).map(c => ({ body: c.body, public: c.public }));
   } catch (e) {
     return [];
@@ -2409,7 +2409,7 @@ async function fetchTicketById(ticketId) {
   const base = zdBase();
   try {
     const data = await zdAuditorGet(`${base}/tickets/${ticketId}`);
-    await auditorDelay(200);
+    await auditorDelay(80);
     const t = data.ticket;
     const comments = await fetchTicketComments(t.id);
     return { id: t.id, subject: t.subject, created_at: t.created_at, status: t.status, comments };
@@ -2425,19 +2425,19 @@ async function getRecentSolvedTickets(match, limit) {
       const data = await zdAuditorGet(`${base}/organizations/${match.zdOrgId}/tickets`, {
         sort_by: 'created_at', sort_order: 'desc', per_page: limit,
       });
-      await auditorDelay(300);
+      await auditorDelay(80);
       tickets = data.tickets || [];
     } catch (e) { /* fall through */ }
   } else {
     // No org — use per-user /tickets/requested endpoint (avoids search query complexity)
-    const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 15) : (match.zdUserId ? [match.zdUserId] : []);
+    const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 5) : (match.zdUserId ? [match.zdUserId] : []);
     const ticketMap = new Map();
     for (const userId of userIds) {
       try {
         const data = await zdAuditorGet(`${base}/users/${userId}/tickets/requested`, {
           sort_by: 'created_at', sort_order: 'desc', per_page: limit,
         });
-        await auditorDelay(300);
+        await auditorDelay(80);
         for (const t of (data.tickets || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
       } catch (e) { /* continue */ }
     }
@@ -2463,20 +2463,20 @@ async function getCancellationKeywordTickets(match) {
         query: `${keywords} organization_id:${match.zdOrgId} type:ticket`,
         sort_by: 'created_at', sort_order: 'desc', per_page: 5,
       });
-      await auditorDelay(300);
+      await auditorDelay(80);
       for (const t of (data.results || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
     } catch (e) { /* fall through */ }
   }
 
   // Always also search across all user IDs — catches cases where org search misses tickets
-  const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 15) : (match.zdUserId ? [match.zdUserId] : []);
+  const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 5) : (match.zdUserId ? [match.zdUserId] : []);
   for (const userId of userIds) {
     try {
       const data = await zdAuditorGet(`${base}/search`, {
         query: `${keywords} requester_id:${userId} type:ticket`,
         sort_by: 'created_at', sort_order: 'desc', per_page: 5,
       });
-      await auditorDelay(300);
+      await auditorDelay(80);
       for (const t of (data.results || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
     } catch (e) { /* continue */ }
   }
@@ -2713,16 +2713,21 @@ async function runAuditJob(jobId, rows) {
         if (t) ticketMap.set(t.id, t);
       }
 
-      // Match customer in Zendesk
-      const match = await matchCustomer(row);
+      // If explicit tickets found, skip expensive customer search — we already have what we need
+      if (ticketMap.size > 0) {
+        baseResult.matchedOrg = row.accountName || row.orgName || 'Unknown';
+        baseResult.matchConfidence = 'High';
+        baseResult.matchType = 'noteTicketId';
+      } else {
+        // Match customer in Zendesk
+        const match = await matchCustomer(row);
 
-      if (!match && ticketMap.size === 0) {
-        job.results.push({ ...baseResult, status: 'no_match' });
-        job.done++;
-        continue;
-      }
+        if (!match) {
+          job.results.push({ ...baseResult, status: 'no_match' });
+          job.done++;
+          continue;
+        }
 
-      if (match) {
         baseResult.matchedOrg = match.zdOrgName;
         baseResult.matchConfidence = match.matchConfidence;
         baseResult.matchType = match.matchType;
@@ -2743,11 +2748,6 @@ async function runAuditJob(jobId, rows) {
             if (!ticketMap.has(t.id)) ticketMap.set(t.id, t);
           }
         }
-      } else {
-        // No customer match but explicit ticket IDs were found — use CSV name + ticket data
-        baseResult.matchedOrg = row.accountName || row.orgName || 'Unknown';
-        baseResult.matchConfidence = 'High';
-        baseResult.matchType = 'noteTicketId';
       }
 
       const tickets = Array.from(ticketMap.values());
