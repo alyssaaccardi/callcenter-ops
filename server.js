@@ -2308,24 +2308,26 @@ async function matchCustomer(row) {
     } catch (e) { /* fall through */ }
   }
 
-  // 3. Email domain search
+  // 3. Email domain search — collect ALL users with this domain, resolve org from any
   if (row.emailDomain) {
     const domain = row.emailDomain.replace(/^@/, '');
     try {
-      const data = await zdAuditorGet(`${base}/users/search`, { query: `email:*@${domain} role:end-user` });
+      const data = await zdAuditorGet(`${base}/users/search`, { query: `email:*@${domain} role:end-user`, per_page: 25 });
       await auditorDelay(300);
       const users = data.users || [];
       if (users.length > 0) {
-        const user = users[0];
-        if (user.organization_id) {
+        const userWithOrg = users.find(u => u.organization_id);
+        const allUserIds  = users.map(u => u.id);
+        if (userWithOrg) {
           try {
-            const orgData = await zdAuditorGet(`${base}/organizations/${user.organization_id}`);
+            const orgData = await zdAuditorGet(`${base}/organizations/${userWithOrg.organization_id}`);
             await auditorDelay(300);
             const org = orgData.organization;
-            return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: user.id, zdUserEmail: user.email, matchType: 'emailDomain', matchConfidence: 'Medium' };
-          } catch (e) { /* fall through */ }
+            return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: userWithOrg.id, zdUserEmail: userWithOrg.email, zdUserIds: allUserIds, matchType: 'emailDomain', matchConfidence: 'Medium' };
+          } catch (e) { /* fall through to no-org path */ }
         }
-        return { zdOrgId: null, zdOrgName: null, zdUserId: user.id, zdUserEmail: user.email, matchType: 'emailDomain', matchConfidence: 'Medium' };
+        // No org found — keep all user IDs so ticket search covers everyone at the domain
+        return { zdOrgId: null, zdOrgName: null, zdUserId: users[0].id, zdUserEmail: users[0].email, zdUserIds: allUserIds, matchType: 'emailDomain', matchConfidence: 'Medium' };
       }
     } catch (e) { /* fall through */ }
   }
@@ -2343,10 +2345,10 @@ async function matchCustomer(row) {
             const orgData = await zdAuditorGet(`${base}/organizations/${user.organization_id}`);
             await auditorDelay(300);
             const org = orgData.organization;
-            return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: user.id, zdUserEmail: user.email, matchType: 'customerEmail', matchConfidence: 'High' };
+            return { zdOrgId: org.id, zdOrgName: org.name, zdUserId: user.id, zdUserEmail: user.email, zdUserIds: [user.id], matchType: 'customerEmail', matchConfidence: 'High' };
           } catch (e) { /* fall through */ }
         }
-        return { zdOrgId: null, zdOrgName: null, zdUserId: user.id, zdUserEmail: user.email, matchType: 'customerEmail', matchConfidence: 'Medium' };
+        return { zdOrgId: null, zdOrgName: null, zdUserId: user.id, zdUserEmail: user.email, zdUserIds: [user.id], matchType: 'customerEmail', matchConfidence: 'Medium' };
       }
     } catch (e) { /* fall through */ }
   }
@@ -2377,15 +2379,21 @@ async function getRecentSolvedTickets(match, limit) {
       await auditorDelay(300);
       tickets = data.tickets || [];
     } catch (e) { /* fall through */ }
-  } else if (match.zdUserId) {
-    try {
-      const data = await zdAuditorGet(`${base}/search`, {
-        query: `requester_id:${match.zdUserId} type:ticket status:solved`,
-        sort_by: 'created_at', sort_order: 'desc', per_page: limit,
-      });
-      await auditorDelay(300);
-      tickets = data.results || [];
-    } catch (e) { /* fall through */ }
+  } else {
+    // No org — search across all known user IDs for this domain/email
+    const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 6) : (match.zdUserId ? [match.zdUserId] : []);
+    const ticketMap = new Map();
+    for (const userId of userIds) {
+      try {
+        const data = await zdAuditorGet(`${base}/search`, {
+          query: `requester_id:${userId} type:ticket status:solved`,
+          sort_by: 'created_at', sort_order: 'desc', per_page: limit,
+        });
+        await auditorDelay(300);
+        for (const t of (data.results || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
+      } catch (e) { /* continue */ }
+    }
+    tickets = [...ticketMap.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, limit);
   }
 
   const withComments = [];
@@ -2398,30 +2406,40 @@ async function getRecentSolvedTickets(match, limit) {
 
 async function getCancellationKeywordTickets(match) {
   const base = zdBase();
-  let query;
+  const keywords = '(cancel OR cancellation OR terminate OR "close account" OR competitor OR refund OR "cancel service")';
+  const ticketMap = new Map();
+
   if (match.zdOrgId) {
-    query = `(cancel OR cancellation OR terminate OR "close account") organization_id:${match.zdOrgId} type:ticket status:solved`;
-  } else if (match.zdUserId) {
-    query = `(cancel OR cancellation OR terminate OR "close account" OR competitor OR refund) requester_id:${match.zdUserId} type:ticket status:solved`;
-  } else {
-    return [];
+    try {
+      const data = await zdAuditorGet(`${base}/search`, {
+        query: `${keywords} organization_id:${match.zdOrgId} type:ticket status:solved`,
+        sort_by: 'created_at', sort_order: 'desc', per_page: 5,
+      });
+      await auditorDelay(300);
+      for (const t of (data.results || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
+    } catch (e) { /* fall through */ }
   }
 
-  try {
-    const data = await zdAuditorGet(`${base}/search`, {
-      query, sort_by: 'created_at', sort_order: 'desc', per_page: 5,
-    });
-    await auditorDelay(300);
-    const tickets = data.results || [];
-    const withComments = [];
-    for (const t of tickets) {
-      const comments = await fetchTicketComments(t.id);
-      withComments.push({ id: t.id, subject: t.subject, created_at: t.created_at, comments });
-    }
-    return withComments;
-  } catch (e) {
-    return [];
+  // Always also search across all user IDs — catches cases where org search misses tickets
+  const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 6) : (match.zdUserId ? [match.zdUserId] : []);
+  for (const userId of userIds) {
+    try {
+      const data = await zdAuditorGet(`${base}/search`, {
+        query: `${keywords} requester_id:${userId} type:ticket status:solved`,
+        sort_by: 'created_at', sort_order: 'desc', per_page: 5,
+      });
+      await auditorDelay(300);
+      for (const t of (data.results || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
+    } catch (e) { /* continue */ }
   }
+
+  const tickets = [...ticketMap.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8);
+  const withComments = [];
+  for (const t of tickets) {
+    const comments = await fetchTicketComments(t.id);
+    withComments.push({ id: t.id, subject: t.subject, created_at: t.created_at, comments });
+  }
+  return withComments;
 }
 
 // ─── Keyword-based cancellation analysis (no external AI needed) ─────────────
