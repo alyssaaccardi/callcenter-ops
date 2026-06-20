@@ -687,6 +687,7 @@ export default function ZendeskAuditor() {
           if (r.status === 'done' && r.category) catCounts[r.category] = (catCounts[r.category] || 0) + 1;
         }
         const sorted = Object.entries(catCounts).sort((a, b) => b[1] - a[1]);
+        const total = doneCount + noMatchCount;
         return (
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 12 }}>Results Summary</div>
@@ -695,12 +696,14 @@ export default function ZendeskAuditor() {
                 <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px', borderRadius: 8, background: 'var(--surface2, rgba(0,0,0,0.03))' }}>
                   <Badge label={cat} colors={CATEGORY_COLORS} />
                   <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>{count}</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>{Math.round(count / total * 100)}%</span>
                 </div>
               ))}
               {noMatchCount > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px', borderRadius: 8, background: 'var(--surface2, rgba(0,0,0,0.03))' }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: '#b45309', padding: '2px 8px', borderRadius: 20, background: 'rgba(234,179,8,0.12)' }}>No Match</span>
                   <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>{noMatchCount}</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>{Math.round(noMatchCount / total * 100)}%</span>
                 </div>
               )}
             </div>
