@@ -2688,9 +2688,9 @@ async function claudeAnalyzeTickets(customer, ticketData) {
 async function geminiAnalyzeTickets(customer, ticketData) {
   const prompt = buildAuditPrompt(customer, ticketData);
   const resp = await axios.post(
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent',
-    { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 500, temperature: 0.1 } },
-    { headers: { 'X-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, timeout: 15000 }
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+    { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 600, temperature: 0.1, thinkingConfig: { thinkingBudget: 0 } } },
+    { headers: { 'X-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, timeout: 20000 }
   );
   const raw = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
   return parseAuditResponse(raw, ticketData);
