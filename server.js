@@ -2586,6 +2586,15 @@ function buildAuditPrompt(customer, ticketData) {
   const categoriesList = AUDITOR_CATEGORIES.map(c => `- ${c}`).join('\n');
   const today = new Date().toISOString().slice(0, 10);
 
+  // Build CSAT summary from ticket data if ratings are present
+  const rated = ticketData.filter(t => t.satisfactionRating && t.satisfactionRating.score !== 'unoffered');
+  const csatGood = rated.filter(t => t.satisfactionRating.score === 'good').length;
+  const csatBad  = rated.filter(t => t.satisfactionRating.score === 'bad').length;
+  const lastRated = rated.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+  const csatContext = rated.length > 0
+    ? `\nCUSTOMER SATISFACTION HISTORY (${rated.length} rated tickets): ${csatGood} good / ${csatBad} bad (${Math.round(csatGood / rated.length * 100)}% satisfaction).${lastRated?.satisfactionRating?.comment ? ` Most recent comment: "${lastRated.satisfactionRating.comment}"` : ''}\n`
+    : '';
+
   return `You are a cancellation analyst for Answering Legal and Ring Savvy.
 Today's date: ${today}
 
@@ -2624,7 +2633,7 @@ INTEGRATIONS THAT ARE NOT COMPETITORS:
 - "AI intake chatbot" / "intake chatbot" = Answering Legal's own free feature. NOT an outside service.
 - Ring Savvy / Answering Legal themselves are NOT competitors.
 
-Customer: ${customer.accountName || customer.orgName || 'Unknown'}${notesContext}
+Customer: ${customer.accountName || customer.orgName || 'Unknown'}${notesContext}${csatContext}
 
 Full ticket conversation(s) — read the ENTIRE thread before deciding:
 ${transcripts || '(no ticket content available)'}
