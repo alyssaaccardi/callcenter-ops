@@ -8,7 +8,9 @@ const CATEGORY_COLORS = {
   'Price is Too High':                 { bg: 'rgba(249,115,22,0.12)',   color: '#ea580c' },
   'Downsizing Practice':               { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
   'Hired Staff':                       { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
-  'Quality Issues':                    { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
+  'IVR / Auto Attendant':              { bg: 'rgba(6,182,212,0.12)',    color: '#0e7490' },
+  'Quality of Service':                { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
+  'Technical Issues':                  { bg: 'rgba(239,68,68,0.12)',    color: '#b91c1c' },
   'Closed Practice':                   { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
   'Leaving Firm':                      { bg: 'rgba(107,114,128,0.12)', color: '#6b7280' },
   'Fired':                             { bg: 'rgba(107,114,128,0.12)', color: '#6b7280' },
@@ -58,16 +60,19 @@ function exportCsv(results) {
   const a = document.createElement('a');
   a.href = url;
   a.download = 'cancellation-audit.csv';
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
 function SummaryCell({ text }) {
   const [expanded, setExpanded] = useState(false);
   if (!text) return <span style={{ color: 'var(--muted)' }}>—</span>;
+  const isLong = text.length > 120;
   return (
     <div>
-      <div style={expanded ? {} : {
+      <div style={!isLong || expanded ? {} : {
         overflow: 'hidden',
         display: '-webkit-box',
         WebkitLineClamp: 2,
@@ -76,12 +81,14 @@ function SummaryCell({ text }) {
       }}>
         {text}
       </div>
-      <button
-        onClick={() => setExpanded(e => !e)}
-        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--accent, #6366f1)', marginTop: 2 }}
-      >
-        {expanded ? 'Show less' : 'Show more'}
-      </button>
+      {isLong && (
+        <button
+          onClick={() => setExpanded(e => !e)}
+          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--accent, #6366f1)', marginTop: 2 }}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
     </div>
   );
 }
@@ -424,7 +431,7 @@ export default function ZendeskAuditor() {
     setError('');
   }, [handleCancel]);
 
-  const handleSingleLookup = useCallback(async (e) => {
+  async function handleSingleLookup(e) {
     e.preventDefault();
     setSingleError('');
     setSingleResult(null);
@@ -441,7 +448,7 @@ export default function ZendeskAuditor() {
     } finally {
       setSingleLoading(false);
     }
-  }, [singleForm]);
+  }
 
   const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
 
@@ -454,40 +461,72 @@ export default function ZendeskAuditor() {
             <div className="page-title">Cancellation Auditor</div>
             <div className="page-sub">Zendesk AI · Analyze cancellation reasons from ticket history</div>
           </div>
-          {/* Mode toggle */}
-          <div style={{ display: 'flex', gap: 2, background: 'var(--surface2, rgba(0,0,0,0.05))', borderRadius: 8, padding: 3 }}>
-            <button className={`btn btn-sm ${lookupMode === 'upload' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setLookupMode('upload')}>Upload List</button>
-            <button className={`btn btn-sm ${lookupMode === 'single' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setLookupMode('single')}>Single Lookup</button>
-          </div>
+        </div>
+
+        {/* ── Mode selector cards ──────────────────────────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, maxWidth: 680, margin: '0 auto 24px' }}>
+          {[
+            { id: 'upload', label: 'Bulk Import', desc: 'Upload a CSV or Excel file to analyze an entire cancellation list at once' },
+            { id: 'single', label: 'Single Lookup', desc: 'Search one customer by name or email — includes CSAT and full account pulse' },
+          ].map(({ id, label, desc }) => {
+            const active = lookupMode === id;
+            return (
+              <button
+                key={id}
+                onClick={() => setLookupMode(id)}
+                style={{
+                  textAlign: 'left', padding: '18px 20px', borderRadius: 12, cursor: 'pointer',
+                  border: active ? '2px solid var(--accent, #6366f1)' : '2px solid var(--border, rgba(0,0,0,0.1))',
+                  background: active ? 'rgba(99,102,241,0.07)' : 'var(--card-bg, var(--surface, transparent))',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 700, color: active ? 'var(--accent, #6366f1)' : 'var(--text)', marginBottom: 5 }}>{label}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{desc}</div>
+              </button>
+            );
+          })}
         </div>
 
         {/* ── Single Lookup Form ─────────────────────────────────────────────── */}
         {lookupMode === 'single' && (
-          <div style={{ maxWidth: 600, margin: '0 auto' }}>
+          <div style={{ maxWidth: 640, margin: '0 auto' }}>
             <div className="card">
-              <div style={{ marginBottom: 18 }}>
-                <div className="field-label">Look Up a Single Customer</div>
-                <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
-                  Enter any combination of fields. More detail = better Zendesk match.
-                </div>
-              </div>
               {singleError && (
                 <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#dc2626', marginBottom: 14 }}>
                   {singleError}
                 </div>
               )}
               <form onSubmit={handleSingleLookup}>
-                <div className="form-row" style={{ marginBottom: 12 }}>
-                  <label className="field-label">Account / Firm Name</label>
-                  <input type="text" value={singleForm.accountName} onChange={e => setSingleForm(f => ({ ...f, accountName: e.target.value }))} placeholder="Smith & Associates Law" />
-                </div>
-                <div className="form-row" style={{ marginBottom: 12 }}>
-                  <label className="field-label">Customer Email</label>
-                  <input type="email" value={singleForm.customerEmail} onChange={e => setSingleForm(f => ({ ...f, customerEmail: e.target.value }))} placeholder="john@smithlaw.com" />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <div className="form-row">
+                    <label className="field-label">Account / Firm Name</label>
+                    <input
+                      type="text"
+                      autoFocus
+                      value={singleForm.accountName}
+                      onChange={e => setSingleForm(f => ({ ...f, accountName: e.target.value }))}
+                      placeholder="Smith & Associates Law"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label className="field-label">Customer Email</label>
+                    <input
+                      type="email"
+                      value={singleForm.customerEmail}
+                      onChange={e => setSingleForm(f => ({ ...f, customerEmail: e.target.value }))}
+                      placeholder="john@smithlaw.com"
+                    />
+                  </div>
                 </div>
                 <div className="form-row" style={{ marginBottom: 16 }}>
                   <label className="field-label">Notes / Ticket IDs <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
-                  <input type="text" value={singleForm.notes} onChange={e => setSingleForm(f => ({ ...f, notes: e.target.value }))} placeholder="Ticket #314123 or cancellation context" />
+                  <input
+                    type="text"
+                    value={singleForm.notes}
+                    onChange={e => setSingleForm(f => ({ ...f, notes: e.target.value }))}
+                    placeholder="Ticket #314123 or cancellation context"
+                  />
                 </div>
                 <button
                   className="btn btn-primary"
@@ -516,7 +555,7 @@ export default function ZendeskAuditor() {
           <div style={{ marginBottom: 20 }}>
             <div className="field-label">Upload Customer List</div>
             <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
-              Upload a CSV or Excel file with columns: Account Name, Email Domain, Customer Email, and/or Org Name
+              CSV or Excel file with columns: Account Name, Email Domain, Customer Email, and/or Org Name
             </div>
           </div>
 
@@ -544,7 +583,6 @@ export default function ZendeskAuditor() {
               style={{ display: 'none' }}
               onChange={e => handleFile(e.target.files?.[0])}
             />
-            <div style={{ fontSize: 32, marginBottom: 10 }}>📄</div>
             {file ? (
               <div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{file.name}</div>
@@ -568,11 +606,9 @@ export default function ZendeskAuditor() {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button className="btn btn-primary" onClick={handleRunAudit} disabled={!file}>
-              Run Audit
-            </button>
-          </div>
+          <button className="btn btn-primary" onClick={handleRunAudit} disabled={!file}>
+            Run Audit
+          </button>
         </div>
         )}
       </div>

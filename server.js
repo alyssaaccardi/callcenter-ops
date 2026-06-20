@@ -2237,7 +2237,8 @@ app.get('/api/mitel/cloudlink/calls', async (req, res) => {
 
 const AUDITOR_CATEGORIES = [
   'Switched to AI Service', 'Went to Competitor', 'Price is Too High',
-  'Downsizing Practice', 'Hired Staff', 'Quality Issues', 'Closed Practice',
+  'Downsizing Practice', 'Hired Staff', 'IVR / Auto Attendant',
+  'Quality of Service', 'Technical Issues', 'Closed Practice',
   'Leaving Firm', 'Fired', 'Not Enough Call Volume',
   'Wanted Features/Services Not Offered', 'Does Not See Value in Service',
   'Unknown / Unspecified',
@@ -2352,7 +2353,7 @@ async function matchCustomer(row) {
     zdUserId: users[0].id,
     zdUserIds: users.map(u => u.id).slice(0, 5),
     matchType: userSet.size > 1 ? 'emailAndName' : 'singleSearch',
-    matchConfidence: 'Medium',
+    matchConfidence: zdOrgId ? 'High' : 'Medium',
   };
 }
 
@@ -2526,12 +2527,27 @@ const CATEGORY_RULES = [
     [/front\s*desk (person|staff|coverage)/i, 3],
     [/have (someone|staff) (now|to answer)/i, 3], [/no longer need/i, 2],
   ]},
-  { category: 'Quality Issues', patterns: [
+  { category: 'IVR / Auto Attendant', patterns: [
+    [/\bIVR\b/i, 5], [/auto(mated)?\s+attendant/i, 5], [/autoattendant/i, 5],
+    [/interactive voice response/i, 5], [/phone tree/i, 4],
+    [/automated (phone|answering|call) system/i, 4],
+    [/(set up|implement(ed)?|got|using) (an?\s+)?(auto|automated|IVR)/i, 4],
+  ]},
+  { category: 'Quality of Service', patterns: [
     [/quality (issue|problem|concern)/i, 4], [/miss(ing|ed) calls?/i, 4],
     [/wrong (message|information|number)/i, 3], [/incorrect (message|information)/i, 3],
     [/(bad|poor) (service|quality|experience)/i, 4], [/unprofessional/i, 4],
     [/complaint/i, 3], [/not (satisfied|happy) with (the\s+)?service/i, 3],
     [/dissatisf(ied|action)/i, 4], [/terrible service/i, 3],
+  ]},
+  { category: 'Technical Issues', patterns: [
+    [/patch(ing|ed)? (calls?|through)/i, 5], [/can'?t (patch|reach|transfer) calls?/i, 5],
+    [/(busy|silent) (signal|line)/i, 4], [/ring(ing)? (busy|silent|no answer)/i, 4],
+    [/calls? (not\s+)?going through/i, 4], [/calls? (not\s+)?connecting/i, 4],
+    [/call (transfer|forwarding|routing) (issue|problem|fail)/i, 4],
+    [/technical (issue|problem|error|failure)/i, 4],
+    [/system (issue|problem|outage|error)/i, 3],
+    [/(lines?|phones?) (ringing|are) busy/i, 4],
   ]},
   { category: 'Closed Practice', patterns: [
     [/clos(ing|ed|e) (the\s+)?(practice|firm|office|business)/i, 4],
@@ -2677,10 +2693,14 @@ function parseAuditResponse(raw, ticketData) {
     : [];
   const supporting_ticket_ids = aiIds.length > 0 ? aiIds : ticketData.slice(0, 3).map(t => t.id);
 
+  const rawConfidence = ['High','Medium','Low'].includes(parsed.confidence) ? parsed.confidence : 'Low';
+  // High confidence on "Unknown" is confusing — cap at Medium
+  const confidence = (category === 'Unknown / Unspecified' && rawConfidence === 'High') ? 'Medium' : rawConfidence;
+
   return {
     category,
     competitorName,
-    confidence: ['High','Medium','Low'].includes(parsed.confidence) ? parsed.confidence : 'Low',
+    confidence,
     summary: parsed.summary || '',
     reasoning: parsed.reasoning || '',
     supporting_ticket_ids,
