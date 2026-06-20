@@ -370,6 +370,11 @@ function ResultRow({ r, index }) {
         {r.emailDomain && r.accountName && (
           <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>{r.emailDomain}</div>
         )}
+        {r._repeatCount > 1 && (
+          <div style={{ fontSize: 10, fontWeight: 700, marginTop: 2, color: r._isMostRecent ? '#0891b2' : '#9ca3af' }}>
+            {r._isMostRecent ? `LATEST · ${r._repeatCount}× cancelled` : `EARLIER · ${r._repeatCount}× cancelled`}
+          </div>
+        )}
         {usedKeywords && (
           <div style={{ fontSize: 10, fontWeight: 600, color: '#b45309', marginTop: 2, letterSpacing: '0.03em' }}>KEYWORD MATCH</div>
         )}
@@ -574,6 +579,7 @@ export default function ZendeskAuditor() {
   const [singleError, setSingleError] = useState('');
   const [chartFilter, setChartFilter] = useState(null); // { rows, label }
   const [hiddenCats, setHiddenCats] = useState(new Set(['Unknown / Unspecified']));
+  const [dedupeMode, setDedupeMode] = useState(false);
 
   const handleFile = useCallback((f) => {
     if (!f) return;
@@ -701,6 +707,7 @@ export default function ZendeskAuditor() {
     setChartFilter(null);
     setLookbackDays('');
     setHiddenCats(new Set(['Unknown / Unspecified']));
+    setDedupeMode(false);
   }, [handleCancel]);
 
   async function handleSingleLookup(e) {
@@ -910,6 +917,31 @@ export default function ZendeskAuditor() {
     return new Date(r.estimatedCancellationDate + 'T00:00:00') >= viewCutoff;
   });
 
+  // Compute per-customer repeat counts and best (most recent) entry
+  const countByKey = new Map();
+  const bestByKey = new Map();
+  for (const r of windowedResults) {
+    const key = (r.matchedOrg || r.accountName || r.customerEmail || '').toLowerCase().trim();
+    if (!key) continue;
+    countByKey.set(key, (countByKey.get(key) || 0) + 1);
+    const d = r.estimatedCancellationDate || '';
+    if (!bestByKey.has(key) || d > (bestByKey.get(key).estimatedCancellationDate || '')) {
+      bestByKey.set(key, r);
+    }
+  }
+  const bestSet = new Set(bestByKey.values());
+
+  // Enrich with repeat metadata (non-mutating)
+  const enriched = windowedResults.map(r => {
+    const key = (r.matchedOrg || r.accountName || r.customerEmail || '').toLowerCase().trim();
+    const count = key ? (countByKey.get(key) || 1) : 1;
+    if (count <= 1) return r;
+    return { ...r, _repeatCount: count, _isMostRecent: bestSet.has(r) };
+  });
+
+  // Active results for chart/summary/table
+  const activeResults = dedupeMode ? enriched.filter(r => !r._repeatCount || r._isMostRecent) : enriched;
+
   const windowLabel = lookbackDays ? LOOKBACK_OPTIONS.find(o => o.value === lookbackDays)?.label : null;
 
   return (
@@ -925,7 +957,7 @@ export default function ZendeskAuditor() {
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           {results.length > 0 && (
-            <button className="btn btn-ghost btn-sm" onClick={() => exportCsv(windowedResults.length < results.length ? windowedResults : results)}>
+            <button className="btn btn-ghost btn-sm" onClick={() => exportCsv(activeResults.length < results.length ? activeResults : results)}>
               Export CSV
             </button>
           )}
@@ -943,6 +975,26 @@ export default function ZendeskAuditor() {
             <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Date range</span>
             <LookbackSelect value={lookbackDays} onChange={v => { setLookbackDays(v); setChartFilter(null); }} />
           </div>
+          <div style={{ width: 1, height: 20, background: 'var(--border, rgba(0,0,0,0.1))', flexShrink: 0 }} />
+          <button
+            onClick={() => { setDedupeMode(v => !v); setChartFilter(null); }}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '4px 10px', borderRadius: 20, cursor: 'pointer',
+              background: dedupeMode ? 'rgba(99,102,241,0.12)' : 'transparent',
+              border: `1px solid ${dedupeMode ? 'var(--accent, #6366f1)' : 'var(--border, rgba(0,0,0,0.15))'}`,
+              color: dedupeMode ? 'var(--accent, #6366f1)' : 'var(--muted)',
+              fontSize: 11, fontWeight: 600, transition: 'all 0.15s',
+            }}
+            title="When on, shows only the most recent cancellation per customer — older entries for the same customer are hidden"
+          >
+            {dedupeMode ? '✓' : ''} Unique customers
+            {!dedupeMode && countByKey.size > 0 && [...countByKey.values()].some(c => c > 1) && (
+              <span style={{ background: 'rgba(234,179,8,0.15)', color: '#b45309', borderRadius: 10, padding: '1px 5px', fontSize: 10 }}>
+                {[...countByKey.values()].filter(c => c > 1).length} repeats
+              </span>
+            )}
+          </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Hide from chart</span>
             {['Unknown / Unspecified', 'No Match'].concat(
@@ -975,9 +1027,9 @@ export default function ZendeskAuditor() {
               );
             })}
           </div>
-          {(lookbackDays || hiddenCats.size > 0) && (
+          {(lookbackDays || hiddenCats.size > 0 || dedupeMode) && (
             <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>
-              Showing {windowedResults.filter(r => r.status === 'done').length} of {doneCount} results
+              Showing {activeResults.filter(r => r.status === 'done').length} of {doneCount} results
               {windowLabel ? ` · ${windowLabel}` : ''}
             </span>
           )}
@@ -1021,7 +1073,7 @@ export default function ZendeskAuditor() {
       {/* Trend chart — shown once the audit is done, uses windowed + filtered results */}
       {!isRunning && doneCount > 0 && (
         <TrendChart
-          results={windowedResults}
+          results={activeResults}
           hiddenCats={hiddenCats}
           onSegmentClick={(rows, label) => setChartFilter({ rows, label })}
         />
@@ -1030,12 +1082,12 @@ export default function ZendeskAuditor() {
       {/* Category totals — reflects current window + hidden cat filters */}
       {!isRunning && doneCount > 0 && (() => {
         const catCounts = {};
-        for (const r of windowedResults) {
+        for (const r of activeResults) {
           if (r.status === 'done' && r.category) catCounts[r.category] = (catCounts[r.category] || 0) + 1;
         }
         const sorted = Object.entries(catCounts).sort((a, b) => b[1] - a[1]);
-        const windowedDone = windowedResults.filter(r => r.status === 'done').length;
-        const windowedNoMatch = windowedResults.filter(r => r.status === 'no_match').length;
+        const windowedDone = activeResults.filter(r => r.status === 'done').length;
+        const windowedNoMatch = activeResults.filter(r => r.status === 'no_match').length;
         const total = windowedDone + windowedNoMatch;
         if (total === 0) return null;
         return (
@@ -1074,7 +1126,7 @@ export default function ZendeskAuditor() {
       )}
 
       {(() => {
-        const displayResults = chartFilter ? chartFilter.rows : windowedResults;
+        const displayResults = chartFilter ? chartFilter.rows : activeResults;
         return displayResults.length === 0 && !isRunning ? (
           <div className="card" style={{ textAlign: 'center', padding: '60px 40px', color: 'var(--muted)' }}>
             {chartFilter ? 'No results match this filter.' : 'No results to display.'}
