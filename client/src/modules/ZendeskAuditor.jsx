@@ -178,8 +178,114 @@ function SpinnerRow({ index }) {
   );
 }
 
+function SingleResult({ r, onClear }) {
+  const zdSubdomain = r.zdSubdomain || '';
+  const needsCompetitor = r.category === 'Went to Competitor' || r.category === 'Switched to AI Service';
+  const usedKeywords = r.analysisMethod === 'keywords';
+  const { csat } = r;
+  const csatColor = !csat || csat.pct === null ? '#6b7280'
+    : csat.pct >= 80 ? '#15803d'
+    : csat.pct >= 60 ? '#b45309'
+    : '#dc2626';
+
+  return (
+    <div className="card" style={{ marginTop: 16, position: 'relative' }}>
+      <button onClick={onClear} style={{ position: 'absolute', top: 10, right: 12, background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--muted)', lineHeight: 1 }} title="Clear">×</button>
+
+      {/* Header */}
+      <div style={{ marginBottom: 14, paddingRight: 24 }}>
+        <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
+          {r.matchedOrg || r.accountName || r.customerEmail || '—'}
+        </div>
+        {r.matchedOrg && r.accountName && r.matchedOrg !== r.accountName && (
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Searched: {r.accountName}</div>
+        )}
+      </div>
+
+      {r.status === 'no_match' && (
+        <div style={{ fontSize: 13, color: '#b45309' }}>No Zendesk user found. Try a different name or email address.</div>
+      )}
+      {r.status === 'error' && (
+        <div style={{ fontSize: 13, color: '#dc2626' }}>{r.error}</div>
+      )}
+
+      {r.status === 'done' && r.category && (
+        <>
+          {/* Category + confidence */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+            <Badge label={r.category} colors={CATEGORY_COLORS} />
+            {needsCompetitor && (
+              <span style={{ fontSize: 12, fontWeight: 600, color: r.competitorName ? 'var(--text)' : 'var(--muted)' }}>
+                {r.competitorName || 'Unknown'}
+              </span>
+            )}
+            {r.confidence && <Badge label={r.confidence} colors={CONFIDENCE_COLORS} />}
+            {usedKeywords && <span style={{ fontSize: 10, fontWeight: 600, color: '#b45309', letterSpacing: '0.03em' }}>KEYWORD MATCH</span>}
+          </div>
+
+          {r.summary && (
+            <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6, marginBottom: 10 }}>{r.summary}</div>
+          )}
+          {r.reasoning && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+              <strong>Signals: </strong>{r.reasoning}
+            </div>
+          )}
+          {r.supportingTicketIds?.length > 0 && (
+            <div style={{ fontSize: 12, marginBottom: 10 }}>
+              <strong style={{ color: 'var(--muted)' }}>Tickets: </strong>
+              <TicketLinks ids={r.supportingTicketIds} subjects={r.ticketSubjects} zdSubdomain={zdSubdomain} />
+            </div>
+          )}
+
+          {/* Account Pulse / CSAT */}
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border, rgba(0,0,0,0.08))' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 10 }}>Account Pulse</div>
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              {/* Ticket count */}
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)' }}>{r.ticketCount ?? r.ticketSubjects?.length ?? 0}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>tickets found</div>
+              </div>
+
+              {/* CSAT */}
+              {csat && csat.total > 0 ? (
+                <>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: csatColor }}>{csat.pct}%</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>satisfaction</div>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)' }}>{csat.total}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>ratings</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {csat.good > 0 && <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: 'rgba(34,197,94,0.12)', color: '#15803d' }}>{csat.good} good</span>}
+                    {csat.bad > 0  && <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: 'rgba(239,68,68,0.12)',  color: '#dc2626' }}>{csat.bad} bad</span>}
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center' }}>No satisfaction ratings on record</div>
+              )}
+            </div>
+
+            {/* Last rating comment */}
+            {csat?.lastComment && (
+              <div style={{ marginTop: 10, fontSize: 12, fontStyle: 'italic', color: 'var(--muted)', borderLeft: '3px solid var(--border, rgba(0,0,0,0.1))', paddingLeft: 10 }}>
+                "{csat.lastComment}"
+                {csat.lastDate && <span style={{ fontStyle: 'normal', marginLeft: 6, opacity: 0.6 }}>— {csat.lastDate}</span>}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function ZendeskAuditor() {
   const [view, setView] = useState('upload');      // 'upload' | 'running' | 'results'
+  const [lookupMode, setLookupMode] = useState('upload'); // 'upload' | 'single'
   const [file, setFile] = useState(null);
   const [jobId, setJobId] = useState(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -188,6 +294,10 @@ export default function ZendeskAuditor() {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
   const readerRef = useRef(null);
+  const [singleForm, setSingleForm] = useState({ accountName: '', customerEmail: '', notes: '' });
+  const [singleResult, setSingleResult] = useState(null);
+  const [singleLoading, setSingleLoading] = useState(false);
+  const [singleError, setSingleError] = useState('');
 
   const handleFile = useCallback((f) => {
     if (!f) return;
@@ -314,6 +424,25 @@ export default function ZendeskAuditor() {
     setError('');
   }, [handleCancel]);
 
+  const handleSingleLookup = useCallback(async (e) => {
+    e.preventDefault();
+    setSingleError('');
+    setSingleResult(null);
+    if (!singleForm.accountName.trim() && !singleForm.customerEmail.trim()) {
+      setSingleError('Enter an account name or email address');
+      return;
+    }
+    setSingleLoading(true);
+    try {
+      const resp = await api.post('/api/zendesk-auditor/lookup', singleForm);
+      setSingleResult(resp.data);
+    } catch (err) {
+      setSingleError(err.response?.data?.error || err.message);
+    } finally {
+      setSingleLoading(false);
+    }
+  }, [singleForm]);
+
   const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
 
   // ── Upload view ─────────────────────────────────────────────────────────────
@@ -325,8 +454,64 @@ export default function ZendeskAuditor() {
             <div className="page-title">Cancellation Auditor</div>
             <div className="page-sub">Zendesk AI · Analyze cancellation reasons from ticket history</div>
           </div>
+          {/* Mode toggle */}
+          <div style={{ display: 'flex', gap: 2, background: 'var(--surface2, rgba(0,0,0,0.05))', borderRadius: 8, padding: 3 }}>
+            <button className={`btn btn-sm ${lookupMode === 'upload' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setLookupMode('upload')}>Upload List</button>
+            <button className={`btn btn-sm ${lookupMode === 'single' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setLookupMode('single')}>Single Lookup</button>
+          </div>
         </div>
 
+        {/* ── Single Lookup Form ─────────────────────────────────────────────── */}
+        {lookupMode === 'single' && (
+          <div style={{ maxWidth: 600, margin: '0 auto' }}>
+            <div className="card">
+              <div style={{ marginBottom: 18 }}>
+                <div className="field-label">Look Up a Single Customer</div>
+                <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
+                  Enter any combination of fields. More detail = better Zendesk match.
+                </div>
+              </div>
+              {singleError && (
+                <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#dc2626', marginBottom: 14 }}>
+                  {singleError}
+                </div>
+              )}
+              <form onSubmit={handleSingleLookup}>
+                <div className="form-row" style={{ marginBottom: 12 }}>
+                  <label className="field-label">Account / Firm Name</label>
+                  <input type="text" value={singleForm.accountName} onChange={e => setSingleForm(f => ({ ...f, accountName: e.target.value }))} placeholder="Smith & Associates Law" />
+                </div>
+                <div className="form-row" style={{ marginBottom: 12 }}>
+                  <label className="field-label">Customer Email</label>
+                  <input type="email" value={singleForm.customerEmail} onChange={e => setSingleForm(f => ({ ...f, customerEmail: e.target.value }))} placeholder="john@smithlaw.com" />
+                </div>
+                <div className="form-row" style={{ marginBottom: 16 }}>
+                  <label className="field-label">Notes / Ticket IDs <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
+                  <input type="text" value={singleForm.notes} onChange={e => setSingleForm(f => ({ ...f, notes: e.target.value }))} placeholder="Ticket #314123 or cancellation context" />
+                </div>
+                <button
+                  className="btn btn-primary"
+                  type="submit"
+                  disabled={singleLoading || (!singleForm.accountName.trim() && !singleForm.customerEmail.trim())}
+                >
+                  {singleLoading ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }}>
+                        <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4" strokeDashoffset="10" />
+                      </svg>
+                      Analyzing…
+                    </span>
+                  ) : 'Analyze'}
+                </button>
+              </form>
+            </div>
+            {singleResult && <SingleResult r={singleResult} onClear={() => setSingleResult(null)} />}
+            <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+          </div>
+        )}
+
+        {/* ── Upload Card ────────────────────────────────────────────────────── */}
+        {lookupMode === 'upload' && (
         <div className="card" style={{ maxWidth: 600, margin: '0 auto' }}>
           <div style={{ marginBottom: 20 }}>
             <div className="field-label">Upload Customer List</div>
@@ -389,6 +574,7 @@ export default function ZendeskAuditor() {
             </button>
           </div>
         </div>
+        )}
       </div>
     );
   }
@@ -457,6 +643,34 @@ export default function ZendeskAuditor() {
           </div>
         </div>
       )}
+
+      {/* Category totals — shown once the audit is done */}
+      {!isRunning && doneCount > 0 && (() => {
+        const catCounts = {};
+        for (const r of results) {
+          if (r.status === 'done' && r.category) catCounts[r.category] = (catCounts[r.category] || 0) + 1;
+        }
+        const sorted = Object.entries(catCounts).sort((a, b) => b[1] - a[1]);
+        return (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 12 }}>Results Summary</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {sorted.map(([cat, count]) => (
+                <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px', borderRadius: 8, background: 'var(--surface2, rgba(0,0,0,0.03))' }}>
+                  <Badge label={cat} colors={CATEGORY_COLORS} />
+                  <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>{count}</span>
+                </div>
+              ))}
+              {noMatchCount > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px', borderRadius: 8, background: 'var(--surface2, rgba(0,0,0,0.03))' }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#b45309', padding: '2px 8px', borderRadius: 20, background: 'rgba(234,179,8,0.12)' }}>No Match</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>{noMatchCount}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {results.length === 0 && !isRunning ? (
         <div className="card" style={{ textAlign: 'center', padding: '60px 40px', color: 'var(--muted)' }}>

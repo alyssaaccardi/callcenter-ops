@@ -2411,7 +2411,7 @@ async function getRecentSolvedTickets(match, limit) {
   const sorted = [...ticketMap.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, limit);
   return Promise.all(sorted.map(async t => {
     const comments = await fetchTicketComments(t.id);
-    return { id: t.id, subject: t.subject, created_at: t.created_at, comments };
+    return { id: t.id, subject: t.subject, created_at: t.created_at, comments, satisfactionRating: t.satisfaction_rating || null };
   }));
 }
 
@@ -2641,6 +2641,7 @@ Critical rules:
 - "Does Not See Value in Service" = not enough calls to justify cost, or service didn't meet expectations
 - Agent asking to turn off call forwarding = post-cancellation cleanup. NOT a reason.
 - Base your answer on the customer's actual words in [Message] blocks, not agent templates or [Internal note] blocks.
+- PRICE RULE: If the customer is leaving for a competitor OR hiring staff/AI primarily because it is cheaper, the root reason is "Price is Too High". Only use "Went to Competitor" or "Hired Staff" or "Switched to AI Service" when price is NOT the stated driver. When the customer explicitly mentions cost savings, cheaper alternative, or budget as the reason for switching, choose "Price is Too High" even if a competitor or AI tool is mentioned.
 
 Respond with ONLY valid JSON, no markdown:
 {"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>","relevantTicketIds":[<1-2 ticket IDs from above that most clearly show the reason, e.g. 12345>]}`;
@@ -2756,8 +2757,16 @@ function analyzeTickets(customer, ticketData) {
   });
 
   scores.sort((a, b) => b.score - a.score);
-  const best = scores[0];
+  let best = scores[0];
   const second = scores[1];
+
+  // Price override: if price signals are strong and the top category is Competitor/AI/HiredStaff,
+  // price is the root cause — the competitor/AI was just the vehicle.
+  const priceScore = scores.find(s => s.category === 'Price is Too High')?.score || 0;
+  const PRICE_OVERRIDE_CATEGORIES = new Set(['Went to Competitor', 'Switched to AI Service', 'Hired Staff']);
+  if (PRICE_OVERRIDE_CATEGORIES.has(best.category) && priceScore >= 4 && priceScore >= best.score * 0.6) {
+    best = scores.find(s => s.category === 'Price is Too High');
+  }
 
   const confidence = best.score === 0 ? 'Low' : best.score >= 8 && best.score >= second.score * 2 ? 'High' : best.score >= 4 ? 'Medium' : 'Low';
   const category  = best.score > 0 ? best.category : 'Unknown / Unspecified';
@@ -2915,6 +2924,112 @@ async function runAuditJob(jobId, rows) {
 
 app.get('/api/zendesk-auditor/categories', requireRole('super_admin', 'zendesk_auditor'), (req, res) => {
   res.json({ categories: AUDITOR_CATEGORIES });
+});
+
+// Single-customer lookup — same logic as batch, returns directly with CSAT pulse
+app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_auditor'), async (req, res) => {
+  const row = {
+    accountName: String(req.body.accountName || '').trim(),
+    customerEmail: String(req.body.customerEmail || '').trim(),
+    emailDomain: String(req.body.emailDomain || '').trim(),
+    orgName: String(req.body.orgName || '').trim(),
+    notes: String(req.body.notes || '').trim(),
+  };
+
+  if (!row.accountName && !row.customerEmail && !row.orgName) {
+    return res.status(400).json({ error: 'Provide at least an account name or email to search' });
+  }
+
+  const baseResult = {
+    accountName: row.accountName || row.orgName || '',
+    emailDomain: row.emailDomain || (row.customerEmail ? (row.customerEmail.split('@')[1] || '') : ''),
+    customerEmail: row.customerEmail || '',
+    matchedOrg: null, matchConfidence: null, matchType: null,
+    category: null, competitorName: null, summary: null,
+    confidence: null, reasoning: null,
+    supportingTicketIds: [], ticketSubjects: [], ticketDates: [],
+    csat: null, status: 'done', error: null,
+    zdSubdomain: process.env.ZENDESK_SUBDOMAIN || '',
+  };
+
+  try {
+    const explicitTicketIds = parseTicketIdsFromRow(req.body);
+    const ticketMap = new Map();
+    console.log(`[auditor:lookup] "${row.accountName || row.customerEmail}" — explicitIds: [${explicitTicketIds.join(', ')}]`);
+
+    for (const tid of explicitTicketIds) {
+      const t = await fetchTicketById(tid);
+      if (t) ticketMap.set(t.id, t);
+    }
+
+    if (ticketMap.size > 0) {
+      baseResult.matchedOrg = row.accountName || row.orgName || 'Unknown';
+      baseResult.matchConfidence = 'High';
+      baseResult.matchType = 'noteTicketId';
+    } else {
+      const match = await matchCustomer(row);
+      console.log(`[auditor:lookup] match → ${match ? `org:${match.zdOrgName} userIds:[${match.zdUserIds?.join(',')}]` : 'null'}`);
+      if (!match) return res.json({ ...baseResult, status: 'no_match' });
+
+      baseResult.matchedOrg = match.zdOrgName;
+      baseResult.matchConfidence = match.matchConfidence;
+      baseResult.matchType = match.matchType;
+
+      // Fetch more tickets than batch mode to get better CSAT coverage
+      for (const t of await getRecentSolvedTickets(match, 15)) {
+        if (!ticketMap.has(t.id)) ticketMap.set(t.id, t);
+      }
+      for (const t of await getCancellationKeywordTickets(match)) {
+        if (!ticketMap.has(t.id)) ticketMap.set(t.id, t);
+      }
+      if (ticketMap.size < 3) {
+        for (const t of await getRecentSolvedTickets(match, 25)) {
+          if (!ticketMap.has(t.id)) ticketMap.set(t.id, t);
+        }
+      }
+    }
+
+    const tickets = Array.from(ticketMap.values());
+    if (tickets.length === 0) {
+      return res.json({ ...baseResult, category: 'Unknown / Unspecified', summary: 'No tickets found in Zendesk for this customer.', confidence: 'Low', reasoning: 'No ticket data available.', status: 'done' });
+    }
+
+    baseResult.ticketSubjects = tickets.map(t => t.subject || '');
+    baseResult.ticketDates = tickets.map(t => t.created_at?.slice(0, 10) || '');
+    baseResult.ticketCount = tickets.length;
+
+    // ── CSAT pulse ──────────────────────────────────────────────────────────────
+    const rated = tickets.filter(t => t.satisfactionRating && t.satisfactionRating.score !== 'unoffered');
+    const csatGood = rated.filter(t => t.satisfactionRating.score === 'good').length;
+    const csatBad  = rated.filter(t => t.satisfactionRating.score === 'bad').length;
+    // sorted desc by date, so rated[0] is the most recent rated ticket
+    const last = rated.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+    baseResult.csat = {
+      total: rated.length,
+      good: csatGood,
+      bad: csatBad,
+      pct: rated.length > 0 ? Math.round((csatGood / rated.length) * 100) : null,
+      lastScore: last?.satisfactionRating?.score || null,
+      lastComment: last?.satisfactionRating?.comment || null,
+      lastDate: last?.created_at?.slice(0, 10) || null,
+    };
+
+    const analysis = await runAnalysis(row, tickets);
+    return res.json({
+      ...baseResult,
+      category: analysis.category,
+      competitorName: analysis.competitorName || null,
+      summary: analysis.summary,
+      confidence: analysis.confidence,
+      reasoning: analysis.reasoning,
+      supportingTicketIds: analysis.supporting_ticket_ids || [],
+      analysisMethod: analysis.analysisMethod || 'ai',
+      status: 'done',
+    });
+  } catch (err) {
+    console.error(`[auditor:lookup] error: ${err.message}`);
+    return res.status(500).json({ ...baseResult, status: 'error', error: err.message });
+  }
 });
 
 app.post('/api/zendesk-auditor/run', requireRole('super_admin', 'zendesk_auditor'), auditorUpload.single('file'), (req, res) => {
