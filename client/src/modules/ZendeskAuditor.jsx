@@ -270,12 +270,22 @@ function TrendChart({ results, onSegmentClick, hiddenCats }) {
 
 const LOOKBACK_OPTIONS = [
   { value: '',    label: 'All time' },
+  { value: 'ytd', label: 'Year to date' },
   { value: '30',  label: 'Last 30 days' },
   { value: '90',  label: 'Last 90 days' },
   { value: '180', label: 'Last 6 months' },
   { value: '365', label: 'Last 12 months' },
   { value: '730', label: 'Last 2 years' },
 ];
+
+function getLookbackCutoff(value) {
+  if (!value) return null;
+  if (value === 'ytd') {
+    const d = new Date();
+    return new Date(d.getFullYear(), 0, 1);
+  }
+  return new Date(Date.now() - parseInt(value, 10) * 24 * 60 * 60 * 1000);
+}
 
 function LookbackSelect({ value, onChange }) {
   return (
@@ -923,9 +933,7 @@ export default function ZendeskAuditor() {
   const isRunning    = view === 'running';
 
   // Client-side date + category filter applied after the run
-  const viewCutoff = lookbackDays
-    ? new Date(Date.now() - parseInt(lookbackDays, 10) * 24 * 60 * 60 * 1000)
-    : null;
+  const viewCutoff = getLookbackCutoff(lookbackDays);
 
   const windowedResults = results.filter(r => {
     if (hiddenCats.has(r.category)) return false;
