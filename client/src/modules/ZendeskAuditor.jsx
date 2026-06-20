@@ -47,11 +47,15 @@ function Badge({ label, colors }) {
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-function TrendChart({ results, onSegmentClick }) {
+function TrendChart({ results, onSegmentClick, hiddenCats }) {
   const [tooltip, setTooltip] = useState(null); // { x, y, key, cat, rows }
   const containerRef = useRef(null);
 
-  const dated = results.filter(r => r.status === 'done' && r.estimatedCancellationDate);
+  const dated = results.filter(r =>
+    r.status === 'done' &&
+    r.estimatedCancellationDate &&
+    !(hiddenCats && hiddenCats.has(r.category))
+  );
 
   if (dated.length < 3) {
     return (
@@ -246,14 +250,18 @@ function TrendChart({ results, onSegmentClick }) {
         </div>
       </div>
 
-      {/* Legend */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 10 }}>
-        {catOrder.map(cat => (
-          <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <div style={{ width: 9, height: 9, borderRadius: 2, background: CATEGORY_COLORS[cat]?.color || '#6366f1', flexShrink: 0 }} />
-            <span style={{ fontSize: 11, color: '#6b7280' }}>{cat}</span>
-          </div>
-        ))}
+      {/* Legend — click to toggle category visibility */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px 10px', marginTop: 10 }}>
+        {catOrder.map(cat => {
+          const hidden = hiddenCats && hiddenCats.has(cat);
+          const col = CATEGORY_COLORS[cat]?.color || '#6366f1';
+          return (
+            <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 5 }} title={hidden ? `Show ${cat}` : `Hide ${cat}`}>
+              <div style={{ width: 9, height: 9, borderRadius: 2, background: hidden ? '#374151' : col, flexShrink: 0 }} />
+              <span style={{ fontSize: 11, color: hidden ? '#4b5563' : '#6b7280', textDecoration: hidden ? 'line-through' : 'none' }}>{cat}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -565,6 +573,7 @@ export default function ZendeskAuditor() {
   const [singleLoading, setSingleLoading] = useState(false);
   const [singleError, setSingleError] = useState('');
   const [chartFilter, setChartFilter] = useState(null); // { rows, label }
+  const [hiddenCats, setHiddenCats] = useState(new Set(['Unknown / Unspecified']));
 
   const handleFile = useCallback((f) => {
     if (!f) return;
@@ -658,7 +667,6 @@ export default function ZendeskAuditor() {
 
     const formData = new FormData();
     formData.append('file', file);
-    if (lookbackDays) formData.append('lookbackDays', lookbackDays);
 
     try {
       const resp = await api.post('/api/zendesk-auditor/run', formData, {
@@ -691,6 +699,8 @@ export default function ZendeskAuditor() {
     setResults([]);
     setError('');
     setChartFilter(null);
+    setLookbackDays('');
+    setHiddenCats(new Set(['Unknown / Unspecified']));
   }, [handleCancel]);
 
   async function handleSingleLookup(e) {
@@ -703,7 +713,7 @@ export default function ZendeskAuditor() {
     }
     setSingleLoading(true);
     try {
-      const resp = await api.post('/api/zendesk-auditor/lookup', { ...singleForm, lookbackDays: lookbackDays || undefined });
+      const resp = await api.post('/api/zendesk-auditor/lookup', { ...singleForm });
       setSingleResult(resp.data);
     } catch (err) {
       setSingleError(err.response?.data?.error || err.message);
@@ -781,7 +791,7 @@ export default function ZendeskAuditor() {
                     />
                   </div>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                <div style={{ marginBottom: 16 }}>
                   <div className="form-row">
                     <label className="field-label">Notes / Ticket IDs <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
                     <input
@@ -790,10 +800,6 @@ export default function ZendeskAuditor() {
                       onChange={e => setSingleForm(f => ({ ...f, notes: e.target.value }))}
                       placeholder="Ticket #314123 or cancellation context"
                     />
-                  </div>
-                  <div className="form-row">
-                    <label className="field-label">Look back</label>
-                    <LookbackSelect value={lookbackDays} onChange={setLookbackDays} />
                   </div>
                 </div>
                 <button
@@ -878,10 +884,6 @@ export default function ZendeskAuditor() {
             <button className="btn btn-primary" onClick={handleRunAudit} disabled={!file}>
               Run Audit
             </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <label className="field-label" style={{ margin: 0, whiteSpace: 'nowrap' }}>Look back</label>
-              <LookbackSelect value={lookbackDays} onChange={setLookbackDays} />
-            </div>
           </div>
         </div>
         )}
@@ -896,6 +898,20 @@ export default function ZendeskAuditor() {
   const keywordCount = results.filter(r => r.analysisMethod === 'keywords').length;
   const isRunning    = view === 'running';
 
+  // Client-side date + category filter applied after the run
+  const viewCutoff = lookbackDays
+    ? new Date(Date.now() - parseInt(lookbackDays, 10) * 24 * 60 * 60 * 1000)
+    : null;
+
+  const windowedResults = results.filter(r => {
+    if (hiddenCats.has(r.category)) return false;
+    if (!viewCutoff) return true;
+    if (!r.estimatedCancellationDate) return false;
+    return new Date(r.estimatedCancellationDate + 'T00:00:00') >= viewCutoff;
+  });
+
+  const windowLabel = lookbackDays ? LOOKBACK_OPTIONS.find(o => o.value === lookbackDays)?.label : null;
+
   return (
     <div>
       <div className="page-header">
@@ -904,12 +920,12 @@ export default function ZendeskAuditor() {
           <div className="page-sub">
             {isRunning
               ? `Analyzing… ${progress.done} of ${progress.total} complete`
-              : `${results.length} customers · ${doneCount} analyzed · ${noMatchCount} no match · ${errorCount} error${lookbackDays ? ` · ${LOOKBACK_OPTIONS.find(o => o.value === lookbackDays)?.label || ''}` : ''}`}
+              : `${results.length} customers · ${doneCount} analyzed · ${noMatchCount} no match · ${errorCount} errors`}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           {results.length > 0 && (
-            <button className="btn btn-ghost btn-sm" onClick={() => exportCsv(results)}>
+            <button className="btn btn-ghost btn-sm" onClick={() => exportCsv(windowedResults.length < results.length ? windowedResults : results)}>
               Export CSV
             </button>
           )}
@@ -919,6 +935,54 @@ export default function ZendeskAuditor() {
           }
         </div>
       </div>
+
+      {/* Post-run filter bar */}
+      {!isRunning && results.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16, padding: '10px 14px', borderRadius: 8, background: 'var(--surface2, rgba(0,0,0,0.03))', border: '1px solid var(--border, rgba(0,0,0,0.07))' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Date range</span>
+            <LookbackSelect value={lookbackDays} onChange={v => { setLookbackDays(v); setChartFilter(null); }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Hide from chart</span>
+            {['Unknown / Unspecified', 'No Match'].concat(
+              [...new Set(results.map(r => r.category).filter(Boolean))].filter(c => c !== 'Unknown / Unspecified')
+            ).map(cat => {
+              const hidden = hiddenCats.has(cat);
+              const col = cat === 'No Match' ? '#b45309' : (CATEGORY_COLORS[cat]?.color || '#6366f1');
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setHiddenCats(prev => {
+                    const next = new Set(prev);
+                    if (hidden) next.delete(cat); else next.add(cat);
+                    setChartFilter(null);
+                    return next;
+                  })}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    padding: '3px 8px', borderRadius: 20, cursor: 'pointer',
+                    background: hidden ? 'rgba(0,0,0,0.04)' : `${col}22`,
+                    border: `1px solid ${hidden ? 'rgba(0,0,0,0.12)' : col}`,
+                    color: hidden ? '#9ca3af' : col,
+                    fontSize: 11, fontWeight: 600,
+                    opacity: hidden ? 0.6 : 1,
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {hidden ? '+ ' : '× '}{cat}
+                </button>
+              );
+            })}
+          </div>
+          {(lookbackDays || hiddenCats.size > 0) && (
+            <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>
+              Showing {windowedResults.filter(r => r.status === 'done').length} of {doneCount} results
+              {windowLabel ? ` · ${windowLabel}` : ''}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Slim progress bar — only shown while running */}
       {isRunning && (
@@ -954,22 +1018,26 @@ export default function ZendeskAuditor() {
         </div>
       )}
 
-      {/* Trend chart — shown once the audit is done */}
+      {/* Trend chart — shown once the audit is done, uses windowed + filtered results */}
       {!isRunning && doneCount > 0 && (
         <TrendChart
-          results={results}
+          results={windowedResults}
+          hiddenCats={hiddenCats}
           onSegmentClick={(rows, label) => setChartFilter({ rows, label })}
         />
       )}
 
-      {/* Category totals — shown once the audit is done */}
+      {/* Category totals — reflects current window + hidden cat filters */}
       {!isRunning && doneCount > 0 && (() => {
         const catCounts = {};
-        for (const r of results) {
+        for (const r of windowedResults) {
           if (r.status === 'done' && r.category) catCounts[r.category] = (catCounts[r.category] || 0) + 1;
         }
         const sorted = Object.entries(catCounts).sort((a, b) => b[1] - a[1]);
-        const total = doneCount + noMatchCount;
+        const windowedDone = windowedResults.filter(r => r.status === 'done').length;
+        const windowedNoMatch = windowedResults.filter(r => r.status === 'no_match').length;
+        const total = windowedDone + windowedNoMatch;
+        if (total === 0) return null;
         return (
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 12 }}>Results Summary</div>
@@ -981,11 +1049,11 @@ export default function ZendeskAuditor() {
                   <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>{Math.round(count / total * 100)}%</span>
                 </div>
               ))}
-              {noMatchCount > 0 && (
+              {windowedNoMatch > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px', borderRadius: 8, background: 'var(--surface2, rgba(0,0,0,0.03))' }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: '#b45309', padding: '2px 8px', borderRadius: 20, background: 'rgba(234,179,8,0.12)' }}>No Match</span>
-                  <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>{noMatchCount}</span>
-                  <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>{Math.round(noMatchCount / total * 100)}%</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>{windowedNoMatch}</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>{Math.round(windowedNoMatch / total * 100)}%</span>
                 </div>
               )}
             </div>
@@ -1006,7 +1074,7 @@ export default function ZendeskAuditor() {
       )}
 
       {(() => {
-        const displayResults = chartFilter ? chartFilter.rows : results;
+        const displayResults = chartFilter ? chartFilter.rows : windowedResults;
         return displayResults.length === 0 && !isRunning ? (
           <div className="card" style={{ textAlign: 'center', padding: '60px 40px', color: 'var(--muted)' }}>
             {chartFilter ? 'No results match this filter.' : 'No results to display.'}
