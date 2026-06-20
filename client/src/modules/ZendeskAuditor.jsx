@@ -45,13 +45,150 @@ function Badge({ label, colors }) {
   );
 }
 
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function TrendChart({ results }) {
+  const dated = results.filter(r => r.status === 'done' && r.estimatedCancellationDate);
+
+  if (dated.length < 3) {
+    return (
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#9ca3af', marginBottom: 8 }}>Cancellation Trend</div>
+        <div style={{ fontSize: 13, color: '#9ca3af', padding: '24px 0', textAlign: 'center' }}>
+          Not enough dated data — only {dated.length} of {results.filter(r=>r.status==='done').length} results have an estimated cancellation date.
+        </div>
+      </div>
+    );
+  }
+
+  // Determine grouping based on date range
+  const timestamps = dated.map(r => new Date(r.estimatedCancellationDate + 'T00:00:00').getTime());
+  const minTs = Math.min(...timestamps);
+  const maxTs = Math.max(...timestamps);
+  const rangeMonths = (maxTs - minTs) / (1000 * 60 * 60 * 24 * 30.5);
+
+  let bucketKey, bucketLabel, groupNote;
+  if (rangeMonths <= 20) {
+    bucketKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    bucketLabel = k => { const [y,m] = k.split('-'); return `${MONTHS[+m-1]} '${y.slice(2)}`; };
+  } else if (rangeMonths <= 52) {
+    bucketKey = d => `${d.getFullYear()}-Q${Math.ceil((d.getMonth()+1)/3)}`;
+    bucketLabel = k => k.replace('-', '\n');
+    groupNote = 'Grouped by quarter';
+  } else {
+    bucketKey = d => String(d.getFullYear());
+    bucketLabel = k => k;
+    groupNote = `Wide date range (${Math.round(rangeMonths/12)}+ yrs) — grouped by year`;
+  }
+
+  // Build bucket → category → count
+  const buckets = {};
+  for (const r of dated) {
+    const key = bucketKey(new Date(r.estimatedCancellationDate + 'T00:00:00'));
+    if (!buckets[key]) buckets[key] = {};
+    buckets[key][r.category] = (buckets[key][r.category] || 0) + 1;
+  }
+
+  const sortedKeys = Object.keys(buckets).sort();
+  const totals = sortedKeys.map(k => Object.values(buckets[k]).reduce((a,b) => a+b, 0));
+  const maxTotal = Math.max(...totals);
+
+  // Consistent category order across all bars (sorted by total occurrences desc)
+  const allCats = {};
+  for (const r of dated) allCats[r.category] = (allCats[r.category] || 0) + 1;
+  const catOrder = Object.entries(allCats).sort((a,b) => b[1]-a[1]).map(([c]) => c);
+
+  const PAD = { top: 28, right: 16, bottom: 36, left: 28 };
+  const SVG_W = 640;
+  const SVG_H = 200;
+  const chartW = SVG_W - PAD.left - PAD.right;
+  const chartH = SVG_H - PAD.top - PAD.bottom;
+
+  const colW = chartW / sortedKeys.length;
+  const barW = Math.max(10, Math.min(44, colW * 0.65));
+
+  const yTick = maxTotal <= 4 ? 1 : maxTotal <= 10 ? 2 : maxTotal <= 20 ? 5 : 10;
+  const yTicks = [];
+  for (let v = 0; v <= maxTotal; v += yTick) yTicks.push(v);
+  if (yTicks[yTicks.length-1] < maxTotal) yTicks.push(maxTotal);
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#9ca3af' }}>Cancellation Trend</div>
+        {groupNote && <div style={{ fontSize: 11, color: '#9ca3af' }}>{groupNote}</div>}
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{ width: '100%', minWidth: Math.max(340, sortedKeys.length * 52), display: 'block' }}>
+          {/* Grid lines + Y labels */}
+          {yTicks.map(tick => {
+            const y = PAD.top + chartH - (tick / maxTotal) * chartH;
+            return (
+              <g key={tick}>
+                <line x1={PAD.left} x2={PAD.left + chartW} y1={y} y2={y} stroke="#e5e7eb" strokeWidth="1" strokeDasharray={tick === 0 ? '' : '3 3'} />
+                <text x={PAD.left - 5} y={y + 4} textAnchor="end" fontSize="10" fill="#9ca3af">{tick}</text>
+              </g>
+            );
+          })}
+
+          {/* Bars */}
+          {sortedKeys.map((key, i) => {
+            const cx = PAD.left + i * colW + colW / 2;
+            const x = cx - barW / 2;
+            let yOffset = 0;
+            const total = totals[i];
+
+            return (
+              <g key={key}>
+                {catOrder.filter(cat => buckets[key][cat]).map(cat => {
+                  const count = buckets[key][cat];
+                  const segH = Math.max(2, (count / maxTotal) * chartH);
+                  const sy = PAD.top + chartH - yOffset - segH;
+                  const isTop = yOffset + segH >= (total / maxTotal) * chartH * 0.99;
+                  yOffset += segH;
+                  const col = CATEGORY_COLORS[cat]?.color || '#6366f1';
+                  return (
+                    <rect key={cat} x={x} y={sy} width={barW} height={segH}
+                      fill={col} opacity="0.85"
+                      rx={isTop ? Math.min(4, barW/4) : 0}
+                      ry={isTop ? Math.min(4, barW/4) : 0}
+                    />
+                  );
+                })}
+                {/* Total label above bar */}
+                {total > 0 && (
+                  <text x={cx} y={PAD.top + chartH - (total/maxTotal)*chartH - 5}
+                    textAnchor="middle" fontSize="11" fontWeight="700" fill="#374151">{total}</text>
+                )}
+                {/* X label */}
+                <text x={cx} y={SVG_H - 6} textAnchor="middle" fontSize="10" fill="#9ca3af">{bucketLabel(key)}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 10 }}>
+        {catOrder.map(cat => (
+          <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 9, height: 9, borderRadius: 2, background: CATEGORY_COLORS[cat]?.color || '#6366f1', flexShrink: 0 }} />
+            <span style={{ fontSize: 11, color: '#6b7280' }}>{cat}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function exportCsv(results) {
-  const headers = ['Account Name', 'Email Domain', 'Matched Org', 'Match Confidence', 'Match Type', 'Category', 'Competitor / AI Name', 'Confidence', 'Summary', 'Reasoning', 'Ticket IDs', 'Ticket Subjects', 'Ticket Dates', 'Analysis Method', 'Status'];
+  const headers = ['Account Name', 'Email Domain', 'Matched Org', 'Match Confidence', 'Match Type', 'Category', 'Competitor / AI Name', 'Confidence', 'Summary', 'Reasoning', 'Est. Exit Date', 'Ticket IDs', 'Ticket Subjects', 'Ticket Dates', 'Analysis Method', 'Status'];
   const needsCompetitor = r => r.category === 'Went to Competitor' || r.category === 'Switched to AI Service';
   const rows = results.map(r => [
     r.accountName, r.emailDomain, r.matchedOrg, r.matchConfidence, r.matchType,
     r.category, needsCompetitor(r) ? (r.competitorName || 'Unknown') : (r.competitorName || ''),
     r.confidence, r.summary, r.reasoning,
+    r.estimatedCancellationDate || '',
     (r.supportingTicketIds || []).join('; '),
     (r.ticketSubjects || []).join('; '),
     (r.ticketDates || []).join('; '),
@@ -165,6 +302,11 @@ function ResultRow({ r, index }) {
       <td style={{ padding: '10px 12px', fontSize: 13 }}>
         <TicketLinks ids={r.supportingTicketIds} subjects={r.ticketSubjects} zdSubdomain={zdSubdomain} />
       </td>
+      <td style={{ padding: '10px 12px', fontSize: 12, whiteSpace: 'nowrap', color: r.estimatedCancellationDate ? 'var(--text)' : 'var(--muted)' }}>
+        {r.estimatedCancellationDate
+          ? new Date(r.estimatedCancellationDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          : '—'}
+      </td>
       <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700, color: statusColor, whiteSpace: 'nowrap' }}>
         {r.status === 'done' ? 'Done' : r.status === 'no_match' ? 'No Match' : 'Error'}
         {r.error && <div style={{ fontSize: 11, fontWeight: 400, color: '#dc2626', maxWidth: 200 }}>{r.error}</div>}
@@ -252,6 +394,15 @@ function SingleResult({ r, onClear }) {
           <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border, rgba(0,0,0,0.08))' }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 10 }}>Account Pulse</div>
             <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              {/* Exit date */}
+              {r.estimatedCancellationDate && (
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>
+                    {new Date(r.estimatedCancellationDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>est. exit date</div>
+                </div>
+              )}
               {/* Ticket count */}
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)' }}>{r.ticketCount ?? r.ticketSubjects?.length ?? 0}</div>
@@ -683,6 +834,9 @@ export default function ZendeskAuditor() {
         </div>
       )}
 
+      {/* Trend chart — shown once the audit is done */}
+      {!isRunning && doneCount > 0 && <TrendChart results={results} />}
+
       {/* Category totals — shown once the audit is done */}
       {!isRunning && doneCount > 0 && (() => {
         const catCounts = {};
@@ -724,7 +878,7 @@ export default function ZendeskAuditor() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--surface2, rgba(0,0,0,0.03))' }}>
-                  {['Customer', 'Matched Org', 'Category', 'Confidence', 'Summary', 'Tickets', 'Status'].map(h => (
+                  {['Customer', 'Matched Org', 'Category', 'Confidence', 'Summary', 'Tickets', 'Exit Date', 'Status'].map(h => (
                     <th key={h} style={{ padding: '10px 12px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>

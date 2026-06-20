@@ -2691,7 +2691,9 @@ Critical rules:
 - PRICE RULE: If the customer is leaving for a competitor OR hiring staff/AI primarily because it is cheaper, the root reason is "Price is Too High". Only use "Went to Competitor" or "Hired Staff" or "Switched to AI Service" when price is NOT the stated driver. When the customer explicitly mentions cost savings, cheaper alternative, or budget as the reason for switching, choose "Price is Too High" even if a competitor or AI tool is mentioned.
 
 Respond with ONLY valid JSON, no markdown:
-{"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>","relevantTicketIds":[<1-2 ticket IDs from above that most clearly show the reason, e.g. 12345>]}`;
+{"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>","relevantTicketIds":[<1-2 ticket IDs from above that most clearly show the reason, e.g. 12345>],"estimatedCancellationDate":"<YYYY-MM-DD or null>"}
+
+estimatedCancellationDate rules: Look for the date the customer said they want to cancel or their service ended — phrases like "effective [date]", "as of [date]", "cancelling on [date]", "end of [month]", "final day [date]", "last day [date]". If only month/year given, use the last day of that month. If no explicit date, use the date of the most relevant cancellation ticket. Return null only if you cannot determine any date.`;
 }
 
 function parseAuditResponse(raw, ticketData) {
@@ -2719,6 +2721,10 @@ function parseAuditResponse(raw, ticketData) {
   // High confidence on "Unknown" is confusing — cap at Medium
   const confidence = (category === 'Unknown / Unspecified' && rawConfidence === 'High') ? 'Medium' : rawConfidence;
 
+  // Validate date is YYYY-MM-DD format
+  const rawDate = String(parsed.estimatedCancellationDate ?? '').trim();
+  const estimatedCancellationDate = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : null;
+
   return {
     category,
     competitorName,
@@ -2726,6 +2732,7 @@ function parseAuditResponse(raw, ticketData) {
     summary: parsed.summary || '',
     reasoning: parsed.reasoning || '',
     supporting_ticket_ids,
+    estimatedCancellationDate,
     analysisMethod: 'ai',
   };
 }
@@ -2853,6 +2860,13 @@ function analyzeTickets(customer, ticketData) {
     ? `Score ${best.score} for "${category}"${best.matchedTerms.length ? ` (signals: ${best.matchedTerms.slice(0, 3).join(', ')})` : ''}.${second.score > 0 ? ` Runner-up: "${second.category}" (${second.score}).` : ''}`
     : 'No keyword signals matched any category.';
 
+  // Use the most recent matched ticket date as a proxy for cancellation date
+  const matchedTickets = best.matchedIds.length
+    ? ticketData.filter(t => best.matchedIds.includes(t.id))
+    : ticketData.slice(0, 2);
+  const latestTicket = matchedTickets.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+  const estimatedCancellationDate = latestTicket?.created_at?.slice(0, 10) || null;
+
   return {
     category,
     competitorName,
@@ -2860,6 +2874,7 @@ function analyzeTickets(customer, ticketData) {
     confidence,
     reasoning,
     supporting_ticket_ids: best.matchedIds.length ? best.matchedIds : ticketData.slice(0, 2).map(t => t.id),
+    estimatedCancellationDate,
   };
 }
 
@@ -2882,6 +2897,7 @@ async function runAuditJob(jobId, rows) {
       summary: null,
       confidence: null,
       reasoning: null,
+      estimatedCancellationDate: null,
       supportingTicketIds: [],
       ticketSubjects: [],
       ticketDates: [],
@@ -2957,6 +2973,7 @@ async function runAuditJob(jobId, rows) {
       baseResult.summary = analysis.summary;
       baseResult.confidence = analysis.confidence;
       baseResult.reasoning = analysis.reasoning;
+      baseResult.estimatedCancellationDate = analysis.estimatedCancellationDate || null;
       baseResult.supportingTicketIds = analysis.supporting_ticket_ids || [];
       baseResult.analysisMethod = analysis.analysisMethod || 'ai';
 
@@ -3073,6 +3090,7 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
       summary: analysis.summary,
       confidence: analysis.confidence,
       reasoning: analysis.reasoning,
+      estimatedCancellationDate: analysis.estimatedCancellationDate || null,
       supportingTicketIds: analysis.supporting_ticket_ids || [],
       analysisMethod: analysis.analysisMethod || 'ai',
       status: 'done',
