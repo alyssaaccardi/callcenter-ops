@@ -47,7 +47,10 @@ function Badge({ label, colors }) {
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-function TrendChart({ results }) {
+function TrendChart({ results, onSegmentClick }) {
+  const [tooltip, setTooltip] = useState(null); // { x, y, key, cat, rows }
+  const containerRef = useRef(null);
+
   const dated = results.filter(r => r.status === 'done' && r.estimatedCancellationDate);
 
   if (dated.length < 3) {
@@ -61,46 +64,48 @@ function TrendChart({ results }) {
     );
   }
 
-  // Determine grouping based on date range
   const timestamps = dated.map(r => new Date(r.estimatedCancellationDate + 'T00:00:00').getTime());
   const minTs = Math.min(...timestamps);
   const maxTs = Math.max(...timestamps);
   const rangeMonths = (maxTs - minTs) / (1000 * 60 * 60 * 24 * 30.5);
 
-  let bucketKey, bucketLabel, groupNote;
+  let bucketKeyFn, bucketLabelFn, groupNote, xAxisLabel;
   if (rangeMonths <= 20) {
-    bucketKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    bucketLabel = k => { const [y,m] = k.split('-'); return `${MONTHS[+m-1]} '${y.slice(2)}`; };
+    bucketKeyFn = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    bucketLabelFn = k => { const [y,m] = k.split('-'); return `${MONTHS[+m-1]} '${y.slice(2)}`; };
+    xAxisLabel = 'EXIT MONTH';
   } else if (rangeMonths <= 52) {
-    bucketKey = d => `${d.getFullYear()}-Q${Math.ceil((d.getMonth()+1)/3)}`;
-    bucketLabel = k => k.replace('-', '\n');
+    bucketKeyFn = d => `${d.getFullYear()}-Q${Math.ceil((d.getMonth()+1)/3)}`;
+    bucketLabelFn = k => k.replace('-', ' ');
     groupNote = 'Grouped by quarter';
+    xAxisLabel = 'EXIT QUARTER';
   } else {
-    bucketKey = d => String(d.getFullYear());
-    bucketLabel = k => k;
+    bucketKeyFn = d => String(d.getFullYear());
+    bucketLabelFn = k => k;
     groupNote = `Wide date range (${Math.round(rangeMonths/12)}+ yrs) — grouped by year`;
+    xAxisLabel = 'EXIT YEAR';
   }
 
-  // Build bucket → category → count
+  // Build bucket → category → [result rows]
   const buckets = {};
   for (const r of dated) {
-    const key = bucketKey(new Date(r.estimatedCancellationDate + 'T00:00:00'));
+    const key = bucketKeyFn(new Date(r.estimatedCancellationDate + 'T00:00:00'));
     if (!buckets[key]) buckets[key] = {};
-    buckets[key][r.category] = (buckets[key][r.category] || 0) + 1;
+    if (!buckets[key][r.category]) buckets[key][r.category] = [];
+    buckets[key][r.category].push(r);
   }
 
   const sortedKeys = Object.keys(buckets).sort();
-  const totals = sortedKeys.map(k => Object.values(buckets[k]).reduce((a,b) => a+b, 0));
+  const totals = sortedKeys.map(k => Object.values(buckets[k]).reduce((s, arr) => s + arr.length, 0));
   const maxTotal = Math.max(...totals);
 
-  // Consistent category order across all bars (sorted by total occurrences desc)
   const allCats = {};
   for (const r of dated) allCats[r.category] = (allCats[r.category] || 0) + 1;
   const catOrder = Object.entries(allCats).sort((a,b) => b[1]-a[1]).map(([c]) => c);
 
-  const PAD = { top: 28, right: 16, bottom: 36, left: 28 };
+  const PAD = { top: 28, right: 16, bottom: 52, left: 46 };
   const SVG_W = 640;
-  const SVG_H = 200;
+  const SVG_H = 210;
   const chartW = SVG_W - PAD.left - PAD.right;
   const chartH = SVG_H - PAD.top - PAD.bottom;
 
@@ -112,60 +117,133 @@ function TrendChart({ results }) {
   for (let v = 0; v <= maxTotal; v += yTick) yTicks.push(v);
   if (yTicks[yTicks.length-1] < maxTotal) yTicks.push(maxTotal);
 
+  function handleMouseMove(e, key, cat) {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setTooltip({ x: e.clientX - rect.left, y: e.clientY - rect.top, key, cat, rows: buckets[key][cat] || [] });
+  }
+
+  function handleClick(key, cat) {
+    if (!onSegmentClick) return;
+    const rows = cat ? (buckets[key][cat] || []) : Object.values(buckets[key]).flat();
+    const label = cat ? `${bucketLabelFn(key)} · ${cat}` : `All cancellations in ${bucketLabelFn(key)}`;
+    onSegmentClick(rows, label);
+  }
+
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
         <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#9ca3af' }}>Cancellation Trend</div>
         {groupNote && <div style={{ fontSize: 11, color: '#9ca3af' }}>{groupNote}</div>}
       </div>
-      <div style={{ overflowX: 'auto' }}>
-        <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{ width: '100%', minWidth: Math.max(340, sortedKeys.length * 52), display: 'block' }}>
-          {/* Grid lines + Y labels */}
-          {yTicks.map(tick => {
-            const y = PAD.top + chartH - (tick / maxTotal) * chartH;
-            return (
-              <g key={tick}>
-                <line x1={PAD.left} x2={PAD.left + chartW} y1={y} y2={y} stroke="#e5e7eb" strokeWidth="1" strokeDasharray={tick === 0 ? '' : '3 3'} />
-                <text x={PAD.left - 5} y={y + 4} textAnchor="end" fontSize="10" fill="#9ca3af">{tick}</text>
-              </g>
-            );
-          })}
 
-          {/* Bars */}
-          {sortedKeys.map((key, i) => {
-            const cx = PAD.left + i * colW + colW / 2;
-            const x = cx - barW / 2;
-            let yOffset = 0;
-            const total = totals[i];
+      <div ref={containerRef} style={{ position: 'relative' }}>
+        {/* Tooltip */}
+        {tooltip && (
+          <div style={{
+            position: 'absolute',
+            left: tooltip.x + 14,
+            top: Math.max(4, tooltip.y - 90),
+            background: '#111827',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 8,
+            padding: '10px 13px',
+            fontSize: 12,
+            color: '#f1f5f9',
+            maxWidth: 240,
+            pointerEvents: 'none',
+            zIndex: 100,
+            boxShadow: '0 4px 18px rgba(0,0,0,0.4)',
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 2, color: CATEGORY_COLORS[tooltip.cat]?.color || '#6366f1' }}>
+              {tooltip.cat}
+            </div>
+            <div style={{ color: '#9ca3af', fontSize: 11, marginBottom: 7 }}>
+              {bucketLabelFn(tooltip.key)} &middot; {tooltip.rows.length} cancellation{tooltip.rows.length !== 1 ? 's' : ''}
+            </div>
+            {tooltip.rows.slice(0, 5).map((r, i) => (
+              <div key={i} style={{ fontSize: 11, color: '#e2e8f0', marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 210 }}>
+                · {r.accountName || r.matchedOrg || r.customerEmail || 'Unknown'}
+              </div>
+            ))}
+            {tooltip.rows.length > 5 && (
+              <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 3 }}>+{tooltip.rows.length - 5} more</div>
+            )}
+            <div style={{ fontSize: 10, color: '#6366f1', fontWeight: 600, marginTop: 7 }}>Click to filter ↓</div>
+          </div>
+        )}
 
-            return (
-              <g key={key}>
-                {catOrder.filter(cat => buckets[key][cat]).map(cat => {
-                  const count = buckets[key][cat];
-                  const segH = Math.max(2, (count / maxTotal) * chartH);
-                  const sy = PAD.top + chartH - yOffset - segH;
-                  const isTop = yOffset + segH >= (total / maxTotal) * chartH * 0.99;
-                  yOffset += segH;
-                  const col = CATEGORY_COLORS[cat]?.color || '#6366f1';
-                  return (
-                    <rect key={cat} x={x} y={sy} width={barW} height={segH}
-                      fill={col} opacity="0.85"
-                      rx={isTop ? Math.min(4, barW/4) : 0}
-                      ry={isTop ? Math.min(4, barW/4) : 0}
-                    />
-                  );
-                })}
-                {/* Total label above bar */}
-                {total > 0 && (
-                  <text x={cx} y={PAD.top + chartH - (total/maxTotal)*chartH - 5}
-                    textAnchor="middle" fontSize="11" fontWeight="700" fill="#374151">{total}</text>
-                )}
-                {/* X label */}
-                <text x={cx} y={SVG_H - 6} textAnchor="middle" fontSize="10" fill="#9ca3af">{bucketLabel(key)}</text>
-              </g>
-            );
-          })}
-        </svg>
+        <div style={{ overflowX: 'auto' }}>
+          <svg
+            viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+            style={{ width: '100%', minWidth: Math.max(340, sortedKeys.length * 52), display: 'block' }}
+            onMouseLeave={() => setTooltip(null)}
+          >
+            {/* Y axis label */}
+            <text
+              transform={`translate(11, ${PAD.top + chartH / 2}) rotate(-90)`}
+              textAnchor="middle" fontSize="9" fontWeight="700" letterSpacing="0.07em" fill="#9ca3af"
+            >CANCELLATIONS</text>
+
+            {/* Grid lines + Y tick labels */}
+            {yTicks.map(tick => {
+              const y = PAD.top + chartH - (tick / maxTotal) * chartH;
+              return (
+                <g key={tick}>
+                  <line x1={PAD.left} x2={PAD.left + chartW} y1={y} y2={y}
+                    stroke="rgba(156,163,175,0.15)" strokeWidth="1" strokeDasharray={tick === 0 ? '' : '3 3'} />
+                  <text x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize="10" fill="#9ca3af">{tick}</text>
+                </g>
+              );
+            })}
+
+            {/* X axis label */}
+            <text
+              x={PAD.left + chartW / 2} y={SVG_H - 3}
+              textAnchor="middle" fontSize="9" fontWeight="700" letterSpacing="0.07em" fill="#9ca3af"
+            >{xAxisLabel}</text>
+
+            {/* Bars */}
+            {sortedKeys.map((key, i) => {
+              const cx = PAD.left + i * colW + colW / 2;
+              const x = cx - barW / 2;
+              let yOffset = 0;
+              const total = totals[i];
+
+              return (
+                <g key={key} style={{ cursor: 'pointer' }} onClick={() => handleClick(key, null)}>
+                  {catOrder.filter(cat => buckets[key][cat]).map(cat => {
+                    const count = buckets[key][cat].length;
+                    const segH = Math.max(2, (count / maxTotal) * chartH);
+                    const sy = PAD.top + chartH - yOffset - segH;
+                    const isTop = yOffset + segH >= (total / maxTotal) * chartH * 0.99;
+                    yOffset += segH;
+                    const col = CATEGORY_COLORS[cat]?.color || '#6366f1';
+                    return (
+                      <rect
+                        key={cat} x={x} y={sy} width={barW} height={segH}
+                        fill={col} opacity="0.82"
+                        rx={isTop ? Math.min(4, barW/4) : 0}
+                        ry={isTop ? Math.min(4, barW/4) : 0}
+                        onMouseMove={e => { e.stopPropagation(); handleMouseMove(e, key, cat); }}
+                        onMouseLeave={() => setTooltip(null)}
+                        onClick={e => { e.stopPropagation(); handleClick(key, cat); }}
+                        style={{ cursor: 'pointer' }}
+                      />
+                    );
+                  })}
+                  {/* Total label */}
+                  {total > 0 && (
+                    <text x={cx} y={PAD.top + chartH - (total/maxTotal)*chartH - 5}
+                      textAnchor="middle" fontSize="11" fontWeight="700" fill="#9ca3af">{total}</text>
+                  )}
+                  {/* X tick label */}
+                  <text x={cx} y={SVG_H - 18} textAnchor="middle" fontSize="10" fill="#9ca3af">{bucketLabelFn(key)}</text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
       </div>
 
       {/* Legend */}
@@ -486,6 +564,7 @@ export default function ZendeskAuditor() {
   const [singleResult, setSingleResult] = useState(null);
   const [singleLoading, setSingleLoading] = useState(false);
   const [singleError, setSingleError] = useState('');
+  const [chartFilter, setChartFilter] = useState(null); // { rows, label }
 
   const handleFile = useCallback((f) => {
     if (!f) return;
@@ -611,6 +690,7 @@ export default function ZendeskAuditor() {
     setProgress({ done: 0, total: 0 });
     setResults([]);
     setError('');
+    setChartFilter(null);
   }, [handleCancel]);
 
   async function handleSingleLookup(e) {
@@ -875,7 +955,12 @@ export default function ZendeskAuditor() {
       )}
 
       {/* Trend chart — shown once the audit is done */}
-      {!isRunning && doneCount > 0 && <TrendChart results={results} />}
+      {!isRunning && doneCount > 0 && (
+        <TrendChart
+          results={results}
+          onSegmentClick={(rows, label) => setChartFilter({ rows, label })}
+        />
+      )}
 
       {/* Category totals — shown once the audit is done */}
       {!isRunning && doneCount > 0 && (() => {
@@ -908,29 +993,44 @@ export default function ZendeskAuditor() {
         );
       })()}
 
-      {results.length === 0 && !isRunning ? (
-        <div className="card" style={{ textAlign: 'center', padding: '60px 40px', color: 'var(--muted)' }}>
-          No results to display.
-        </div>
-      ) : (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: 'var(--surface2, rgba(0,0,0,0.03))' }}>
-                  {['Customer', 'Matched Org', 'Category', 'Confidence', 'Summary', 'Tickets', 'Exit Date', 'Status'].map(h => (
-                    <th key={h} style={{ padding: '10px 12px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((r, i) => <ResultRow key={i} r={r} index={i} />)}
-                {isRunning && progress.done < progress.total && <SpinnerRow index={progress.done} />}
-              </tbody>
-            </table>
-          </div>
+      {/* Chart filter banner */}
+      {chartFilter && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.22)', marginBottom: 12, fontSize: 13 }}>
+          <span style={{ flex: 1, color: 'var(--text)' }}>
+            <strong style={{ color: 'var(--accent, #6366f1)' }}>Filtered:</strong> {chartFilter.label} &middot; {chartFilter.rows.length} result{chartFilter.rows.length !== 1 ? 's' : ''}
+          </span>
+          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => setChartFilter(null)}>
+            × Clear filter
+          </button>
         </div>
       )}
+
+      {(() => {
+        const displayResults = chartFilter ? chartFilter.rows : results;
+        return displayResults.length === 0 && !isRunning ? (
+          <div className="card" style={{ textAlign: 'center', padding: '60px 40px', color: 'var(--muted)' }}>
+            {chartFilter ? 'No results match this filter.' : 'No results to display.'}
+          </div>
+        ) : (
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'var(--surface2, rgba(0,0,0,0.03))' }}>
+                    {['Customer', 'Matched Org', 'Category', 'Confidence', 'Summary', 'Tickets', 'Exit Date', 'Status'].map(h => (
+                      <th key={h} style={{ padding: '10px 12px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayResults.map((r, i) => <ResultRow key={i} r={r} index={i} />)}
+                  {isRunning && !chartFilter && progress.done < progress.total && <SpinnerRow index={progress.done} />}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
 
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
