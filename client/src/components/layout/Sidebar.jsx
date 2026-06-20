@@ -17,7 +17,7 @@ const ALL_NAV_ITEMS = [
   { id: 'tech-leaderboard', icon: '🏆', label: 'Team Leaderboard', roles: ['super_admin', 'tech'], section: 'Tech'           },
   { id: 'app-portal',       icon: '🌐', label: 'App Portal',       roles: ['super_admin', 'tech'], section: 'Tech'           },
   { id: 'user-management',  icon: '👥', label: 'User Management',  roles: ['super_admin'],                          section: 'Administration' },
-  { id: 'zendesk-auditor', icon: '🔎', label: 'The Farewell Report', roles: ['super_admin', 'zendesk_auditor'], section: 'Analytics'      },
+  { id: 'zendesk-auditor', icon: '🔎', label: 'The Farewell Reporter', roles: ['super_admin', 'zendesk_auditor'], section: 'Analytics'      },
 ];
 
 const ROLE_LABELS = {

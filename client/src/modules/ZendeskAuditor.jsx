@@ -9,6 +9,9 @@ const CATEGORY_COLORS = {
   'Downsizing Practice':               { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
   'Hired Staff':                       { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
   'IVR / Auto Attendant':              { bg: 'rgba(6,182,212,0.12)',    color: '#0e7490' },
+  'Missed Calls':                      { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
+  'Message / Intake Errors':           { bg: 'rgba(249,115,22,0.12)',   color: '#c2410c' },
+  'Receptionist Conduct':              { bg: 'rgba(239,68,68,0.12)',    color: '#991b1b' },
   'Quality of Service':                { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
   'Technical Issues':                  { bg: 'rgba(239,68,68,0.12)',    color: '#b91c1c' },
   'Closed Practice':                   { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
@@ -292,7 +295,7 @@ function SingleResult({ r, onClear }) {
 
 export default function ZendeskAuditor() {
   const [view, setView] = useState('upload');      // 'upload' | 'running' | 'results'
-  const [lookupMode, setLookupMode] = useState('upload'); // 'upload' | 'single'
+  const [lookupMode, setLookupMode] = useState('single'); // 'upload' | 'single'
   const [file, setFile] = useState(null);
   const [jobId, setJobId] = useState(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
