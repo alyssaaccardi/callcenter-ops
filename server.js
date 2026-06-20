@@ -2236,13 +2236,15 @@ app.get('/api/mitel/cloudlink/calls', async (req, res) => {
 // ─── Zendesk Auditor ─────────────────────────────────────────────────────────
 
 const AUDITOR_CATEGORIES = [
-  'Switched to AI Service', 'Went to Competitor', 'Price is Too High',
+  'Switched to AI Service', 'Went to Competitor', 'Price Too High',
   'Downsizing Practice', 'Hired Staff', 'IVR / Auto Attendant',
-  'Missed Calls', 'Message / Intake Errors', 'Receptionist Conduct',
-  'Quality of Service', 'Technical Issues', 'Closed Practice',
+  'Quality', 'Call Forwarding Issue', 'Closed Practice',
   'Leaving Firm', 'Fired', 'Not Enough Call Volume',
-  'Wanted Features/Services Not Offered', 'Does Not See Value in Service',
-  'Unknown / Unspecified',
+  "Wanted Features/Services We Don't Offer",
+  'Wanted Real Time Reporting / Portal',
+  'Answering Service Included In Suite', 'Appointed Judge',
+  "Doesn't See Value", 'Unknown / Unspecified',
+  'No Cancellation Evidence Found',
 ];
 
 const auditorUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -2443,7 +2445,7 @@ const AI_SERVICE_NAMES = [
   { name: 'Lex',           pattern: /\blex\b/i },
   { name: 'Goodcall',      pattern: /goodcall/i },
   { name: 'Answering.AI',  pattern: /answering\.ai/i },
-  { name: 'Dialpad',       pattern: /dialpad/i },
+  { name: 'Dialpad AI',    pattern: /dialpad/i },
   { name: 'Convoso',       pattern: /convoso/i },
   { name: 'Rosie',         pattern: /\brosie\b/i },
   { name: 'Numa',          pattern: /\bnuma\b/i },
@@ -2462,6 +2464,35 @@ const HUMAN_COMPETITOR_NAMES = [
   { name: 'VoiceNation',           pattern: /voicenation/i },
   { name: 'Answering365',          pattern: /answering\s*365/i },
   { name: 'Nexa',                  pattern: /\bnexa\b/i },
+];
+
+// Cancellation signals — at least one must match for keyword analysis to classify churn
+const CANCELLATION_SIGNALS = [
+  /cancel(l?ing|l?ed|lation)/i,
+  /terminat(e|ing|ed|ion)/i,
+  /discontinu(e|ing|ed)/i,
+  /closing (the\s+)?(account|service|subscription)/i,
+  /shut(ting)?\s+down/i,
+  /no longer (need|want|use|require)/i,
+  /going (with|to) (another|a\s+(different|new|other))/i,
+  /switch(ing|ed)\s+(to|away)/i,
+  /moving (to|away|on)/i,
+  /leaving (the\s+)?(service|firm|company|practice)/i,
+  /want(ed|ing)?\s+to\s+cancel/i,
+  /request(ing|ed)?\s+(to\s+)?cancel/i,
+  /please\s+(cancel|close|terminate)\s+(my|our|the)\s+account/i,
+  /clos(e|ing|ed)\s+(my|our|the)?\s+account/i,
+  /end(ing)?\s+(my|our|the)?\s+(service|subscription|account)/i,
+  /notice\s+(of\s+)?cancel/i,
+  /30[\s-]day\s+(cancel|notice)/i,
+  /winding\s+down/i,
+  /retir(e|ing|ed)/i,
+  /out\s+of\s+business/i,
+  /dissolv(e|ing|ed)/i,
+  /no\s+longer\s+practicing/i,
+  /hired\s+(a\s+)?(receptionist|staff|assistant|employee|secretary)/i,
+  /in(-|\s*)house\s+(receptionist|staff|answering)/i,
+  /\bfired\b/i, /\blaid\s+off\b/i,
 ];
 
 // ─── Keyword-based cancellation analysis (no external AI needed) ─────────────
@@ -2487,7 +2518,7 @@ const CATEGORY_RULES = [
     [/different (answering\s+)?service/i, 2], [/another (answering\s+)?service/i, 2],
     [/found (a\s+)?cheaper/i, 3],
   ]},
-  { category: 'Price is Too High', patterns: [
+  { category: 'Price Too High', patterns: [
     [/too expensive/i, 4], [/can'?t afford/i, 4], [/overpriced/i, 4],
     [/over\s*budget/i, 3], [/cheaper (option|alternative|service|provider)/i, 4],
     [/rate increase/i, 3], [/price(s)? (too |are )?(high|much)/i, 4],
@@ -2522,41 +2553,32 @@ const CATEGORY_RULES = [
     [/internal (system|phone|call|routing)/i, 4],
     [/no longer need (live|the)?\s*(answering|service)/i, 4],
   ]},
-  { category: 'Missed Calls', patterns: [
+  { category: 'Quality', patterns: [
     [/miss(ing|ed) calls?/i, 5], [/calls? (went|going) to voicemail/i, 5],
     [/calls? (not\s+)?(being\s+)?answered/i, 5], [/calls? (being\s+)?dropped/i, 4],
     [/no one (answered|picked up)/i, 4], [/unanswered calls?/i, 4],
     [/calls? roll(ing|ed)? (over|to) voicemail/i, 4],
-  ]},
-  { category: 'Message / Intake Errors', patterns: [
     [/wrong (message|information|number|name|callback)/i, 5],
     [/incorrect (message|information|details?)/i, 5],
     [/bad (intake|message|information)/i, 4],
     [/message(s)? (wrong|incorrect|inaccurate|missing)/i, 4],
     [/intake (error|issue|problem)/i, 4],
-    [/wrong (info|details?|callback)/i, 4],
     [/information (not\s+)?(captured|recorded|taken) (correctly|properly|right)/i, 4],
-  ]},
-  { category: 'Receptionist Conduct', patterns: [
-    [/unprofessional/i, 5], [/rude/i, 5], [/disrespectful/i, 5],
+    [/unprofessional/i, 5], [/\brude\b/i, 5], [/disrespectful/i, 5],
     [/(bad|poor|terrible|awful) (receptionist|operator|agent|staff)/i, 5],
-    [/receptionist(s)? (were?|was|are|is|being|acted|sounded) (rude|unprofessional|bad|poor)/i, 5],
     [/(hard|difficult) to (understand|hear)/i, 4], [/accent (issue|problem|concern)/i, 4],
-    [/not (professional|polite|helpful|friendly)/i, 4],
-  ]},
-  { category: 'Quality of Service', patterns: [
     [/quality (issue|problem|concern)/i, 4],
     [/(bad|poor|terrible) (service|quality|experience)/i, 4],
-    [/complaint/i, 3], [/not (satisfied|happy) with (the\s+)?service/i, 3],
+    [/not (satisfied|happy) with (the\s+)?service/i, 3],
     [/dissatisf(ied|action)/i, 4],
   ]},
-  { category: 'Technical Issues', patterns: [
+  { category: 'Call Forwarding Issue', patterns: [
     [/patch(ing|ed)? (calls?|through)/i, 5], [/can'?t (patch|reach|transfer) calls?/i, 5],
     [/(busy|silent) (signal|line)/i, 4], [/ring(ing)? (busy|silent|no answer)/i, 4],
     [/calls? (not\s+)?going through/i, 4], [/calls? (not\s+)?connecting/i, 4],
-    [/call (transfer|forwarding|routing) (issue|problem|fail)/i, 4],
-    [/technical (issue|problem|error|failure)/i, 4],
-    [/system (issue|problem|outage|error)/i, 3],
+    [/call (transfer|forwarding|routing) (issue|problem|fail)/i, 5],
+    [/forward(ing)?\s+(issue|problem|not working|fail)/i, 5],
+    [/calls? (not\s+)?(being\s+)?forward(ed)?/i, 4],
     [/(lines?|phones?) (ringing|are) busy/i, 4],
   ]},
   { category: 'Closed Practice', patterns: [
@@ -2580,7 +2602,7 @@ const CATEGORY_RULES = [
     [/don'?t (receive|get) enough calls/i, 3],
     [/calls? (have\s+)?(slowed|decreased|dropped)/i, 3],
   ]},
-  { category: 'Wanted Features/Services Not Offered', patterns: [
+  { category: "Wanted Features/Services We Don't Offer", patterns: [
     [/feature (request|not available|missing)/i, 4],
     [/doesn'?t (have|offer|support)\s+.{0,30}(need|want|require)/i, 3],
     [/can'?t (integrate|connect|sync)/i, 3],
@@ -2588,7 +2610,28 @@ const CATEGORY_RULES = [
     [/wish (you|it)\s+(had|offer(ed)?|support(ed)?)/i, 3],
     [/(intake|scheduling|crm)\s+(integration|software)/i, 3],
   ]},
-  { category: 'Does Not See Value in Service', patterns: [
+  { category: 'Wanted Real Time Reporting / Portal', patterns: [
+    [/real[\s-]?time (report|reporting|data|stats?)/i, 5],
+    [/portal (access|login|dashboard)/i, 4],
+    [/(client|customer|online)\s+portal/i, 4],
+    [/reporting (dashboard|tool|feature)/i, 4],
+    [/want(ed|s)?\s+(to\s+)?see\s+(real[\s-]?time|live)\s+(data|stats?|calls?)/i, 4],
+    [/live (dashboard|reporting|stats?|view)/i, 4],
+  ]},
+  { category: 'Answering Service Included In Suite', patterns: [
+    [/included (in|with) (the\s+)?(suite|package|plan|software|system)/i, 5],
+    [/comes? with\s+.{0,30}(answering|receptionist|service)/i, 4],
+    [/(software|platform|suite|crm)\s+(includes?|has|comes?\s+with)\s+.{0,20}(answering|receptionist)/i, 5],
+    [/bundled?\s+(with|in|into)/i, 3],
+    [/already\s+(have|includes?)\s+(answering|receptionist)/i, 4],
+  ]},
+  { category: 'Appointed Judge', patterns: [
+    [/appointed\s+(a\s+)?judge/i, 5], [/became\s+(a\s+)?judge/i, 5],
+    [/judicial\s+(appointment|position)/i, 5],
+    [/elected\s+(to\s+)?(the\s+)?bench/i, 4],
+    [/taking\s+(a\s+)?judgeship/i, 5],
+  ]},
+  { category: "Doesn't See Value", patterns: [
     [/not worth (it|the cost|the price)/i, 4], [/don'?t (see|find)\s+(the\s+)?value/i, 4],
     [/no (longer\s+)?benefit/i, 3], [/doesn'?t (justify|make sense)/i, 3],
     [/\broi\b/i, 3], [/return on investment/i, 3],
@@ -2652,10 +2695,10 @@ COMMON TICKET SUBJECT PATTERNS (do NOT use the subject as the reason — read th
 - "RE: [Answering Legal] Re: ..." = reply in a thread. Read full body.
 
 KNOWN COMPETITORS AND AI SERVICES:
-- AI answering tools (use "Switched to AI Service"): Smith.ai, Lex, LEX Reception, Goodcall, Rosie, Numa, Answering.AI, Dialpad AI, Ruby AI, Convoso
-- Human answering services (use "Went to Competitor"): Ruby Receptionist, PATLive, AnswerConnect, MAP Communications, Gabbyville, VoiceNation, Alert Communications
+- AI answering tools (use "Switched to AI Service"): Smith.ai, Lex, LEX Reception, Goodcall, Rosie, Numa, Answering.AI, Dialpad AI, Convoso
+- Human answering services (use "Went to Competitor"): Ruby Receptionist, PATLive, AnswerConnect, MAP Communications, Gabbyville, VoiceNation, Moneypenny, Abby Connect, Alert Communications, Answering365, Nexa, Davinci
 - "Lex" / "LEX" is an AI legal receptionist tool — NOT a law firm
-- Hiring a virtual assistant (VA) for $X/hour = "Price is Too High" (price comparison) OR "Hired Staff" if they actually plan to hire, NOT "Switched to AI Service"
+- Hiring a virtual assistant (VA) for $X/hour = "Price Too High" (price comparison) OR "Hired Staff" if they actually plan to hire, NOT "Switched to AI Service"
 
 INTEGRATIONS THAT ARE NOT COMPETITORS:
 - Clio, MyCase, PracticePanther, Filevine, Litify, Lawmatics = legal practice management software that integrates WITH Answering Legal. Tickets about these are support/setup requests, NOT cancellations.
@@ -2671,16 +2714,22 @@ Choose the single best cancellation reason from these categories:
 ${categoriesList}
 
 Critical rules:
-- A ticket about integrating with or setting up our service is NOT a cancellation reason.
-- "Switched to AI Service" = replaced us with an AI answering/receptionist tool
-- "Went to Competitor" = switched to another HUMAN answering service
+- CANCELLATION EVIDENCE REQUIRED: Only classify a churn reason when there is explicit evidence that the customer canceled, requested cancellation, was closed, or terminated service. Support tickets, complaints, technical issues, account updates, plan reductions, and resolved issues are NOT churn reasons. If no cancellation evidence exists, return "No Cancellation Evidence Found".
+- PLAN REDUCTIONS ARE NOT CHURN: A customer downgrading their plan, reducing minutes, or adjusting their subscription is NOT a cancellation. Do not classify these as any churn category.
+- Only return a category from the approved list above. Never invent new categories.
+- "Switched to AI Service" = replaced us with an AI answering/receptionist tool (Smith.ai, Lex, Goodcall, Rosie, etc.)
+- "Went to Competitor" = switched to another HUMAN answering service (Ruby, PATLive, AnswerConnect, etc.)
 - "Hired Staff" = specifically hired a HUMAN in-house receptionist, front desk person, or employee to answer phones — NOT an AI, NOT a phone system
-- "IVR / Auto Attendant" = customer set up their own automated phone system, call routing, internal phone routing, auto-attendant, or IVR — this includes ANY case where the customer says their phone routing is working now, they set up an internal system, they configured their own call handling, or they no longer need live answering because their system handles it. Do NOT confuse this with "Hired Staff" (which requires a human hire).
-- "Wanted Features/Services Not Offered" = wanted a specific capability or integration that we simply don't offer — NOT an issue with their own setup or routing
-- "Does Not See Value in Service" = not enough calls to justify cost, or service didn't meet expectations
+- "IVR / Auto Attendant" = customer set up their own automated phone system, call routing, auto-attendant, or IVR — they no longer need live answering because an automated system handles it. NOT the same as "Hired Staff" (which requires a human hire).
+- "Call Forwarding Issue" = the customer's calls were not being forwarded/transferred/patched correctly — a technical problem with call routing or connectivity, NOT the customer choosing a different solution
+- "Wanted Features/Services We Don't Offer" = wanted a specific capability or integration that we simply don't offer
+- "Wanted Real Time Reporting / Portal" = specifically wanted live dashboards, a client portal, or real-time reporting access we don't provide
+- "Answering Service Included In Suite" = customer switched to a software/platform/CRM that bundles answering or receptionist service
+- "Doesn't See Value" = service didn't justify the cost in their view — not enough ROI, not useful enough. Distinct from "Not Enough Call Volume" (which is about call traffic, not perceived value)
+- "Not Enough Call Volume" = call traffic is too low to warrant the service — not a cost or value complaint, literally not enough calls
 - Agent asking to turn off call forwarding = post-cancellation cleanup. NOT a reason.
 - Base your answer on the customer's actual words in [Message] blocks, not agent templates or [Internal note] blocks.
-- PRICE RULE: If the customer is leaving for a competitor OR hiring staff/AI primarily because it is cheaper, the root reason is "Price is Too High". Only use "Went to Competitor" or "Hired Staff" or "Switched to AI Service" when price is NOT the stated driver. When the customer explicitly mentions cost savings, cheaper alternative, or budget as the reason for switching, choose "Price is Too High" even if a competitor or AI tool is mentioned.
+- PRICE RULE: If the customer is leaving for a competitor OR hiring staff/AI primarily because it is cheaper, the root reason is "Price Too High". Only use "Went to Competitor", "Hired Staff", or "Switched to AI Service" when price is NOT the stated driver.
 
 Respond with ONLY valid JSON, no markdown:
 {"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>","relevantTicketIds":[<1-2 ticket IDs from above that most clearly show the reason, e.g. 12345>],"estimatedCancellationDate":"<YYYY-MM-DD or null>"}
@@ -2794,6 +2843,21 @@ function analyzeTickets(customer, ticketData) {
     ticketTexts.unshift({ id: 'notes', subject: 'Notes', date: null, text: customer.notes });
   }
 
+  // If no cancellation signals are present in any ticket text, return early
+  const allText = ticketTexts.map(t => t.text).join(' ');
+  const hasCancellationSignal = CANCELLATION_SIGNALS.some(p => p.test(allText));
+  if (!hasCancellationSignal) {
+    return {
+      category: 'No Cancellation Evidence Found',
+      competitorName: null,
+      summary: `No cancellation language found across ${ticketData.length} ticket(s). This may be a support, billing, or account management ticket.`,
+      confidence: 'High',
+      reasoning: 'No cancellation signals matched.',
+      supporting_ticket_ids: ticketData.slice(0, 2).map(t => t.id),
+      estimatedCancellationDate: null,
+    };
+  }
+
   const scores = CATEGORY_RULES.map(rule => {
     let score = 0;
     const matchedTerms = [];
@@ -2812,10 +2876,10 @@ function analyzeTickets(customer, ticketData) {
 
   // Price override: if price signals are strong and the top category is Competitor/AI/HiredStaff,
   // price is the root cause — the competitor/AI was just the vehicle.
-  const priceScore = scores.find(s => s.category === 'Price is Too High')?.score || 0;
+  const priceScore = scores.find(s => s.category === 'Price Too High')?.score || 0;
   const PRICE_OVERRIDE_CATEGORIES = new Set(['Went to Competitor', 'Switched to AI Service', 'Hired Staff']);
   if (PRICE_OVERRIDE_CATEGORIES.has(best.category) && priceScore >= 4 && priceScore >= best.score * 0.6) {
-    best = scores.find(s => s.category === 'Price is Too High');
+    best = scores.find(s => s.category === 'Price Too High');
   }
 
   const confidence = best.score === 0 ? 'Low' : best.score >= 8 && best.score >= second.score * 2 ? 'High' : best.score >= 4 ? 'Medium' : 'Low';
@@ -2857,7 +2921,7 @@ function analyzeTickets(customer, ticketData) {
     ? ticketData.filter(t => best.matchedIds.includes(t.id))
     : ticketData.slice(0, 2);
   const latestTicket = matchedTickets.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-  const estimatedCancellationDate = latestTicket?.created_at?.slice(0, 10) || null;
+  const estimatedCancellationDate = (category === 'No Cancellation Evidence Found') ? null : (latestTicket?.created_at?.slice(0, 10) || null);
 
   return {
     category,
@@ -2892,6 +2956,7 @@ async function runAuditJob(jobId, rows) {
       supportingTicketIds: [], ticketSubjects: [], ticketDates: [],
       status: 'done', error: null,
       zdSubdomain: process.env.ZENDESK_SUBDOMAIN || '',
+      _originalRow: rawRow,
     };
 
     try {

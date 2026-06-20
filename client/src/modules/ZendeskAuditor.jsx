@@ -3,24 +3,25 @@ import api from '../api';
 
 // ─── Category color mapping ────────────────────────────────────────────────
 const CATEGORY_COLORS = {
-  'Went to Competitor':                { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
-  'Switched to AI Service':            { bg: 'rgba(6,182,212,0.12)',    color: '#0891b2' },
-  'Price is Too High':                 { bg: 'rgba(249,115,22,0.12)',   color: '#ea580c' },
-  'Downsizing Practice':               { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
-  'Hired Staff':                       { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
-  'IVR / Auto Attendant':              { bg: 'rgba(6,182,212,0.12)',    color: '#0e7490' },
-  'Missed Calls':                      { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
-  'Message / Intake Errors':           { bg: 'rgba(249,115,22,0.12)',   color: '#c2410c' },
-  'Receptionist Conduct':              { bg: 'rgba(239,68,68,0.12)',    color: '#991b1b' },
-  'Quality of Service':                { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
-  'Technical Issues':                  { bg: 'rgba(239,68,68,0.12)',    color: '#b91c1c' },
-  'Closed Practice':                   { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
-  'Leaving Firm':                      { bg: 'rgba(107,114,128,0.12)', color: '#6b7280' },
-  'Fired':                             { bg: 'rgba(107,114,128,0.12)', color: '#6b7280' },
-  'Not Enough Call Volume':            { bg: 'rgba(234,179,8,0.12)',    color: '#b45309' },
-  'Wanted Features/Services Not Offered': { bg: 'rgba(99,102,241,0.12)', color: '#4338ca' },
-  'Does Not See Value in Service':     { bg: 'rgba(249,115,22,0.12)',   color: '#ea580c' },
-  'Unknown / Unspecified':             { bg: 'rgba(107,114,128,0.12)', color: '#6b7280' },
+  'Went to Competitor':                    { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
+  'Switched to AI Service':               { bg: 'rgba(6,182,212,0.12)',    color: '#0891b2' },
+  'Price Too High':                        { bg: 'rgba(249,115,22,0.12)',   color: '#ea580c' },
+  'Downsizing Practice':                   { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
+  'Hired Staff':                           { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
+  'IVR / Auto Attendant':                  { bg: 'rgba(6,182,212,0.12)',    color: '#0e7490' },
+  'Quality':                               { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
+  'Call Forwarding Issue':                 { bg: 'rgba(239,68,68,0.12)',    color: '#b91c1c' },
+  'Closed Practice':                       { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
+  'Leaving Firm':                          { bg: 'rgba(107,114,128,0.12)', color: '#6b7280' },
+  'Fired':                                 { bg: 'rgba(107,114,128,0.12)', color: '#6b7280' },
+  'Not Enough Call Volume':               { bg: 'rgba(234,179,8,0.12)',    color: '#b45309' },
+  "Wanted Features/Services We Don't Offer": { bg: 'rgba(99,102,241,0.12)', color: '#4338ca' },
+  'Wanted Real Time Reporting / Portal':  { bg: 'rgba(99,102,241,0.12)',   color: '#6366f1' },
+  'Answering Service Included In Suite':  { bg: 'rgba(16,185,129,0.12)',   color: '#059669' },
+  'Appointed Judge':                       { bg: 'rgba(16,185,129,0.12)',   color: '#0d9488' },
+  "Doesn't See Value":                     { bg: 'rgba(249,115,22,0.12)',   color: '#ea580c' },
+  'Unknown / Unspecified':                { bg: 'rgba(107,114,128,0.12)', color: '#6b7280' },
+  'No Cancellation Evidence Found':       { bg: 'rgba(107,114,128,0.08)', color: '#9ca3af' },
 };
 
 const CONFIDENCE_COLORS = {
@@ -285,20 +286,36 @@ function LookbackSelect({ value, onChange }) {
 }
 
 function exportCsv(results) {
-  const headers = ['Account Name', 'Email Domain', 'Matched Org', 'Match Confidence', 'Match Type', 'Category', 'Competitor / AI Name', 'Confidence', 'Summary', 'Reasoning', 'Est. Exit Date', 'Ticket IDs', 'Ticket Subjects', 'Ticket Dates', 'Analysis Method', 'Status'];
-  const needsCompetitor = r => r.category === 'Went to Competitor' || r.category === 'Switched to AI Service';
-  const rows = results.map(r => [
-    r.accountName, r.emailDomain, r.matchedOrg, r.matchConfidence, r.matchType,
-    r.category, needsCompetitor(r) ? (r.competitorName || 'Unknown') : (r.competitorName || ''),
-    r.confidence, r.summary, r.reasoning,
-    r.estimatedCancellationDate || '',
-    (r.supportingTicketIds || []).join('; '),
-    (r.ticketSubjects || []).join('; '),
-    (r.ticketDates || []).join('; '),
-    r.analysisMethod || 'ai',
-    r.status,
-  ].map(v => `"${String(v || '').replace(/"/g, '""')}"`).join(','));
-  const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv' });
+  const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+  // Collect all original column names from _originalRow across all results
+  const origKeysSet = new Set();
+  for (const r of results) {
+    if (r._originalRow) Object.keys(r._originalRow).forEach(k => origKeysSet.add(k));
+  }
+  const origKeys = [...origKeysSet];
+
+  const analysisHeaders = ['Matched Org', 'Match Confidence', 'Match Type', 'Category', 'Competitor / AI Name', 'Confidence', 'Summary', 'Reasoning', 'Est. Exit Date', 'Ticket IDs', 'Ticket Subjects', 'Ticket Dates', 'Analysis Method', 'Status'];
+  const headers = [...origKeys, ...analysisHeaders];
+
+  const rows = results.map(r => {
+    const origCols = origKeys.map(k => q(r._originalRow?.[k] ?? ''));
+    const needsComp = r.category === 'Went to Competitor' || r.category === 'Switched to AI Service';
+    const analysisCols = [
+      r.matchedOrg, r.matchConfidence, r.matchType,
+      r.category, needsComp ? (r.competitorName || 'Unknown') : (r.competitorName || ''),
+      r.confidence, r.summary, r.reasoning,
+      r.estimatedCancellationDate || '',
+      (r.supportingTicketIds || []).join('; '),
+      (r.ticketSubjects || []).join('; '),
+      (r.ticketDates || []).join('; '),
+      r.analysisMethod || 'ai',
+      r.status,
+    ].map(q);
+    return [...origCols, ...analysisCols].join(',');
+  });
+
+  const blob = new Blob([[headers.map(q).join(','), ...rows].join('\n')], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -578,7 +595,7 @@ export default function ZendeskAuditor() {
   const [singleLoading, setSingleLoading] = useState(false);
   const [singleError, setSingleError] = useState('');
   const [chartFilter, setChartFilter] = useState(null); // { rows, label }
-  const [hiddenCats, setHiddenCats] = useState(new Set(['Unknown / Unspecified']));
+  const [hiddenCats, setHiddenCats] = useState(new Set(['Unknown / Unspecified', 'No Cancellation Evidence Found']));
   const [dedupeMode, setDedupeMode] = useState(false);
 
   const handleFile = useCallback((f) => {
@@ -706,7 +723,7 @@ export default function ZendeskAuditor() {
     setError('');
     setChartFilter(null);
     setLookbackDays('');
-    setHiddenCats(new Set(['Unknown / Unspecified']));
+    setHiddenCats(new Set(['Unknown / Unspecified', 'No Cancellation Evidence Found']));
     setDedupeMode(false);
   }, [handleCancel]);
 
@@ -1094,18 +1111,21 @@ export default function ZendeskAuditor() {
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 12 }}>Results Summary</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {sorted.map(([cat, count]) => (
-                <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px', borderRadius: 8, background: 'var(--surface2, rgba(0,0,0,0.03))' }}>
-                  <Badge label={cat} colors={CATEGORY_COLORS} />
-                  <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>{count}</span>
-                  <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>{Math.round(count / total * 100)}%</span>
-                </div>
-              ))}
+              {sorted.map(([cat, count]) => {
+                const col = CATEGORY_COLORS[cat]?.color || '#6366f1';
+                return (
+                  <div key={cat} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '10px 14px', borderRadius: 10, background: 'var(--surface2, rgba(0,0,0,0.03))', minWidth: 90, textAlign: 'center' }}>
+                    <span style={{ fontSize: 28, fontWeight: 900, color: col, lineHeight: 1 }}>{count}</span>
+                    <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>{Math.round(count / total * 100)}%</span>
+                    <Badge label={cat} colors={CATEGORY_COLORS} />
+                  </div>
+                );
+              })}
               {windowedNoMatch > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px', borderRadius: 8, background: 'var(--surface2, rgba(0,0,0,0.03))' }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: '#b45309', padding: '2px 8px', borderRadius: 20, background: 'rgba(234,179,8,0.12)' }}>No Match</span>
-                  <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>{windowedNoMatch}</span>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '10px 14px', borderRadius: 10, background: 'var(--surface2, rgba(0,0,0,0.03))', minWidth: 90, textAlign: 'center' }}>
+                  <span style={{ fontSize: 28, fontWeight: 900, color: '#b45309', lineHeight: 1 }}>{windowedNoMatch}</span>
                   <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>{Math.round(windowedNoMatch / total * 100)}%</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#b45309', padding: '2px 8px', borderRadius: 20, background: 'rgba(234,179,8,0.12)' }}>No Match</span>
                 </div>
               )}
             </div>
