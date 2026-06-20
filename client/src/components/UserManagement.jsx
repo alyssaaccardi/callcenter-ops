@@ -7,7 +7,7 @@ const ROLES = [
   { value: 'support',         label: 'Support' },
   { value: 'tech',            label: 'Tech Team' },
   { value: 'tv_display',      label: 'TV Display' },
-  { value: 'zendesk_auditor', label: 'Zendesk Auditor' },
+  { value: 'zendesk_auditor', label: 'Farewell Report' },
 ];
 
 const ROLE_STYLE = {
@@ -26,7 +26,7 @@ const ROLE_LABEL = {
   support:         'Support',
   tech:            'Tech Team',
   tv_display:      'TV Display',
-  zendesk_auditor: 'Zendesk Auditor',
+  zendesk_auditor: 'Farewell Report',
 };
 
 function TutorialRow({ t, onToggle, onReset }) {
@@ -275,7 +275,7 @@ export default function UserManagement() {
           {role !== 'zendesk_auditor' && (
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13, color: 'var(--text)', cursor: 'pointer' }}>
               <input type="checkbox" checked={zdAuditor} onChange={e => setZdAuditor(e.target.checked)} />
-              Also grant Zendesk Auditor access
+              Also grant Farewell Report access
             </label>
           )}
           <button className="btn btn-primary btn-sm mt-12" type="submit" disabled={adding}>

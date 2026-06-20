@@ -59,7 +59,7 @@ function exportCsv(results) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'cancellation-audit.csv';
+  a.download = 'farewell-report.csv';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -458,8 +458,8 @@ export default function ZendeskAuditor() {
       <div>
         <div className="page-header">
           <div>
-            <div className="page-title">Cancellation Auditor</div>
-            <div className="page-sub">Zendesk AI · Analyze cancellation reasons from ticket history</div>
+            <div className="page-title">The Farewell Report</div>
+            <div className="page-sub">Zendesk AI · Analyze customer exit reasons from ticket history</div>
           </div>
         </div>
 
@@ -626,7 +626,7 @@ export default function ZendeskAuditor() {
     <div>
       <div className="page-header">
         <div>
-          <div className="page-title">Cancellation Auditor</div>
+          <div className="page-title">The Farewell Report</div>
           <div className="page-sub">
             {isRunning
               ? `Analyzing… ${progress.done} of ${progress.total} complete`
