@@ -2656,6 +2656,11 @@ function parseAuditResponse(raw, ticketData) {
   }
   const category = AUDITOR_CATEGORIES.includes(parsed.category) ? parsed.category : 'Unknown / Unspecified';
 
+  // Normalize all "nothing found" competitor name variants to null
+  const UNKNOWN_NAME_VALUES = new Set(['null','unknown','n/a','none','not identified','not specified','not available','unidentified','not mentioned','not stated','not provided','unclear','unspecified','']);
+  const rawName = String(parsed.competitorName ?? '').trim();
+  const competitorName = rawName && !UNKNOWN_NAME_VALUES.has(rawName.toLowerCase()) ? rawName : null;
+
   // Use AI-identified ticket IDs if they reference tickets we actually have; fall back to first 3
   const aiIds = Array.isArray(parsed.relevantTicketIds)
     ? parsed.relevantTicketIds.map(Number).filter(id => ticketData.some(t => t.id === id)).slice(0, 3)
@@ -2664,7 +2669,7 @@ function parseAuditResponse(raw, ticketData) {
 
   return {
     category,
-    competitorName: parsed.competitorName || null,
+    competitorName,
     confidence: ['High','Medium','Low'].includes(parsed.confidence) ? parsed.confidence : 'Low',
     summary: parsed.summary || '',
     reasoning: parsed.reasoning || '',
