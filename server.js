@@ -2596,7 +2596,7 @@ const CATEGORY_RULES = [
   ]},
 ];
 
-function buildAuditPrompt(customer, ticketData) {
+function buildAuditPrompt(customer, ticketData, cutoff) {
   const transcripts = ticketData.map(t => {
     const date = t.created_at ? ` (${t.created_at.slice(0, 10)})` : '';
     const lines = [`Ticket #${t.id}${date} — "${t.subject || '(no subject)'}"`];
@@ -2609,6 +2609,9 @@ function buildAuditPrompt(customer, ticketData) {
   }).join('\n\n---\n\n');
 
   const notesContext = customer.notes ? `\nCSV cancellation notes: "${customer.notes}"\n` : '';
+  const windowNote = cutoff
+    ? `\nIMPORTANT: Only tickets from ${cutoff.toISOString().slice(0, 10)} onwards have been provided. The estimated cancellation date MUST be on or after ${cutoff.toISOString().slice(0, 10)} — do NOT extract dates from before this cutoff even if they are mentioned in ticket text.\n`
+    : '';
   const categoriesList = AUDITOR_CATEGORIES.map(c => `- ${c}`).join('\n');
   const today = new Date().toISOString().slice(0, 10);
 
@@ -2659,7 +2662,7 @@ INTEGRATIONS THAT ARE NOT COMPETITORS:
 - "AI intake chatbot" / "intake chatbot" = Answering Legal's own free feature. NOT an outside service.
 - Ring Savvy / Answering Legal themselves are NOT competitors.
 
-Customer: ${customer.accountName || customer.orgName || 'Unknown'}${notesContext}${csatContext}
+Customer: ${customer.accountName || customer.orgName || 'Unknown'}${notesContext}${csatContext}${windowNote}
 
 Full ticket conversation(s) — read the ENTIRE thread before deciding:
 ${transcripts || '(no ticket content available)'}
@@ -2726,9 +2729,9 @@ function parseAuditResponse(raw, ticketData) {
   };
 }
 
-async function claudeAnalyzeTickets(customer, ticketData) {
+async function claudeAnalyzeTickets(customer, ticketData, cutoff) {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  const prompt = buildAuditPrompt(customer, ticketData);
+  const prompt = buildAuditPrompt(customer, ticketData, cutoff);
   const msg = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 500,
@@ -2738,8 +2741,8 @@ async function claudeAnalyzeTickets(customer, ticketData) {
   return parseAuditResponse(msg.content[0]?.text?.trim() || '', ticketData);
 }
 
-async function geminiAnalyzeTickets(customer, ticketData) {
-  const prompt = buildAuditPrompt(customer, ticketData);
+async function geminiAnalyzeTickets(customer, ticketData, cutoff) {
+  const prompt = buildAuditPrompt(customer, ticketData, cutoff);
   const resp = await axios.post(
     'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
     { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 600, temperature: 0.1, thinkingConfig: { thinkingBudget: 0 } } },
@@ -2749,8 +2752,8 @@ async function geminiAnalyzeTickets(customer, ticketData) {
   return parseAuditResponse(raw, ticketData);
 }
 
-async function openaiAnalyzeTickets(customer, ticketData) {
-  const prompt = buildAuditPrompt(customer, ticketData);
+async function openaiAnalyzeTickets(customer, ticketData, cutoff) {
+  const prompt = buildAuditPrompt(customer, ticketData, cutoff);
   const resp = await axios.post(
     'https://api.openai.com/v1/chat/completions',
     { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 500, temperature: 0.1, response_format: { type: 'json_object' } },
@@ -2761,7 +2764,7 @@ async function openaiAnalyzeTickets(customer, ticketData) {
 }
 
 // Pick whichever AI provider key is configured; fall back to keywords on any error
-async function runAnalysis(customer, tickets) {
+async function runAnalysis(customer, tickets, cutoff) {
   const tryAI = async (fn) => {
     try { return await fn(); }
     catch (e) {
@@ -2773,9 +2776,9 @@ async function runAnalysis(customer, tickets) {
       return { ...analyzeTickets(customer, tickets), analysisMethod: 'keywords' };
     }
   };
-  if (process.env.GEMINI_API_KEY)     return tryAI(() => geminiAnalyzeTickets(customer, tickets));
-  if (process.env.ANTHROPIC_API_KEY)  return tryAI(() => claudeAnalyzeTickets(customer, tickets));
-  if (process.env.OPENAI_API_KEY)     return tryAI(() => openaiAnalyzeTickets(customer, tickets));
+  if (process.env.GEMINI_API_KEY)     return tryAI(() => geminiAnalyzeTickets(customer, tickets, cutoff));
+  if (process.env.ANTHROPIC_API_KEY)  return tryAI(() => claudeAnalyzeTickets(customer, tickets, cutoff));
+  if (process.env.OPENAI_API_KEY)     return tryAI(() => openaiAnalyzeTickets(customer, tickets, cutoff));
   return { ...analyzeTickets(customer, tickets), analysisMethod: 'keywords' };
 }
 
@@ -2953,7 +2956,7 @@ async function runAuditJob(jobId, rows) {
       baseResult.ticketSubjects = tickets.map(t => t.subject || '');
       baseResult.ticketDates = tickets.map(t => t.created_at?.slice(0, 10) || '');
 
-      const analysis = await runAnalysis(row, tickets);
+      const analysis = await runAnalysis(row, tickets, cutoff);
       baseResult.category = analysis.category;
       baseResult.competitorName = analysis.competitorName || null;
       baseResult.summary = analysis.summary;
@@ -2963,12 +2966,20 @@ async function runAuditJob(jobId, rows) {
       baseResult.analysisMethod = analysis.analysisMethod || 'ai';
 
       // Exit date: use AI-extracted date if available, otherwise fall back to most recent ticket
+      const sortedTickets = tickets.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      const latestTicket = sortedTickets[0];
       if (analysis.estimatedCancellationDate) {
-        baseResult.estimatedCancellationDate = analysis.estimatedCancellationDate;
-        baseResult.exitDateSource = 'explicit';
+        // Clamp: if filter active and AI date is before cutoff, use last ticket instead
+        const aiDate = new Date(analysis.estimatedCancellationDate + 'T00:00:00');
+        if (cutoff && aiDate < cutoff) {
+          baseResult.estimatedCancellationDate = latestTicket?.created_at?.slice(0, 10) || null;
+          baseResult.exitDateSource = baseResult.estimatedCancellationDate ? 'last_ticket' : null;
+        } else {
+          baseResult.estimatedCancellationDate = analysis.estimatedCancellationDate;
+          baseResult.exitDateSource = 'explicit';
+        }
       } else {
-        const latest = tickets.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-        baseResult.estimatedCancellationDate = latest?.created_at?.slice(0, 10) || null;
+        baseResult.estimatedCancellationDate = latestTicket?.created_at?.slice(0, 10) || null;
         baseResult.exitDateSource = baseResult.estimatedCancellationDate ? 'last_ticket' : null;
       }
 
@@ -3063,9 +3074,9 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
 
     // Apply lookback filter
     const lookbackDays = parseInt(req.body.lookbackDays, 10) || null;
-    if (lookbackDays) {
-      const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
-      tickets = tickets.filter(t => t.created_at && new Date(t.created_at) >= cutoff);
+    const lookbackCutoff = lookbackDays ? new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000) : null;
+    if (lookbackCutoff) {
+      tickets = tickets.filter(t => t.created_at && new Date(t.created_at) >= lookbackCutoff);
       if (tickets.length === 0) {
         return res.json({ ...baseResult, category: 'Unknown / Unspecified', summary: `No tickets found within the selected time window. This customer may have cancelled outside this period.`, confidence: 'Low', reasoning: 'All tickets predated the lookback window.', status: 'done' });
       }
@@ -3091,12 +3102,19 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
       lastDate: last?.created_at?.slice(0, 10) || null,
     };
 
-    const analysis = await runAnalysis(row, tickets);
+    const analysis = await runAnalysis(row, tickets, lookbackCutoff);
+    const sortedLookup = tickets.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const latestLookup = sortedLookup[0];
     let exitDate = analysis.estimatedCancellationDate || null;
     let exitDateSource = exitDate ? 'explicit' : null;
-    if (!exitDate) {
-      const latest = tickets.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-      exitDate = latest?.created_at?.slice(0, 10) || null;
+    if (exitDate) {
+      // Clamp: if filter active and AI date is before cutoff, use last ticket instead
+      if (lookbackCutoff && new Date(exitDate + 'T00:00:00') < lookbackCutoff) {
+        exitDate = latestLookup?.created_at?.slice(0, 10) || null;
+        exitDateSource = exitDate ? 'last_ticket' : null;
+      }
+    } else {
+      exitDate = latestLookup?.created_at?.slice(0, 10) || null;
       exitDateSource = exitDate ? 'last_ticket' : null;
     }
     return res.json({
