@@ -2872,6 +2872,8 @@ async function runAuditJob(jobId, rows) {
   if (!job) return;
 
   const CONCURRENCY = 3;
+  const lookbackMs = job.lookbackDays ? job.lookbackDays * 24 * 60 * 60 * 1000 : null;
+  const cutoff = lookbackMs ? new Date(Date.now() - lookbackMs) : null;
 
   async function processRow(rawRow) {
     const row = normalizeAuditorRow(rawRow);
@@ -2931,11 +2933,21 @@ async function runAuditJob(jobId, rows) {
         }
       }
 
-      const tickets = Array.from(ticketMap.values());
+      let tickets = Array.from(ticketMap.values());
       if (tickets.length === 0) {
         job.results.push({ ...baseResult, category: 'Unknown / Unspecified', summary: 'No tickets found in Zendesk for this customer.', confidence: 'Low', reasoning: 'No ticket data available.', status: 'done' });
         job.done++;
         return;
+      }
+
+      // Apply lookback filter
+      if (cutoff) {
+        tickets = tickets.filter(t => t.created_at && new Date(t.created_at) >= cutoff);
+        if (tickets.length === 0) {
+          job.results.push({ ...baseResult, category: 'Unknown / Unspecified', summary: `No tickets found within the selected time window. Customer may have cancelled outside this period.`, confidence: 'Low', reasoning: 'All tickets predated the lookback window.', status: 'done' });
+          job.done++;
+          return;
+        }
       }
 
       baseResult.ticketSubjects = tickets.map(t => t.subject || '');
@@ -3044,9 +3056,19 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
       }
     }
 
-    const tickets = Array.from(ticketMap.values());
+    let tickets = Array.from(ticketMap.values());
     if (tickets.length === 0) {
       return res.json({ ...baseResult, category: 'Unknown / Unspecified', summary: 'No tickets found in Zendesk for this customer.', confidence: 'Low', reasoning: 'No ticket data available.', status: 'done' });
+    }
+
+    // Apply lookback filter
+    const lookbackDays = parseInt(req.body.lookbackDays, 10) || null;
+    if (lookbackDays) {
+      const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+      tickets = tickets.filter(t => t.created_at && new Date(t.created_at) >= cutoff);
+      if (tickets.length === 0) {
+        return res.json({ ...baseResult, category: 'Unknown / Unspecified', summary: `No tickets found within the selected time window. This customer may have cancelled outside this period.`, confidence: 'Low', reasoning: 'All tickets predated the lookback window.', status: 'done' });
+      }
     }
 
     baseResult.ticketSubjects = tickets.map(t => t.subject || '');
@@ -3110,8 +3132,9 @@ app.post('/api/zendesk-auditor/run', requireRole('super_admin', 'zendesk_auditor
 
   if (!rows || rows.length === 0) return res.status(400).json({ error: 'Spreadsheet is empty or could not be parsed' });
 
+  const lookbackDays = parseInt(req.body.lookbackDays, 10) || null;
   const jobId = Date.now().toString(36);
-  auditorJobs.set(jobId, { status: 'running', results: [], total: rows.length, done: 0, error: null });
+  auditorJobs.set(jobId, { status: 'running', results: [], total: rows.length, done: 0, error: null, lookbackDays: lookbackDays || null });
 
   // Fire and forget — results stream via SSE
   runAuditJob(jobId, rows).catch(err => {

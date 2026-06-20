@@ -181,6 +181,23 @@ function TrendChart({ results }) {
   );
 }
 
+const LOOKBACK_OPTIONS = [
+  { value: '',    label: 'All time' },
+  { value: '30',  label: 'Last 30 days' },
+  { value: '90',  label: 'Last 90 days' },
+  { value: '180', label: 'Last 6 months' },
+  { value: '365', label: 'Last 12 months' },
+  { value: '730', label: 'Last 2 years' },
+];
+
+function LookbackSelect({ value, onChange }) {
+  return (
+    <select value={value} onChange={e => onChange(e.target.value)} style={{ minWidth: 140 }}>
+      {LOOKBACK_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
 function exportCsv(results) {
   const headers = ['Account Name', 'Email Domain', 'Matched Org', 'Match Confidence', 'Match Type', 'Category', 'Competitor / AI Name', 'Confidence', 'Summary', 'Reasoning', 'Est. Exit Date', 'Ticket IDs', 'Ticket Subjects', 'Ticket Dates', 'Analysis Method', 'Status'];
   const needsCompetitor = r => r.category === 'Went to Competitor' || r.category === 'Switched to AI Service';
@@ -464,6 +481,7 @@ export default function ZendeskAuditor() {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
   const readerRef = useRef(null);
+  const [lookbackDays, setLookbackDays] = useState('');  // '' = all time
   const [singleForm, setSingleForm] = useState({ accountName: '', customerEmail: '', notes: '' });
   const [singleResult, setSingleResult] = useState(null);
   const [singleLoading, setSingleLoading] = useState(false);
@@ -561,6 +579,7 @@ export default function ZendeskAuditor() {
 
     const formData = new FormData();
     formData.append('file', file);
+    if (lookbackDays) formData.append('lookbackDays', lookbackDays);
 
     try {
       const resp = await api.post('/api/zendesk-auditor/run', formData, {
@@ -604,7 +623,7 @@ export default function ZendeskAuditor() {
     }
     setSingleLoading(true);
     try {
-      const resp = await api.post('/api/zendesk-auditor/lookup', singleForm);
+      const resp = await api.post('/api/zendesk-auditor/lookup', { ...singleForm, lookbackDays: lookbackDays || undefined });
       setSingleResult(resp.data);
     } catch (err) {
       setSingleError(err.response?.data?.error || err.message);
@@ -682,14 +701,20 @@ export default function ZendeskAuditor() {
                     />
                   </div>
                 </div>
-                <div className="form-row" style={{ marginBottom: 16 }}>
-                  <label className="field-label">Notes / Ticket IDs <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
-                  <input
-                    type="text"
-                    value={singleForm.notes}
-                    onChange={e => setSingleForm(f => ({ ...f, notes: e.target.value }))}
-                    placeholder="Ticket #314123 or cancellation context"
-                  />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                  <div className="form-row">
+                    <label className="field-label">Notes / Ticket IDs <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
+                    <input
+                      type="text"
+                      value={singleForm.notes}
+                      onChange={e => setSingleForm(f => ({ ...f, notes: e.target.value }))}
+                      placeholder="Ticket #314123 or cancellation context"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label className="field-label">Look back</label>
+                    <LookbackSelect value={lookbackDays} onChange={setLookbackDays} />
+                  </div>
                 </div>
                 <button
                   className="btn btn-primary"
@@ -769,9 +794,15 @@ export default function ZendeskAuditor() {
             </div>
           )}
 
-          <button className="btn btn-primary" onClick={handleRunAudit} disabled={!file}>
-            Run Audit
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" onClick={handleRunAudit} disabled={!file}>
+              Run Audit
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label className="field-label" style={{ margin: 0, whiteSpace: 'nowrap' }}>Look back</label>
+              <LookbackSelect value={lookbackDays} onChange={setLookbackDays} />
+            </div>
+          </div>
         </div>
         )}
       </div>
@@ -793,7 +824,7 @@ export default function ZendeskAuditor() {
           <div className="page-sub">
             {isRunning
               ? `Analyzing… ${progress.done} of ${progress.total} complete`
-              : `${results.length} customers · ${doneCount} analyzed · ${noMatchCount} no match · ${errorCount} error`}
+              : `${results.length} customers · ${doneCount} analyzed · ${noMatchCount} no match · ${errorCount} error${lookbackDays ? ` · ${LOOKBACK_OPTIONS.find(o => o.value === lookbackDays)?.label || ''}` : ''}`}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
