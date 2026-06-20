@@ -2882,7 +2882,8 @@ async function runAuditJob(jobId, rows) {
       customerEmail: row.customerEmail || '',
       matchedOrg: null, matchConfidence: null, matchType: null,
       category: null, competitorName: null, summary: null,
-      confidence: null, reasoning: null, estimatedCancellationDate: null,
+      confidence: null, reasoning: null,
+      estimatedCancellationDate: null, exitDateSource: null,
       supportingTicketIds: [], ticketSubjects: [], ticketDates: [],
       status: 'done', error: null,
       zdSubdomain: process.env.ZENDESK_SUBDOMAIN || '',
@@ -2946,9 +2947,18 @@ async function runAuditJob(jobId, rows) {
       baseResult.summary = analysis.summary;
       baseResult.confidence = analysis.confidence;
       baseResult.reasoning = analysis.reasoning;
-      baseResult.estimatedCancellationDate = analysis.estimatedCancellationDate || null;
       baseResult.supportingTicketIds = analysis.supporting_ticket_ids || [];
       baseResult.analysisMethod = analysis.analysisMethod || 'ai';
+
+      // Exit date: use AI-extracted date if available, otherwise fall back to most recent ticket
+      if (analysis.estimatedCancellationDate) {
+        baseResult.estimatedCancellationDate = analysis.estimatedCancellationDate;
+        baseResult.exitDateSource = 'explicit';
+      } else {
+        const latest = tickets.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+        baseResult.estimatedCancellationDate = latest?.created_at?.slice(0, 10) || null;
+        baseResult.exitDateSource = baseResult.estimatedCancellationDate ? 'last_ticket' : null;
+      }
 
       job.results.push({ ...baseResult, status: 'done' });
     } catch (err) {
@@ -3060,6 +3070,13 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
     };
 
     const analysis = await runAnalysis(row, tickets);
+    let exitDate = analysis.estimatedCancellationDate || null;
+    let exitDateSource = exitDate ? 'explicit' : null;
+    if (!exitDate) {
+      const latest = tickets.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+      exitDate = latest?.created_at?.slice(0, 10) || null;
+      exitDateSource = exitDate ? 'last_ticket' : null;
+    }
     return res.json({
       ...baseResult,
       category: analysis.category,
@@ -3067,7 +3084,8 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
       summary: analysis.summary,
       confidence: analysis.confidence,
       reasoning: analysis.reasoning,
-      estimatedCancellationDate: analysis.estimatedCancellationDate || null,
+      estimatedCancellationDate: exitDate,
+      exitDateSource,
       supportingTicketIds: analysis.supporting_ticket_ids || [],
       analysisMethod: analysis.analysisMethod || 'ai',
       status: 'done',

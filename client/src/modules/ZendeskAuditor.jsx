@@ -302,10 +302,17 @@ function ResultRow({ r, index }) {
       <td style={{ padding: '10px 12px', fontSize: 13 }}>
         <TicketLinks ids={r.supportingTicketIds} subjects={r.ticketSubjects} zdSubdomain={zdSubdomain} />
       </td>
-      <td style={{ padding: '10px 12px', fontSize: 12, whiteSpace: 'nowrap', color: r.estimatedCancellationDate ? 'var(--text)' : 'var(--muted)' }}>
-        {r.estimatedCancellationDate
-          ? new Date(r.estimatedCancellationDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-          : '—'}
+      <td style={{ padding: '10px 12px', fontSize: 12, whiteSpace: 'nowrap' }}>
+        {r.estimatedCancellationDate ? (
+          <div>
+            <div style={{ color: 'var(--text)' }}>
+              {new Date(r.estimatedCancellationDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </div>
+            {r.exitDateSource === 'last_ticket' && (
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 1 }}>last ticket</div>
+            )}
+          </div>
+        ) : <span style={{ color: 'var(--muted)' }}>—</span>}
       </td>
       <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700, color: statusColor, whiteSpace: 'nowrap' }}>
         {r.status === 'done' ? 'Done' : r.status === 'no_match' ? 'No Match' : 'Error'}
@@ -400,7 +407,9 @@ function SingleResult({ r, onClear }) {
                   <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>
                     {new Date(r.estimatedCancellationDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>est. exit date</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    {r.exitDateSource === 'last_ticket' ? 'last ticket on file' : 'est. exit date'}
+                  </div>
                 </div>
               )}
               {/* Ticket count */}
