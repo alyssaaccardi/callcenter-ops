@@ -2738,9 +2738,10 @@ Critical rules:
 - PRICE RULE: If the customer is leaving for a competitor OR hiring staff/AI primarily because it is cheaper, the root reason is "Price Too High". Only use "Went to Competitor", "Hired Staff", or "Switched to AI Service" when price is NOT the stated driver.
 - CLOSED PRACTICE = the firm is permanently shutting down, the attorney is retiring, or the business is dissolving. A seasonal slowdown (tax season ended, slow summer, slow winter, fewer clients temporarily) is NOT "Closed Practice" — use "Not Enough Call Volume" instead. A CPA or accountant saying their busy season is over is "Not Enough Call Volume", not "Closed Practice".
 - SUMMARY RULE: Write a summary specific to THIS customer's actual ticket content. Do NOT copy or paraphrase summaries from other customers. Each summary must reference something specific to this customer's own words or situation.
+- QUALITY SUBCATEGORY: When category is "Quality", you must also set qualitySubcategory to the most specific type: "Missed Calls", "Message / Intake Errors", "Receptionist Conduct", or "General Quality". Use exactly one of these strings.
 
 Respond with ONLY valid JSON, no markdown:
-{"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>","relevantTicketIds":[<1-2 ticket IDs from above that most clearly show the reason, e.g. 12345>],"estimatedCancellationDate":"<YYYY-MM-DD or null>"}
+{"category":"<category>","qualitySubcategory":"<Missed Calls|Message / Intake Errors|Receptionist Conduct|General Quality or null>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>","relevantTicketIds":[<1-2 ticket IDs from above that most clearly show the reason, e.g. 12345>],"estimatedCancellationDate":"<YYYY-MM-DD or null>"}
 
 estimatedCancellationDate rules: Look for the date the customer said they want to cancel or their service ended — phrases like "effective [date]", "as of [date]", "cancelling on [date]", "end of [month]", "final day [date]", "last day [date]". If only month/year given, use the last day of that month. If no explicit date, use the date of the most relevant cancellation ticket. Return null only if you cannot determine any date.`;
 }
@@ -2774,8 +2775,13 @@ function parseAuditResponse(raw, ticketData) {
   const rawDate = String(parsed.estimatedCancellationDate ?? '').trim();
   const estimatedCancellationDate = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : null;
 
+  const QUALITY_SUBCATS = new Set(['Missed Calls', 'Message / Intake Errors', 'Receptionist Conduct', 'General Quality']);
+  const rawSubcat = String(parsed.qualitySubcategory ?? '').trim();
+  const qualitySubcategory = (category === 'Quality' && QUALITY_SUBCATS.has(rawSubcat)) ? rawSubcat : (category === 'Quality' ? 'General Quality' : null);
+
   return {
     category,
+    qualitySubcategory,
     competitorName,
     confidence,
     summary: parsed.summary || '',
@@ -2829,8 +2835,9 @@ async function runAnalysis(customer, tickets, cutoff) {
       // Fall back for rate limits, server errors, network failures, JSON parse errors, etc.
       // Only re-throw for auth errors (401/403) which indicate a misconfigured key
       if (status === 401 || status === 403) throw e;
+      const isQuota = status === 429;
       console.warn(`[auditor] AI error (${status || e.message}), falling back to keywords`);
-      return { ...analyzeTickets(customer, tickets), analysisMethod: 'keywords' };
+      return { ...analyzeTickets(customer, tickets), analysisMethod: 'keywords', keywordFallbackReason: isQuota ? 'quota' : 'error' };
     }
   };
   if (process.env.GEMINI_API_KEY)     return tryAI(() => geminiAnalyzeTickets(customer, tickets, cutoff));
@@ -3029,8 +3036,24 @@ async function runAuditJob(jobId, rows) {
       baseResult.ticketSubjects = tickets.map(t => t.subject || '');
       baseResult.ticketDates = tickets.map(t => t.created_at?.slice(0, 10) || '');
 
+      // CSAT pulse — same logic as single lookup
+      const ratedTickets = tickets.filter(t => t.satisfactionRating && t.satisfactionRating.score !== 'unoffered');
+      const csatGood = ratedTickets.filter(t => t.satisfactionRating.score === 'good').length;
+      const csatBad  = ratedTickets.filter(t => t.satisfactionRating.score === 'bad').length;
+      const lastRatedTicket = ratedTickets.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+      baseResult.csat = {
+        total: ratedTickets.length,
+        good: csatGood,
+        bad: csatBad,
+        pct: ratedTickets.length > 0 ? Math.round((csatGood / ratedTickets.length) * 100) : null,
+        lastScore: lastRatedTicket?.satisfactionRating?.score || null,
+        lastComment: lastRatedTicket?.satisfactionRating?.comment || null,
+        lastDate: lastRatedTicket?.created_at?.slice(0, 10) || null,
+      };
+
       const analysis = await runAnalysis(row, tickets, cutoff);
       baseResult.category = analysis.category;
+      baseResult.qualitySubcategory = analysis.qualitySubcategory || null;
       baseResult.competitorName = analysis.competitorName || null;
       baseResult.summary = analysis.summary;
       baseResult.confidence = analysis.confidence;

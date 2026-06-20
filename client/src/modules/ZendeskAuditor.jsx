@@ -425,6 +425,11 @@ function ResultRow({ r, index }) {
                 {r.competitorName || 'Unknown'}
               </div>
             )}
+            {r.category === 'Quality' && r.qualitySubcategory && r.qualitySubcategory !== 'General Quality' && (
+              <div style={{ fontSize: 11, color: '#dc2626', marginTop: 3, fontWeight: 600 }}>
+                {r.qualitySubcategory}
+              </div>
+            )}
           </div>
         ) : <span style={{ color: 'var(--muted)', fontSize: 12 }}>—</span>}
       </td>
@@ -448,6 +453,23 @@ function ResultRow({ r, index }) {
             )}
           </div>
         ) : <span style={{ color: 'var(--muted)' }}>—</span>}
+      </td>
+      <td style={{ padding: '10px 12px', fontSize: 12, whiteSpace: 'nowrap' }}>
+        {r.csat && r.csat.total > 0 ? (
+          <div>
+            <div style={{
+              fontWeight: 800, fontSize: 14,
+              color: r.csat.pct >= 80 ? '#15803d' : r.csat.pct >= 60 ? '#b45309' : '#dc2626',
+            }}>
+              {r.csat.pct}%
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 1 }}>
+              {r.csat.good}↑ {r.csat.bad}↓ · {r.csat.total} rated
+            </div>
+          </div>
+        ) : (
+          <span style={{ color: 'var(--muted)', fontSize: 12 }}>—</span>
+        )}
       </td>
       <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700, color: statusColor, whiteSpace: 'nowrap' }}>
         {r.status === 'done' ? 'Done' : r.status === 'no_match' ? 'No Match' : 'Error'}
@@ -511,6 +533,11 @@ function SingleResult({ r, onClear }) {
             {needsCompetitor && (
               <span style={{ fontSize: 12, fontWeight: 600, color: r.competitorName ? 'var(--text)' : 'var(--muted)' }}>
                 {r.competitorName || 'Unknown'}
+              </span>
+            )}
+            {r.category === 'Quality' && r.qualitySubcategory && r.qualitySubcategory !== 'General Quality' && (
+              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'rgba(239,68,68,0.1)', color: '#dc2626' }}>
+                {r.qualitySubcategory}
               </span>
             )}
             {r.confidence && <Badge label={r.confidence} colors={CONFIDENCE_COLORS} />}
@@ -930,6 +957,7 @@ export default function ZendeskAuditor() {
   const noMatchCount = results.filter(r => r.status === 'no_match').length;
   const errorCount   = results.filter(r => r.status === 'error').length;
   const keywordCount = results.filter(r => r.analysisMethod === 'keywords').length;
+  const quotaHit = results.some(r => r.keywordFallbackReason === 'quota');
   const isRunning    = view === 'running';
 
   // Client-side date + category filter applied after the run
@@ -1086,10 +1114,15 @@ export default function ZendeskAuditor() {
           <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>⚠</span>
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: '#b45309', marginBottom: 3 }}>
-              AI quota reached — {keywordCount} {keywordCount === 1 ? 'row was' : 'rows were'} categorized using keyword matching
+              {quotaHit
+                ? `AI quota reached — ${keywordCount} ${keywordCount === 1 ? 'row was' : 'rows were'} categorized using keyword matching`
+                : `AI temporarily unavailable — ${keywordCount} ${keywordCount === 1 ? 'row was' : 'rows were'} categorized using keyword matching`}
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
-              Keyword matching scans ticket text for known terms and patterns — it works well for clear-cut cases but lacks the context and nuance of AI analysis. Results marked <strong style={{ color: '#b45309' }}>KEYWORD MATCH</strong> should be reviewed manually for accuracy. The Gemini free tier quota resets daily at midnight Pacific Time — re-run the audit after midnight and AI analysis will resume automatically.
+              Keyword matching scans ticket text for known terms and patterns — results marked <strong style={{ color: '#b45309' }}>KEYWORD MATCH</strong> should be reviewed manually.
+              {quotaHit
+                ? ' The Gemini free tier daily quota has been reached — re-run after midnight Pacific Time for full AI analysis.'
+                : ' This was likely a transient error — re-running the audit should resolve it.'}
             </div>
           </div>
         </div>
@@ -1165,7 +1198,7 @@ export default function ZendeskAuditor() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: 'var(--surface2, rgba(0,0,0,0.03))' }}>
-                    {['Customer', 'Matched Org', 'Category', 'Confidence', 'Summary', 'Tickets', 'Exit Date', 'Status'].map(h => (
+                    {['Customer', 'Matched Org', 'Category', 'Confidence', 'Summary', 'Tickets', 'Exit Date', 'CSAT', 'Status'].map(h => (
                       <th key={h} style={{ padding: '10px 12px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
