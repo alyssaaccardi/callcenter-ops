@@ -2295,43 +2295,34 @@ async function zdAuditorGet(url, params = {}) {
 
 async function matchCustomer(row) {
   const base = zdBase();
-
-  // Learnings from production data:
-  // - Domain wildcard search (email:*@domain.com) returns 0 for ALL domains in this Zendesk instance — skip it
-  // - Org search (organizations/search) also returns 0 consistently — skip it
-  // - The CSV email often belongs to a secondary contact at the firm; the cancellation ticket
-  //   may have been filed by a different person. Searching by BOTH email AND firm name and
-  //   collecting all matched users is the only reliable approach.
-
-  const userSet = new Map(); // userId -> user object (deduplicates across both searches)
-
-  // 1. Exact email search
-  if (row.customerEmail) {
-    try {
-      const data = await zdAuditorGet(`${base}/users/search`, { query: `email:${row.customerEmail}` });
-      await auditorDelay(80);
-      for (const u of (data.users || [])) userSet.set(u.id, u);
-    } catch (e) { /* fall through */ }
-  }
-
-  // 2. Firm/account name search — catches cases where the CSV email is a secondary contact
-  //    but the cancellation ticket was filed by someone else at the same firm.
-  //    Strip special chars (&, commas, parens, quotes) that break Zendesk search.
+  const userSet = new Map();
   const nameQuery = row.accountName || row.orgName;
+
+  // Run email and name searches in parallel
+  const searches = [];
+  if (row.customerEmail) {
+    searches.push(
+      zdAuditorGet(`${base}/users/search`, { query: `email:${row.customerEmail}` })
+        .then(data => { for (const u of (data.users || [])) userSet.set(u.id, u); })
+        .catch(() => {})
+    );
+  }
   if (nameQuery) {
     const clean = nameQuery.replace(/[&,.()"'\/\\]/g, ' ').replace(/\s+/g, ' ').trim();
-    const words = clean.split(' ').filter(w => w.length > 2);
-    const q = words.slice(0, 4).join(' ');
+    const q = clean.split(' ').filter(w => w.length > 2).slice(0, 4).join(' ');
     if (q.length >= 3) {
-      try {
-        const data = await zdAuditorGet(`${base}/users/search`, { query: q, per_page: 10 });
-        await auditorDelay(80);
-        for (const u of (data.users || [])) {
-          if (u.role !== 'agent' && u.role !== 'admin') userSet.set(u.id, u);
-        }
-      } catch (e) { /* fall through */ }
+      searches.push(
+        zdAuditorGet(`${base}/users/search`, { query: q, per_page: 10 })
+          .then(data => {
+            for (const u of (data.users || [])) {
+              if (u.role !== 'agent' && u.role !== 'admin') userSet.set(u.id, u);
+            }
+          })
+          .catch(() => {})
+      );
     }
   }
+  await Promise.all(searches);
 
   if (userSet.size === 0) return null;
 
@@ -2343,7 +2334,6 @@ async function matchCustomer(row) {
   if (zdOrgId) {
     try {
       const orgData = await zdAuditorGet(`${base}/organizations/${zdOrgId}`);
-      await auditorDelay(80);
       zdOrgName = orgData.organization?.name || zdOrgName;
     } catch (e) { /* fall through */ }
   }
@@ -2362,7 +2352,6 @@ async function fetchTicketComments(ticketId) {
   const base = zdBase();
   try {
     const data = await zdAuditorGet(`${base}/tickets/${ticketId}/comments`);
-    await auditorDelay(80);
     return (data.comments || []).map(c => ({ body: c.body, public: c.public }));
   } catch (e) {
     return [];
@@ -2373,7 +2362,6 @@ async function fetchTicketById(ticketId) {
   const base = zdBase();
   try {
     const data = await zdAuditorGet(`${base}/tickets/${ticketId}`);
-    await auditorDelay(80);
     const t = data.ticket;
     const comments = await fetchTicketComments(t.id);
     return { id: t.id, subject: t.subject, created_at: t.created_at, status: t.status, comments };
@@ -2386,29 +2374,26 @@ async function fetchTicketById(ticketId) {
 async function getRecentSolvedTickets(match, limit) {
   const base = zdBase();
   const ticketMap = new Map();
+  const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 3) : (match.zdUserId ? [match.zdUserId] : []);
 
-  // Org-level endpoint — fast but often returns 0 for accounts whose tickets are indexed under users
+  const fetches = [];
   if (match.zdOrgId) {
-    try {
-      const data = await zdAuditorGet(`${base}/organizations/${match.zdOrgId}/tickets`, {
+    fetches.push(
+      zdAuditorGet(`${base}/organizations/${match.zdOrgId}/tickets`, {
         sort_by: 'created_at', sort_order: 'desc', per_page: limit,
-      });
-      await auditorDelay(80);
-      for (const t of (data.tickets || [])) ticketMap.set(t.id, t);
-    } catch (e) { /* fall through */ }
+      }).then(data => { for (const t of (data.tickets || [])) ticketMap.set(t.id, t); }).catch(() => {})
+    );
   }
-
-  // Always also query per-user — catches cases where org endpoint returns 0 (common for Ring Savvy / older accounts)
-  const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 5) : (match.zdUserId ? [match.zdUserId] : []);
   for (const userId of userIds) {
-    try {
-      const data = await zdAuditorGet(`${base}/users/${userId}/tickets/requested`, {
+    fetches.push(
+      zdAuditorGet(`${base}/users/${userId}/tickets/requested`, {
         sort_by: 'created_at', sort_order: 'desc', per_page: limit,
-      });
-      await auditorDelay(80);
-      for (const t of (data.tickets || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
-    } catch (e) { /* continue */ }
+      }).then(data => {
+        for (const t of (data.tickets || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
+      }).catch(() => {})
+    );
   }
+  await Promise.all(fetches);
 
   const sorted = [...ticketMap.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, limit);
   return Promise.all(sorted.map(async t => {
@@ -2421,30 +2406,29 @@ async function getCancellationKeywordTickets(match) {
   const base = zdBase();
   const keywords = '(cancel OR cancellation OR terminate OR "close account" OR competitor OR refund OR "cancel service")';
   const ticketMap = new Map();
+  const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 3) : (match.zdUserId ? [match.zdUserId] : []);
 
+  const searches = [];
   if (match.zdOrgId) {
-    try {
-      const data = await zdAuditorGet(`${base}/search`, {
+    searches.push(
+      zdAuditorGet(`${base}/search`, {
         query: `${keywords} organization_id:${match.zdOrgId} type:ticket`,
         sort_by: 'created_at', sort_order: 'desc', per_page: 5,
-      });
-      await auditorDelay(80);
-      for (const t of (data.results || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
-    } catch (e) { /* fall through */ }
+      }).then(data => { for (const t of (data.results || [])) ticketMap.set(t.id, t); }).catch(() => {})
+    );
   }
 
-  // Always also search across all user IDs — catches cases where org search misses tickets
-  const userIds = match.zdUserIds?.length ? match.zdUserIds.slice(0, 5) : (match.zdUserId ? [match.zdUserId] : []);
   for (const userId of userIds) {
-    try {
-      const data = await zdAuditorGet(`${base}/search`, {
+    searches.push(
+      zdAuditorGet(`${base}/search`, {
         query: `${keywords} requester_id:${userId} type:ticket`,
         sort_by: 'created_at', sort_order: 'desc', per_page: 5,
-      });
-      await auditorDelay(80);
-      for (const t of (data.results || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
-    } catch (e) { /* continue */ }
+      }).then(data => {
+        for (const t of (data.results || [])) { if (!ticketMap.has(t.id)) ticketMap.set(t.id, t); }
+      }).catch(() => {})
+    );
   }
+  await Promise.all(searches);
 
   const tickets = [...ticketMap.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8);
   return Promise.all(tickets.map(async t => {
@@ -2533,6 +2517,10 @@ const CATEGORY_RULES = [
     [/interactive voice response/i, 5], [/phone tree/i, 4],
     [/automated (phone|answering|call) system/i, 4],
     [/(set up|implement(ed)?|got|using) (an?\s+)?(auto|automated|IVR)/i, 4],
+    [/(phone|call) routing (is\s+)?(working|set up|configured|better|fixed)/i, 5],
+    [/(set up|configured|updated) (their|our|my)?\s*(phone|call) routing/i, 5],
+    [/internal (system|phone|call|routing)/i, 4],
+    [/no longer need (live|the)?\s*(answering|service)/i, 4],
   ]},
   { category: 'Missed Calls', patterns: [
     [/miss(ing|ed) calls?/i, 5], [/calls? (went|going) to voicemail/i, 5],
@@ -2683,8 +2671,9 @@ Critical rules:
 - A ticket about integrating with or setting up our service is NOT a cancellation reason.
 - "Switched to AI Service" = replaced us with an AI answering/receptionist tool
 - "Went to Competitor" = switched to another HUMAN answering service
-- "Hired Staff" = hired a human in-house receptionist or employee — NOT an AI tool
-- "Wanted Features/Services Not Offered" = wanted outbound calling, specific integrations, or capabilities we don't have
+- "Hired Staff" = specifically hired a HUMAN in-house receptionist, front desk person, or employee to answer phones — NOT an AI, NOT a phone system
+- "IVR / Auto Attendant" = customer set up their own automated phone system, call routing, internal phone routing, auto-attendant, or IVR — this includes ANY case where the customer says their phone routing is working now, they set up an internal system, they configured their own call handling, or they no longer need live answering because their system handles it. Do NOT confuse this with "Hired Staff" (which requires a human hire).
+- "Wanted Features/Services Not Offered" = wanted a specific capability or integration that we simply don't offer — NOT an issue with their own setup or routing
 - "Does Not See Value in Service" = not enough calls to justify cost, or service didn't meet expectations
 - Agent asking to turn off call forwarding = post-cancellation cleanup. NOT a reason.
 - Base your answer on the customer's actual words in [Message] blocks, not agent templates or [Internal note] blocks.
@@ -2882,70 +2871,58 @@ async function runAuditJob(jobId, rows) {
   const job = auditorJobs.get(jobId);
   if (!job) return;
 
-  for (const rawRow of rows) {
+  const CONCURRENCY = 3;
+
+  async function processRow(rawRow) {
     const row = normalizeAuditorRow(rawRow);
     const explicitTicketIds = parseTicketIdsFromRow(rawRow);
     const baseResult = {
       accountName: row.accountName || '',
       emailDomain: row.emailDomain || '',
       customerEmail: row.customerEmail || '',
-      matchedOrg: null,
-      matchConfidence: null,
-      matchType: null,
-      category: null,
-      competitorName: null,
-      summary: null,
-      confidence: null,
-      reasoning: null,
-      estimatedCancellationDate: null,
-      supportingTicketIds: [],
-      ticketSubjects: [],
-      ticketDates: [],
-      status: 'done',
-      error: null,
+      matchedOrg: null, matchConfidence: null, matchType: null,
+      category: null, competitorName: null, summary: null,
+      confidence: null, reasoning: null, estimatedCancellationDate: null,
+      supportingTicketIds: [], ticketSubjects: [], ticketDates: [],
+      status: 'done', error: null,
       zdSubdomain: process.env.ZENDESK_SUBDOMAIN || '',
     };
 
     try {
-      // Phase 0 — fetch any ticket IDs explicitly referenced in notes (e.g. "See ticket #331182")
       const ticketMap = new Map();
-      console.log(`[auditor] row "${row.accountName || row.orgName || '?'}" — explicitTicketIds: [${explicitTicketIds.join(', ')}]`);
       for (const tid of explicitTicketIds) {
         const t = await fetchTicketById(tid);
         if (t) ticketMap.set(t.id, t);
       }
 
-      // If explicit tickets found, skip expensive customer search — we already have what we need
       if (ticketMap.size > 0) {
         baseResult.matchedOrg = row.accountName || row.orgName || 'Unknown';
         baseResult.matchConfidence = 'High';
         baseResult.matchType = 'noteTicketId';
       } else {
-        // Match customer in Zendesk
         const match = await matchCustomer(row);
-        console.log(`[auditor] matchCustomer("${row.accountName || row.orgName}") → ${match ? `type:${match.matchType} org:${match.zdOrgName} orgId:${match.zdOrgId} userIds:[${match.zdUserIds?.join(',')}]` : 'null'}`);
+        console.log(`[auditor] "${row.accountName || row.orgName || '?'}" → ${match ? `org:${match.zdOrgName}` : 'no_match'}`);
 
         if (!match) {
           job.results.push({ ...baseResult, status: 'no_match' });
           job.done++;
-          continue;
+          return;
         }
 
         baseResult.matchedOrg = match.zdOrgName;
         baseResult.matchConfidence = match.matchConfidence;
         baseResult.matchType = match.matchType;
 
-        // Phase 1 — recent tickets for this customer
-        for (const t of await getRecentSolvedTickets(match, 5)) {
+        // Phase 1 + Phase 2 in parallel
+        const [phase1, phase2] = await Promise.all([
+          getRecentSolvedTickets(match, 5),
+          getCancellationKeywordTickets(match),
+        ]);
+        for (const t of [...phase1, ...phase2]) {
           if (!ticketMap.has(t.id)) ticketMap.set(t.id, t);
         }
 
-        // Phase 2 — cancellation keyword search
-        for (const t of await getCancellationKeywordTickets(match)) {
-          if (!ticketMap.has(t.id)) ticketMap.set(t.id, t);
-        }
-
-        // Phase 3 — historical sweep if still < 3 tickets
+        // Phase 3 — sweep if still thin
         if (ticketMap.size < 3) {
           for (const t of await getRecentSolvedTickets(match, 10)) {
             if (!ticketMap.has(t.id)) ticketMap.set(t.id, t);
@@ -2954,19 +2931,15 @@ async function runAuditJob(jobId, rows) {
       }
 
       const tickets = Array.from(ticketMap.values());
-
       if (tickets.length === 0) {
         job.results.push({ ...baseResult, category: 'Unknown / Unspecified', summary: 'No tickets found in Zendesk for this customer.', confidence: 'Low', reasoning: 'No ticket data available.', status: 'done' });
         job.done++;
-        continue;
+        return;
       }
 
       baseResult.ticketSubjects = tickets.map(t => t.subject || '');
       baseResult.ticketDates = tickets.map(t => t.created_at?.slice(0, 10) || '');
 
-      // Throttle AI calls to stay within free-tier rate limits
-      if (process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY)
-        await auditorDelay(22000);  // OpenAI free tier: 3 RPM
       const analysis = await runAnalysis(row, tickets);
       baseResult.category = analysis.category;
       baseResult.competitorName = analysis.competitorName || null;
@@ -2985,8 +2958,12 @@ async function runAuditJob(jobId, rows) {
     job.done++;
   }
 
+  // Process rows in concurrent batches
+  for (let i = 0; i < rows.length; i += CONCURRENCY) {
+    await Promise.all(rows.slice(i, i + CONCURRENCY).map(processRow));
+  }
+
   job.status = 'done';
-  // Clean up completed job after 2 hours to prevent memory leak
   setTimeout(() => auditorJobs.delete(jobId), 2 * 60 * 60 * 1000);
 }
 
