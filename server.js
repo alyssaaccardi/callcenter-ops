@@ -2509,13 +2509,14 @@ const CATEGORY_RULES = [
     [/artificial intelligence/i, 3], [/ai\s+platform/i, 5],
   ]},
   { category: 'Went to Competitor', patterns: [
-    [/competi(tor|tors|ng)/i, 4], [/switch(ing|ed|es)?\s+(to|away|service)/i, 1],
-    [/going with (another|different|other|a\s+new)/i, 3],
+    [/competi(tor|tors|ng)/i, 4], [/switch(ing|ed)\s+to\s+(another|a\s+(different|new|other))\s+(answering|service)/i, 4],
+    [/going with (another|different|other|a\s+new)\s+(answering\s+)?(service|company|provider)/i, 3],
     [/ruby\b/i, 4], [/patlive/i, 5], [/answer\s*connect/i, 5],
     [/gabbyville/i, 5], [/map\s*communications/i, 5], [/davinci\b/i, 4],
     [/moneypenny/i, 5], [/abby\s*connect/i, 5], [/voicenation/i, 5],
     [/answering\s*365/i, 5], [/\bnexa\b/i, 5],
-    [/different (answering\s+)?service/i, 2], [/another (answering\s+)?service/i, 2],
+    [/different answering service/i, 3], [/another answering service/i, 3],
+    [/different (service|provider|company) (for|to handle)\s+(our|my|the)?\s*(calls?|answering)/i, 3],
     [/found (a\s+)?cheaper/i, 3],
   ]},
   { category: 'Price Too High', patterns: [
@@ -2541,7 +2542,7 @@ const CATEGORY_RULES = [
     [/new (receptionist|staff|assistant|employee|hire)/i, 3],
     [/in(-|\s*)house (receptionist|staff|coverage|answering)/i, 4],
     [/front\s*desk (person|staff|coverage)/i, 3],
-    [/have (someone|staff) (now|to answer)/i, 3], [/no longer need/i, 2],
+    [/have (someone|staff) (now|to answer)/i, 3],
   ]},
   { category: 'IVR / Auto Attendant', patterns: [
     [/\bIVR\b/i, 5], [/auto(mated)?\s+attendant/i, 5], [/autoattendant/i, 5],
@@ -2601,6 +2602,11 @@ const CATEGORY_RULES = [
     [/too few calls/i, 4], [/(barely|rarely) (get|receive|have) calls/i, 3],
     [/don'?t (receive|get) enough calls/i, 3],
     [/calls? (have\s+)?(slowed|decreased|dropped)/i, 3],
+    [/tax season (is\s+)?(over|ended|done|finished)/i, 5],
+    [/(slow|quiet|off)\s*(season|period|time)/i, 4],
+    [/seasonal(ly)?/i, 3], [/busy season (is\s+)?(over|ended|done|finished)/i, 5],
+    [/slow(er)?\s+(this|right) now/i, 3],
+    [/not (many|a lot of|much) (calls?|business|volume) (right now|anymore|lately)/i, 3],
   ]},
   { category: "Wanted Features/Services We Don't Offer", patterns: [
     [/feature (request|not available|missing)/i, 4],
@@ -2730,6 +2736,8 @@ Critical rules:
 - Agent asking to turn off call forwarding = post-cancellation cleanup. NOT a reason.
 - Base your answer on the customer's actual words in [Message] blocks, not agent templates or [Internal note] blocks.
 - PRICE RULE: If the customer is leaving for a competitor OR hiring staff/AI primarily because it is cheaper, the root reason is "Price Too High". Only use "Went to Competitor", "Hired Staff", or "Switched to AI Service" when price is NOT the stated driver.
+- CLOSED PRACTICE = the firm is permanently shutting down, the attorney is retiring, or the business is dissolving. A seasonal slowdown (tax season ended, slow summer, slow winter, fewer clients temporarily) is NOT "Closed Practice" — use "Not Enough Call Volume" instead. A CPA or accountant saying their busy season is over is "Not Enough Call Volume", not "Closed Practice".
+- SUMMARY RULE: Write a summary specific to THIS customer's actual ticket content. Do NOT copy or paraphrase summaries from other customers. Each summary must reference something specific to this customer's own words or situation.
 
 Respond with ONLY valid JSON, no markdown:
 {"category":"<category>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>","relevantTicketIds":[<1-2 ticket IDs from above that most clearly show the reason, e.g. 12345>],"estimatedCancellationDate":"<YYYY-MM-DD or null>"}
