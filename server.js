@@ -2843,7 +2843,7 @@ async function runAnalysis(customer, tickets, cutoff) {
   if (process.env.GEMINI_API_KEY)     return tryAI(() => geminiAnalyzeTickets(customer, tickets, cutoff));
   if (process.env.ANTHROPIC_API_KEY)  return tryAI(() => claudeAnalyzeTickets(customer, tickets, cutoff));
   if (process.env.OPENAI_API_KEY)     return tryAI(() => openaiAnalyzeTickets(customer, tickets, cutoff));
-  return { ...analyzeTickets(customer, tickets), analysisMethod: 'keywords' };
+  return { ...analyzeTickets(customer, tickets), analysisMethod: 'keywords', keywordFallbackReason: 'no_key' };
 }
 
 function analyzeTickets(customer, ticketData) {

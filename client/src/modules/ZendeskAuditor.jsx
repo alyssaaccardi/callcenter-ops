@@ -958,6 +958,7 @@ export default function ZendeskAuditor() {
   const errorCount   = results.filter(r => r.status === 'error').length;
   const keywordCount = results.filter(r => r.analysisMethod === 'keywords').length;
   const quotaHit = results.some(r => r.keywordFallbackReason === 'quota');
+  const noAiKey = keywordCount > 0 && results.every(r => r.analysisMethod !== 'keywords' || r.keywordFallbackReason === 'no_key');
   const isRunning    = view === 'running';
 
   // Client-side date + category filter applied after the run
@@ -1114,13 +1115,17 @@ export default function ZendeskAuditor() {
           <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>⚠</span>
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: '#b45309', marginBottom: 3 }}>
-              {quotaHit
+              {noAiKey
+                ? `No AI provider configured — ${keywordCount} ${keywordCount === 1 ? 'row was' : 'rows were'} categorized using keyword matching`
+                : quotaHit
                 ? `AI quota reached — ${keywordCount} ${keywordCount === 1 ? 'row was' : 'rows were'} categorized using keyword matching`
                 : `AI temporarily unavailable — ${keywordCount} ${keywordCount === 1 ? 'row was' : 'rows were'} categorized using keyword matching`}
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
               Keyword matching scans ticket text for known terms and patterns — results marked <strong style={{ color: '#b45309' }}>KEYWORD MATCH</strong> should be reviewed manually.
-              {quotaHit
+              {noAiKey
+                ? ' Set GEMINI_API_KEY (or ANTHROPIC_API_KEY / OPENAI_API_KEY) in the server .env and restart for full AI analysis.'
+                : quotaHit
                 ? ' The Gemini free tier daily quota has been reached — re-run after midnight Pacific Time for full AI analysis.'
                 : ' This was likely a transient error — re-running the audit should resolve it.'}
             </div>
