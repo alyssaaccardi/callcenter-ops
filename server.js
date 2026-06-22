@@ -2797,7 +2797,7 @@ async function claudeAnalyzeTickets(customer, ticketData, cutoff) {
   const prompt = buildAuditPrompt(customer, ticketData, cutoff);
   const msg = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 500,
+    max_tokens: 1024,
     temperature: 0.1,
     messages: [{ role: 'user', content: prompt }],
   });
@@ -2808,7 +2808,7 @@ async function geminiAnalyzeTickets(customer, ticketData, cutoff) {
   const prompt = buildAuditPrompt(customer, ticketData, cutoff);
   const resp = await axios.post(
     'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
-    { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 600, temperature: 0.1, thinkingConfig: { thinkingBudget: 0 } } },
+    { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 1024, temperature: 0.1, thinkingConfig: { thinkingBudget: 0 } } },
     { headers: { 'X-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, timeout: 20000 }
   );
   const raw = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
@@ -2819,7 +2819,7 @@ async function openaiAnalyzeTickets(customer, ticketData, cutoff) {
   const prompt = buildAuditPrompt(customer, ticketData, cutoff);
   const resp = await axios.post(
     'https://api.openai.com/v1/chat/completions',
-    { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 500, temperature: 0.1, response_format: { type: 'json_object' } },
+    { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 1024, temperature: 0.1, response_format: { type: 'json_object' } },
     { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
   );
   const raw = resp.data?.choices?.[0]?.message?.content?.trim() || '{}';
