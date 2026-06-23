@@ -2240,6 +2240,7 @@ const AUDITOR_CATEGORIES = [
   'Switched to AI Service', 'Went to Competitor', 'Price Too High',
   'Did Not Want to Pay Rate Increase / Overages',
   'Downsizing Practice', 'Hired Staff',
+  'IVR / Auto Attendant',
   'Quality', 'Call Forwarding Issue',
   'Closed Practice', 'Retired',
   'Leaving Firm', 'Fired', 'Not Enough Call Volume',
@@ -2692,7 +2693,7 @@ function buildAuditPrompt(customer, ticketData, cutoff) {
     return lines.join('\n');
   }).join('\n\n---\n\n');
 
-  const notesContext = customer.notes ? `\nCSV cancellation notes (AUTHORITATIVE for involuntary cancellation — see rules below): "${customer.notes}"\n` : '';
+  const notesContext = customer.notes ? `\nCSV cancellation notes (AUTHORITATIVE — these are recorded by the ops team after closing the account, see rules below): "${customer.notes}"\n` : '';
   const windowNote = cutoff
     ? `\nIMPORTANT: Only tickets from ${cutoff.toISOString().slice(0, 10)} onwards have been provided. The estimated cancellation date MUST be on or after ${cutoff.toISOString().slice(0, 10)} — do NOT extract dates from before this cutoff even if they are mentioned in ticket text.\n`
     : '';
@@ -2759,15 +2760,48 @@ Critical rules:
 - PLAN REDUCTIONS ARE NOT CHURN: A customer downgrading their plan, reducing minutes, or adjusting their subscription is NOT a cancellation. Do not classify these as any churn category.
 - Only return a category from the approved list above. Never invent new categories.
 
-INVOLUNTARY CANCELLATION (HIGHEST PRIORITY):
-- "Non-Payment" = WE closed the account because the customer did not pay, did not respond, NSF, payment declined, sent to collections, account terminated by Answering Legal for lack of communication, etc. This is an INVOLUNTARY cancellation — we cut them off, they did not voluntarily leave.
-- CSV NOTES ARE AUTHORITATIVE FOR NON-PAYMENT: If the CSV cancellation notes contain phrases like "non-payment", "non payment", "lack of communication", "no response", "NSF", "past due", "failed payment", "card declined", "sent to collections", "account closed due to", "we closed", "auto-cancelled", "involuntarily terminated" — classify as "Non-Payment" regardless of how positive or pleasant the customer's ticket messages sound. The CSV notes describe what actually ended the account; the ticket thread may just be a customer who was happy with the service but stopped paying.
-- "Non-Payment" overrides every other category. Even if the customer said they "loved the service" or "wanted to switch plans," if the CSV notes show the account was closed for non-payment or lack of communication, the reason is "Non-Payment".
+PRIMARY SIGNAL — CSV CANCELLATION NOTES (READ THESE FIRST):
+The CSV cancellation notes are written by Answering Legal's ops team AFTER they closed the account. They are the authoritative record of the actual reason. Almost every row has a stated reason in the notes — phrases like "non-payment", "AI", "overages", "hired staff", "retiring", "cost", "downsizing", "switched to different service", "new phone system", "lack of communication", etc.
+
+When the CSV notes contain a clear reason phrase, use it as the primary signal for category selection. The ticket conversation is SUPPORTING context — read it for detail (competitor name, AI company name, quality specifics, dates) but the notes column states the ops team's recorded reason.
+
+Map CSV note phrases to categories like this (case-insensitive):
+- "non-payment", "non payment", "lack of communication", "no response", "did not reply", "could not reach", "NSF", "past due", "failed payment", "card declined", "on declines", "sent to collections", "account closed due to non payment", "we closed", "involuntarily terminated", "auto-cancel" → "Non-Payment"
+- "AI", "switched to AI", "went to AI" → "Switched to AI Service" (extract specific company from ticket if present: Smith.ai, Lex, Goodcall, Rosie, etc.)
+- "switched to different service", "another service", "using another service", "started with another service" → "Went to Competitor" (extract competitor name from ticket if present)
+- "hired staff", "has staff", "staff in office", "hired a receptionist", "front desk", "in-house" → "Hired Staff"
+- "answering his own calls", "answering their own calls", "wants to be more hands on", "doing it himself", "using his VM", "answering himself" → "Hired Staff" (the customer IS the staff)
+- "overages", "doesn't want to pay overages", "going over minutes", "exceeded plan", "rate increase", "price increase" → "Did Not Want to Pay Rate Increase / Overages"
+- "too expensive", "cost", "price", "cutting expenses", "cheaper", "can't afford" (when not tied to overages) → "Price Too High"
+- "retiring", "retired", "retirement" → "Retired"
+- "closed practice", "closed firm", "going out of business", "dissolving", "disbarment", "facing disbarment" → "Closed Practice" (use "Fired" only if explicitly fired/let go from a position)
+- "downsizing", "restructuring", "business restructuring", "scaling back" → "Downsizing Practice"
+- "low call volume", "not enough calls", "cost vs. call volume", "slow season", "tax season over" → "Not Enough Call Volume"
+- "new phone system", "got a new phone", "changed phone service", "switched telephone service", "zoom phone service", "automated phone system", "IVR", "auto attendant", "phone tree", "set up call routing" → "IVR / Auto Attendant"
+- "quality", "messages never sent", "lost lead", "ruining business", "agents didn't know", "unhappy with service", "service no longer the quality", "bad service" → "Quality"
+- "moved to shared office", "wework", "regus", "shared office space", "coworking" → "Moved to Shared Office Space"
+- "answering service included in suite", "bundled with software" → "Answering Service Included In Suite"
+- "wanted real time reporting", "wanted portal", "wanted dashboard" → "Wanted Real Time Reporting / Portal"
+- "appointed judge", "became a judge", "judicial appointment" → "Appointed Judge"
+- "leaving firm", "left firm", "no longer at firm" → "Leaving Firm"
+- "fired", "let go", "dismissed" (from a job — distinct from disbarment) → "Fired"
+- "doesn't see value", "not worth it", "no ROI" → "Doesn't See Value"
+- "no longer needed", "service no longer needed", "no longer using" without any other detail in notes or tickets → check ticket context; if the ticket also gives no reason, use "Unknown / Unspecified"; if ticket suggests a specific reason, use that
+- "no reason given", "no reason stated", "did not give a reason" with NO other signal in notes or tickets → "Unknown / Unspecified"
+
+INVOLUNTARY CANCELLATION OVERRIDE:
+"Non-Payment" overrides every other category. Even if the customer's tickets sound happy or mention something else, if the CSV notes show the account was closed for non-payment, lack of communication, no response, or NSF — the reason is "Non-Payment".
+
+USE BOTH NOTES AND TICKETS:
+- Use CSV notes to PICK the category.
+- Use ticket conversation to extract supporting detail: specific competitor names, AI company names, quality subcategory (Missed Calls / Message Errors / Receptionist Conduct), exact cancellation date, summary content.
+- If notes are blank or vague ("no reason given", "see ticket #X"), then the ticket conversation IS your primary source — read it carefully for the customer's own words.
 
 CATEGORY DEFINITIONS:
 - "Switched to AI Service" = replaced us with an AI answering/receptionist tool (Smith.ai, Lex, Goodcall, Rosie, etc.). MUST set competitorName to the AI company's name (e.g. "Smith.ai", "Goodcall").
 - "Went to Competitor" = switched to another HUMAN answering service (Ruby, PATLive, AnswerConnect, etc.). MUST set competitorName to the competitor's name.
-- "Hired Staff" = specifically hired a HUMAN in-house receptionist, front desk person, or employee to answer phones — NOT an AI, NOT a phone system, NOT a shared-office receptionist.
+- "Hired Staff" = the customer is now handling calls with in-house humans — either they hired a receptionist / front desk / employee, OR the attorney/owner is answering their own calls themselves. Distinct from IVR (which is an automated system) and from a shared-office receptionist.
+- "IVR / Auto Attendant" = customer replaced us with an automated phone system, auto-attendant, phone tree, new phone routing setup, or a phone-service product like Zoom Phone / RingCentral / a virtual PBX. The defining feature is that an automated system or phone-service product now handles calls instead of a human service.
 - "Price Too High" = the price of our service was too high for the customer in general (not a specific rate increase event).
 - "Did Not Want to Pay Rate Increase / Overages" = customer specifically objects to a rate increase we issued, OR is leaving because of overage charges / going over their plan minutes. Distinct from general "Price Too High" — this is reactive to a specific bill event.
 - "Call Forwarding Issue" = the customer's calls were not being forwarded/transferred/patched correctly — a technical problem with call routing or connectivity, NOT the customer choosing a different solution.

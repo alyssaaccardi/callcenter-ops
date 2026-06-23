@@ -10,6 +10,7 @@ const CATEGORY_COLORS = {
   'Did Not Want to Pay Rate Increase / Overages': { bg: 'rgba(249,115,22,0.12)', color: '#c2410c' },
   'Downsizing Practice':                   { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
   'Hired Staff':                           { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
+  'IVR / Auto Attendant':                  { bg: 'rgba(6,182,212,0.12)',    color: '#0e7490' },
   'Quality':                               { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
   'Call Forwarding Issue':                 { bg: 'rgba(239,68,68,0.12)',    color: '#b91c1c' },
   'Closed Practice':                       { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
