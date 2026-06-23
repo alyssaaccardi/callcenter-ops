@@ -391,10 +391,9 @@ function TicketLinks({ ids, subjects, zdSubdomain }) {
 function ResultRow({ r, index }) {
   const zdSubdomain = r.zdSubdomain || '';
   const statusColor = r.status === 'done' ? '#15803d' : r.status === 'no_match' ? '#b45309' : '#dc2626';
-  const usedKeywords = r.analysisMethod === 'keywords';
 
   return (
-    <tr style={{ borderBottom: '1px solid var(--border, rgba(0,0,0,0.08))', opacity: usedKeywords ? 0.85 : 1 }}>
+    <tr style={{ borderBottom: '1px solid var(--border, rgba(0,0,0,0.08))' }}>
       <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
         {r.accountName || r.emailDomain || <span style={{ color: 'var(--muted)' }}>—</span>}
         {r.emailDomain && r.accountName && (
@@ -404,9 +403,6 @@ function ResultRow({ r, index }) {
           <div style={{ fontSize: 10, fontWeight: 700, marginTop: 2, color: r._isMostRecent ? '#0891b2' : '#9ca3af' }}>
             {r._isMostRecent ? `LATEST · ${r._repeatCount}× cancelled` : `EARLIER · ${r._repeatCount}× cancelled`}
           </div>
-        )}
-        {usedKeywords && (
-          <div style={{ fontSize: 10, fontWeight: 600, color: '#b45309', marginTop: 2, letterSpacing: '0.03em' }}>KEYWORD MATCH</div>
         )}
       </td>
       <td style={{ padding: '10px 12px', fontSize: 13 }}>
@@ -500,7 +496,6 @@ function SpinnerRow({ index }) {
 function SingleResult({ r, onClear }) {
   const zdSubdomain = r.zdSubdomain || '';
   const needsCompetitor = r.category === 'Went to Competitor' || r.category === 'Switched to AI Service';
-  const usedKeywords = r.analysisMethod === 'keywords';
   const { csat } = r;
   const csatColor = !csat || csat.pct === null ? '#6b7280'
     : csat.pct >= 80 ? '#15803d'
@@ -544,7 +539,6 @@ function SingleResult({ r, onClear }) {
               </span>
             )}
             {r.confidence && <Badge label={r.confidence} colors={CONFIDENCE_COLORS} />}
-            {usedKeywords && <span style={{ fontSize: 10, fontWeight: 600, color: '#b45309', letterSpacing: '0.03em' }}>KEYWORD MATCH</span>}
           </div>
 
           {r.summary && (
@@ -959,9 +953,6 @@ export default function ZendeskAuditor() {
   const doneCount    = results.filter(r => r.status === 'done').length;
   const noMatchCount = results.filter(r => r.status === 'no_match').length;
   const errorCount   = results.filter(r => r.status === 'error').length;
-  const keywordCount = results.filter(r => r.analysisMethod === 'keywords').length;
-  const quotaHit = results.some(r => r.keywordFallbackReason === 'quota');
-  const noAiKey = keywordCount > 0 && results.every(r => r.analysisMethod !== 'keywords' || r.keywordFallbackReason === 'no_key');
   const isRunning    = view === 'running';
 
   // Client-side date + category filter applied after the run
@@ -1110,29 +1101,6 @@ export default function ZendeskAuditor() {
       {error && (
         <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#dc2626', marginBottom: 16 }}>
           {error}
-        </div>
-      )}
-
-      {keywordCount > 0 && (
-        <div style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>⚠</span>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#b45309', marginBottom: 3 }}>
-              {noAiKey
-                ? `No AI provider configured — ${keywordCount} ${keywordCount === 1 ? 'row was' : 'rows were'} categorized using keyword matching`
-                : quotaHit
-                ? `AI quota reached — ${keywordCount} ${keywordCount === 1 ? 'row was' : 'rows were'} categorized using keyword matching`
-                : `AI temporarily unavailable — ${keywordCount} ${keywordCount === 1 ? 'row was' : 'rows were'} categorized using keyword matching`}
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
-              Keyword matching scans ticket text for known terms and patterns — results marked <strong style={{ color: '#b45309' }}>KEYWORD MATCH</strong> should be reviewed manually.
-              {noAiKey
-                ? ' Set GEMINI_API_KEY (or ANTHROPIC_API_KEY / OPENAI_API_KEY) in the server .env and restart for full AI analysis.'
-                : quotaHit
-                ? ' The Gemini free tier daily quota has been reached — re-run after midnight Pacific Time for full AI analysis.'
-                : ' This was likely a transient error — re-running the audit should resolve it.'}
-            </div>
-          </div>
         </div>
       )}
 

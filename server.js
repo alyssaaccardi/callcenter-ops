@@ -2877,24 +2877,32 @@ async function openaiAnalyzeTickets(customer, ticketData, cutoff) {
   return parseAuditResponse(raw, ticketData);
 }
 
-// Pick whichever AI provider key is configured; fall back to keywords on any error
+// Gemini-only with retry on transient errors. No keyword/provider fallback.
 async function runAnalysis(customer, tickets, cutoff) {
-  const tryAI = async (fn) => {
-    try { return await fn(); }
-    catch (e) {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY not configured on the server');
+  }
+  const delays = [1000, 3000, 8000];
+  let lastErr;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return { ...await geminiAnalyzeTickets(customer, tickets, cutoff), analysisMethod: 'ai' };
+    } catch (e) {
+      lastErr = e;
       const status = e?.response?.status;
-      // Fall back for rate limits, server errors, network failures, JSON parse errors, etc.
-      // Only re-throw for auth errors (401/403) which indicate a misconfigured key
-      if (status === 401 || status === 403) throw e;
-      const isQuota = status === 429;
-      console.warn(`[auditor] AI error (${status || e.message}), falling back to keywords`);
-      return { ...analyzeTickets(customer, tickets), analysisMethod: 'keywords', keywordFallbackReason: isQuota ? 'quota' : 'error' };
+      const isTransient = status === 429 || (status >= 500 && status < 600) || !status;
+      if (!isTransient || attempt === delays.length) break;
+      console.warn(`[auditor] Gemini ${status || e.message}, retry ${attempt + 1}/${delays.length} in ${delays[attempt]}ms`);
+      await auditorDelay(delays[attempt]);
     }
-  };
-  if (process.env.GEMINI_API_KEY)     return tryAI(() => geminiAnalyzeTickets(customer, tickets, cutoff));
-  if (process.env.ANTHROPIC_API_KEY)  return tryAI(() => claudeAnalyzeTickets(customer, tickets, cutoff));
-  if (process.env.OPENAI_API_KEY)     return tryAI(() => openaiAnalyzeTickets(customer, tickets, cutoff));
-  return { ...analyzeTickets(customer, tickets), analysisMethod: 'keywords', keywordFallbackReason: 'no_key' };
+  }
+  const status = lastErr?.response?.status;
+  const msg = status === 429
+    ? 'Gemini rate limit — retries exhausted. Try again in a minute.'
+    : status
+      ? `Gemini API error ${status}: ${lastErr?.response?.data?.error?.message || lastErr.message}`
+      : `Gemini call failed: ${lastErr.message}`;
+  throw new Error(msg);
 }
 
 function analyzeTickets(customer, ticketData) {
