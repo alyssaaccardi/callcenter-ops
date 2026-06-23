@@ -2759,6 +2759,7 @@ Critical rules:
 - CANCELLATION EVIDENCE REQUIRED: Only classify a churn reason when there is explicit evidence that the customer canceled, requested cancellation, was closed, or terminated service. Support tickets, complaints, technical issues, account updates, plan reductions, and resolved issues are NOT churn reasons. If no cancellation evidence exists, return "No Cancellation Evidence Found".
 - PLAN REDUCTIONS ARE NOT CHURN: A customer downgrading their plan, reducing minutes, or adjusting their subscription is NOT a cancellation. Do not classify these as any churn category.
 - Only return a category from the approved list above. Never invent new categories.
+- DO NOT GUESS. If the CSV notes and ticket conversation do not contain a clear, explicit reason, return "Unknown / Unspecified". Random guessing (e.g. picking "Went to AI" when no AI is mentioned anywhere, or "Downsizing Practice" with no downsizing language) is WORSE than returning Unknown. Confidence should reflect this: pick High only when the reason is explicit in notes or tickets; pick Low when you are inferring from weak signals.
 
 PRIMARY SIGNAL — CSV CANCELLATION NOTES (READ THESE FIRST):
 The CSV cancellation notes are written by Answering Legal's ops team AFTER they closed the account. They are the authoritative record of the actual reason. Almost every row has a stated reason in the notes — phrases like "non-payment", "AI", "overages", "hired staff", "retiring", "cost", "downsizing", "switched to different service", "new phone system", "lack of communication", etc.
@@ -2819,11 +2820,38 @@ CATEGORY DEFINITIONS:
 
 OTHER RULES:
 - Agent asking to turn off call forwarding = post-cancellation cleanup. NOT a reason.
-- Base your answer on the customer's actual words in [Message] blocks, not agent templates or [Internal note] blocks — EXCEPT for non-payment, where CSV notes are authoritative.
+- "CF already turned off" / "they turned off CF" / "turned service off" / "removed DID" / "made inactive in CTI" = post-cancellation cleanup tasks. These are NOT "Call Forwarding Issue". Call Forwarding Issue means the customer's calls were not reaching us when they were supposed to (technical fault on our side or routing problem). It is rare. Default to other categories when CF is only mentioned in the context of disabling it after cancellation.
+- COMPETITOR-NAME REQUIRED FOR "Went to Competitor": Only classify as "Went to Competitor" when a specific human-answering competitor is explicitly named (Ruby, PATLive, AnswerConnect, MAP, Gabbyville, VoiceNation, Moneypenny, Abby Connect, Alert, Answering365, Nexa, Davinci, or a recognizable equivalent). Vague phrases like "different direction", "another route", "trying something new", "going another way", "exploring options", "using another service" WITHOUT a named competitor → "Unknown / Unspecified", not "Went to Competitor".
+- AI-NAME REQUIRED FOR "Switched to AI Service": Only classify as "Switched to AI Service" when the notes explicitly say "AI" / "went to AI" / "switched to AI" OR a specific AI tool is named (Smith.ai, Lex, Goodcall, Rosie, Numa, Answering.AI, Dialpad AI, Convoso, RingCentral AI, etc.). Do NOT guess this category from absence of evidence.
+- PHONE-SYSTEM ≠ CALL FORWARDING ISSUE: "got a new phone system", "switched telephone service", "changed phone service", "bought new phone system", "Zoom Phone", "RingCentral", "set up new phone routing" → "IVR / Auto Attendant" (customer replaced us with their own phone infrastructure). NOT "Call Forwarding Issue".
+- "ANSWERING OWN CALLS" → HIRED STAFF: "answering his own calls", "answering their own calls", "using his VM", "wants to be more hands on", "doing it himself", "handling calls in office" → "Hired Staff". The customer becoming their own receptionist counts as Hired Staff. Do NOT route these to "Doesn't See Value".
+- "NO RESPONSE" / "DID NOT REPLY" → NON-PAYMENT: When ops notes say the customer did not respond, could not be reached, did not reply to save attempts, was on declines, or was closed for lack of communication — classify as "Non-Payment" (involuntary). "No response" alone is enough; do not require explicit "non-payment" wording.
+- Base your answer on the customer's actual words in [Message] blocks, not agent templates or [Internal note] blocks — EXCEPT CSV notes are always authoritative.
 - PRICE RULE: If the customer is leaving for a competitor OR hiring staff/AI primarily because it is cheaper, the root reason is "Price Too High". Only use "Went to Competitor", "Hired Staff", or "Switched to AI Service" when price is NOT the stated driver. Non-Payment still overrides Price Too High.
-- COMPETITOR / AI NAME REQUIRED: When the category is "Went to Competitor" you MUST extract and return the specific competitor company name in competitorName. When the category is "Switched to AI Service" you MUST extract and return the specific AI company name (e.g. "Smith.ai", "Lex", "Goodcall", "Rosie") in competitorName. If you genuinely cannot identify the specific company from the ticket or notes, set competitorName to null — but try hard to find it first.
 - SUMMARY RULE: Write a summary specific to THIS customer's actual ticket content. Do NOT copy or paraphrase summaries from other customers. Each summary must reference something specific to this customer's own words or situation.
 - QUALITY SUBCATEGORY: When category is "Quality", you must also set qualitySubcategory to the most specific type: "Missed Calls", "Message / Intake Errors", "Receptionist Conduct", or "General Quality". Use exactly one of these strings.
+
+WORKED EXAMPLES (from real prior misclassifications — learn from these):
+- Notes: "got new phone system no longer need our services" + ticket mentions turning off CF. → "IVR / Auto Attendant" (phone system replacement), NOT "Call Forwarding Issue".
+- Notes: "switched telephone service and cancelled service (CF already turned off)". → "IVR / Auto Attendant". The "(CF already turned off)" is cleanup; the reason is the phone-service switch.
+- Notes: "zoom phone service" or "Zoom Phone". → "IVR / Auto Attendant".
+- Notes: "No response." (nothing else, ops tried to save). → "Non-Payment" (involuntary close from lack of communication).
+- Notes: "Closed account due to non payment". → "Non-Payment", with High confidence.
+- Notes: "Closed acct due to non communication". → "Non-Payment".
+- Notes: "On declines per Rob close account" / "On Declines... No reply/No Payment". → "Non-Payment".
+- Notes: "Voided overage invoice for non payment" + "asked to cancel instead of pay overages". → "Non-Payment" overrides (we closed for non-pay even though overages were the trigger).
+- Notes: "answering his own calls" or "answering his own call or using his VM". → "Hired Staff" (customer IS the staff), NOT "Doesn't See Value".
+- Notes: "Wants to be more hands on in the office". → "Hired Staff".
+- Notes: "they are going in a different direction" with no competitor named. → "Unknown / Unspecified", NOT "Went to Competitor".
+- Notes: "he is trying something new" with no further info. → "Unknown / Unspecified".
+- Notes: "Using another service" with no name. → "Unknown / Unspecified". If a competitor is named in the ticket, then "Went to Competitor" with that name.
+- Notes: "business restructuring" or "He restructured". → "Downsizing Practice".
+- Notes: "facing disbarment". → "Closed Practice" (career-ending, like retirement but involuntary).
+- Notes: "happy/just needed to pause for now" or "wants to cancel and come back at a later time". → "Unknown / Unspecified" (this is a pause, not a clear churn reason).
+- Notes: "no reason but was happy". → "Unknown / Unspecified". Do NOT pick a category just because you must — Unknown is the right answer when ops literally noted no reason.
+- Notes: "She wished not to discuss, just cancel" / "He did not want to share his reason". → "Unknown / Unspecified".
+- Notes: "we were ruining her business" or "agents didn't know who they were answering for" or "messages never sent" or "lost lead". → "Quality" with appropriate subcategory.
+- Notes blank but final reason column says "AI" or "Went to AI". → "Switched to AI Service". If ticket mentions specific AI tool, set competitorName.
 
 Respond with ONLY valid JSON, no markdown:
 {"category":"<category>","qualitySubcategory":"<Missed Calls|Message / Intake Errors|Receptionist Conduct|General Quality or null>","competitorName":"<company name or null>","confidence":"High|Medium|Low","summary":"<1-2 sentence plain English summary>","reasoning":"<brief note on signals>","relevantTicketIds":[<1-2 ticket IDs from above that most clearly show the reason, e.g. 12345>],"estimatedCancellationDate":"<YYYY-MM-DD or null>"}
