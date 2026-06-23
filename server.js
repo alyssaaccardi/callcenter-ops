@@ -2259,11 +2259,23 @@ function auditorDelay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Normalize spreadsheet column names to known fields
+const NOTE_NOISE_VALUES = new Set([
+  '', '(none)', 'none', '(blank)', 'blank', 'no note', 'no notes',
+  'unknown', 'unknown or unspecified reason', 'unspecified',
+  'no reason given', 'no reason stated', 'no other reason given',
+  'no other reason given.', 'no reason given.', 'no response',
+  'no response.',
+]);
+
+// Normalize spreadsheet column names to known fields. Notes columns are
+// concatenated rather than overwritten — many real exports have notes
+// split across multiple columns (raw note, Monday note, billing note,
+// updated reason, etc.).
 function normalizeAuditorRow(raw) {
   const normalized = {};
+  const noteFragments = [];
   for (const [key, val] of Object.entries(raw)) {
-    const k = String(key).toLowerCase().trim().replace(/[\s_-]+/g, '');
+    const k = String(key).toLowerCase().trim().replace(/[\s_\-()]+/g, '');
     if (['accountname','account','company','firmname','firm','name','client','clientname',
          'business','businessname','customer','customername','lawfirm','practicename'].includes(k))
       normalized.accountName = String(val || '').trim();
@@ -2273,9 +2285,13 @@ function normalizeAuditorRow(raw) {
       normalized.customerEmail = String(val || '').trim();
     else if (['orgname','organizationname','org','organization'].includes(k))
       normalized.orgName = String(val || '').trim();
-    else if (['notes','note','reason','cancellationreason','cancellationnote','comments','comment',
-              'cancellationdescription','description','details'].includes(k))
-      normalized.notes = String(val || '').trim();
+    else if (k.includes('note') || k.includes('reason') || k.includes('comment') || k.includes('description') || k.includes('details')) {
+      const v = String(val || '').trim();
+      if (v && !NOTE_NOISE_VALUES.has(v.toLowerCase())) noteFragments.push(v);
+    }
+  }
+  if (noteFragments.length > 0) {
+    normalized.notes = [...new Set(noteFragments)].join(' | ');
   }
   return normalized;
 }
@@ -3152,8 +3168,10 @@ async function runAuditJob(jobId, rows) {
         return;
       }
 
-      // Apply lookback filter
-      if (cutoff) {
+      // Apply lookback filter — but only when no explicit ticket IDs were given.
+      // If the user pointed at specific tickets in the CSV, they want those used
+      // regardless of how old they are.
+      if (cutoff && explicitTicketIds.length === 0) {
         tickets = tickets.filter(t => t.created_at && new Date(t.created_at) >= cutoff);
         if (tickets.length === 0) {
           job.results.push({ ...baseResult, category: 'Unknown / Unspecified', summary: `No tickets found within the selected time window. Customer may have cancelled outside this period.`, confidence: 'Low', reasoning: 'All tickets predated the lookback window.', status: 'done' });
@@ -3297,10 +3315,11 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
       return res.json({ ...baseResult, category: 'Unknown / Unspecified', summary: 'No tickets found in Zendesk for this customer.', confidence: 'Low', reasoning: 'No ticket data available.', status: 'done' });
     }
 
-    // Apply lookback filter
+    // Apply lookback filter — but only when no explicit ticket IDs were given.
+    // Explicit IDs in the request mean the caller already chose the tickets.
     const lookbackDays = parseInt(req.body.lookbackDays, 10) || null;
     const lookbackCutoff = lookbackDays ? new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000) : null;
-    if (lookbackCutoff) {
+    if (lookbackCutoff && explicitTicketIds.length === 0) {
       tickets = tickets.filter(t => t.created_at && new Date(t.created_at) >= lookbackCutoff);
       if (tickets.length === 0) {
         return res.json({ ...baseResult, category: 'Unknown / Unspecified', summary: `No tickets found within the selected time window. This customer may have cancelled outside this period.`, confidence: 'Low', reasoning: 'All tickets predated the lookback window.', status: 'done' });
