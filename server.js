@@ -2236,13 +2236,18 @@ app.get('/api/mitel/cloudlink/calls', async (req, res) => {
 // ─── Zendesk Auditor ─────────────────────────────────────────────────────────
 
 const AUDITOR_CATEGORIES = [
+  'Non-Payment',
   'Switched to AI Service', 'Went to Competitor', 'Price Too High',
-  'Downsizing Practice', 'Hired Staff', 'IVR / Auto Attendant',
-  'Quality', 'Call Forwarding Issue', 'Closed Practice',
+  'Did Not Want to Pay Rate Increase / Overages',
+  'Downsizing Practice', 'Hired Staff',
+  'Quality', 'Call Forwarding Issue',
+  'Closed Practice', 'Retired',
   'Leaving Firm', 'Fired', 'Not Enough Call Volume',
   "Wanted Features/Services We Don't Offer",
   'Wanted Real Time Reporting / Portal',
-  'Answering Service Included In Suite', 'Appointed Judge',
+  'Answering Service Included In Suite',
+  'Moved to Shared Office Space',
+  'Appointed Judge',
   "Doesn't See Value", 'Unknown / Unspecified',
   'No Cancellation Evidence Found',
 ];
@@ -2493,10 +2498,26 @@ const CANCELLATION_SIGNALS = [
   /hired\s+(a\s+)?(receptionist|staff|assistant|employee|secretary)/i,
   /in(-|\s*)house\s+(receptionist|staff|answering)/i,
   /\bfired\b/i, /\blaid\s+off\b/i,
+  /non[-\s]?payment/i, /lack\s+of\s+communication/i, /\bnsf\b/i,
+  /failed\s+payment/i, /(account|service)\s+closed\s+due\s+to/i,
+  /past\s+due/i, /unpaid\s+(invoice|balance)/i, /collections?/i,
+  /shared\s+office/i, /co[-\s]?work(ing)?\s+space/i, /wework/i, /regus/i,
 ];
 
 // ─── Keyword-based cancellation analysis (no external AI needed) ─────────────
 const CATEGORY_RULES = [
+  { category: 'Non-Payment', patterns: [
+    [/non[-\s]?payment/i, 6], [/lack\s+of\s+communication/i, 6],
+    [/(account|service)\s+closed\s+due\s+to/i, 6],
+    [/closed\s+(account|service)\s+(due\s+to|for)\s+(non[-\s]?payment|lack\s+of)/i, 6],
+    [/failed\s+payment/i, 5], [/\bnsf\b/i, 5],
+    [/past\s+due/i, 4], [/unpaid\s+(invoice|balance)/i, 5],
+    [/(sent|went)\s+to\s+collections?/i, 5],
+    [/(card|payment)\s+(declined|failed)/i, 4],
+    [/never\s+(paid|responded)/i, 4], [/no\s+response\s+to\s+(billing|invoice)/i, 5],
+    [/auto[-\s]?cancel(led|ed)?/i, 4], [/involuntarily\s+(cancel|terminat)/i, 6],
+    [/we\s+(cancel(l?ed)?|terminated|closed)\s+(the|their)\s+(account|service)/i, 5],
+  ]},
   { category: 'Switched to AI Service', patterns: [
     [/smith\.ai/i, 5], [/\blex\b/i, 4], [/goodcall/i, 5],
     [/answering\.ai/i, 5], [/dialpad/i, 4],
@@ -2522,13 +2543,23 @@ const CATEGORY_RULES = [
   { category: 'Price Too High', patterns: [
     [/too expensive/i, 4], [/can'?t afford/i, 4], [/overpriced/i, 4],
     [/over\s*budget/i, 3], [/cheaper (option|alternative|service|provider)/i, 4],
-    [/rate increase/i, 3], [/price(s)? (too |are )?(high|much)/i, 4],
+    [/price(s)? (too |are )?(high|much)/i, 4],
     [/cost(ing|s)? too much/i, 4], [/cut(ting)?\s+(back\s+)?cost/i, 3],
     [/reduc(e|ing)\s+(our\s+)?cost/i, 3], [/save money/i, 2], [/billing concern/i, 2],
     [/what (i'?m|we'?re) pay(ing)?/i, 3], [/for what (i|we) pay/i, 3],
     [/could (hire|get|find|pay) .{0,40}(\$\d|\d+\s*dollar|\bless\b)/i, 4],
     [/\$\d+\s*(\/|per|a)\s*(hour|hr|month|mo)/i, 3],
     [/not worth (the price|what (i|we) pay)/i, 4],
+  ]},
+  { category: 'Did Not Want to Pay Rate Increase / Overages', patterns: [
+    [/rate\s+increase/i, 5], [/price\s+increase/i, 5],
+    [/(don'?t|wont|won'?t|refus(e|ed|ing))\s+to\s+pay\s+(the\s+)?(rate|price)\s+increase/i, 6],
+    [/overage(s|\s+fee)?/i, 5], [/over\s+(my|our|the)\s+minutes?/i, 4],
+    [/(went|going)\s+over\s+(my|our|the)?\s*minutes?/i, 5],
+    [/exceeded?\s+(my|our|the)?\s*(plan|minutes?|allotment)/i, 4],
+    [/(charged|billed)\s+(for\s+)?overages?/i, 5],
+    [/(reached|hit)\s+(my|our|the)?\s*(allotted|allowed)?\s*minutes?/i, 4],
+    [/new\s+(pricing|rate)/i, 3],
   ]},
   { category: 'Downsizing Practice', patterns: [
     [/downsiz(ing|e|ed)/i, 4], [/scaling (back|down)/i, 4],
@@ -2543,16 +2574,6 @@ const CATEGORY_RULES = [
     [/in(-|\s*)house (receptionist|staff|coverage|answering)/i, 4],
     [/front\s*desk (person|staff|coverage)/i, 3],
     [/have (someone|staff) (now|to answer)/i, 3],
-  ]},
-  { category: 'IVR / Auto Attendant', patterns: [
-    [/\bIVR\b/i, 5], [/auto(mated)?\s+attendant/i, 5], [/autoattendant/i, 5],
-    [/interactive voice response/i, 5], [/phone tree/i, 4],
-    [/automated (phone|answering|call) system/i, 4],
-    [/(set up|implement(ed)?|got|using) (an?\s+)?(auto|automated|IVR)/i, 4],
-    [/(phone|call) routing (is\s+)?(working|set up|configured|better|fixed)/i, 5],
-    [/(set up|configured|updated) (their|our|my)?\s*(phone|call) routing/i, 5],
-    [/internal (system|phone|call|routing)/i, 4],
-    [/no longer need (live|the)?\s*(answering|service)/i, 4],
   ]},
   { category: 'Quality', patterns: [
     [/miss(ing|ed) calls?/i, 5], [/calls? (went|going) to voicemail/i, 5],
@@ -2584,9 +2605,15 @@ const CATEGORY_RULES = [
   ]},
   { category: 'Closed Practice', patterns: [
     [/clos(ing|ed|e) (the\s+)?(practice|firm|office|business)/i, 4],
-    [/shut(ting)?\s+(down|the\s+practice)/i, 4], [/retir(ing|ed|ement)/i, 4],
+    [/shut(ting)?\s+(down|the\s+practice)/i, 4],
     [/no longer practicing/i, 4], [/dissolv(ing|ed)\s+(the\s+)?(firm|practice)/i, 4],
     [/going out of business/i, 4], [/winding down/i, 3],
+  ]},
+  { category: 'Retired', patterns: [
+    [/retir(ing|ed|ement|e)/i, 5],
+    [/(i'?m|i\s+am|going\s+to)\s+retir/i, 6],
+    [/end\s+of\s+(my\s+)?career/i, 4],
+    [/stepping\s+down/i, 3],
   ]},
   { category: 'Leaving Firm', patterns: [
     [/leaving (the\s+)?(firm|company|practice)/i, 4], [/left (the\s+)?(firm|company)/i, 4],
@@ -2631,6 +2658,14 @@ const CATEGORY_RULES = [
     [/bundled?\s+(with|in|into)/i, 3],
     [/already\s+(have|includes?)\s+(answering|receptionist)/i, 4],
   ]},
+  { category: 'Moved to Shared Office Space', patterns: [
+    [/shared\s+office/i, 5], [/co[-\s]?work(ing)?\s+space/i, 5],
+    [/\bwework\b/i, 5], [/\bregus\b/i, 5],
+    [/(moved|moving)\s+(to|into)\s+(a\s+)?(shared|co[-\s]?work)/i, 6],
+    [/(new\s+)?office\s+(includes|has|comes?\s+with)\s+(receptionist|front\s*desk|answering)/i, 5],
+    [/(building|office)\s+(has|provides)\s+(a\s+)?(receptionist|front\s*desk)/i, 5],
+    [/executive\s+suite/i, 4],
+  ]},
   { category: 'Appointed Judge', patterns: [
     [/appointed\s+(a\s+)?judge/i, 5], [/became\s+(a\s+)?judge/i, 5],
     [/judicial\s+(appointment|position)/i, 5],
@@ -2657,7 +2692,7 @@ function buildAuditPrompt(customer, ticketData, cutoff) {
     return lines.join('\n');
   }).join('\n\n---\n\n');
 
-  const notesContext = customer.notes ? `\nCSV cancellation notes: "${customer.notes}"\n` : '';
+  const notesContext = customer.notes ? `\nCSV cancellation notes (AUTHORITATIVE for involuntary cancellation — see rules below): "${customer.notes}"\n` : '';
   const windowNote = cutoff
     ? `\nIMPORTANT: Only tickets from ${cutoff.toISOString().slice(0, 10)} onwards have been provided. The estimated cancellation date MUST be on or after ${cutoff.toISOString().slice(0, 10)} — do NOT extract dates from before this cutoff even if they are mentioned in ticket text.\n`
     : '';
@@ -2723,20 +2758,36 @@ Critical rules:
 - CANCELLATION EVIDENCE REQUIRED: Only classify a churn reason when there is explicit evidence that the customer canceled, requested cancellation, was closed, or terminated service. Support tickets, complaints, technical issues, account updates, plan reductions, and resolved issues are NOT churn reasons. If no cancellation evidence exists, return "No Cancellation Evidence Found".
 - PLAN REDUCTIONS ARE NOT CHURN: A customer downgrading their plan, reducing minutes, or adjusting their subscription is NOT a cancellation. Do not classify these as any churn category.
 - Only return a category from the approved list above. Never invent new categories.
-- "Switched to AI Service" = replaced us with an AI answering/receptionist tool (Smith.ai, Lex, Goodcall, Rosie, etc.)
-- "Went to Competitor" = switched to another HUMAN answering service (Ruby, PATLive, AnswerConnect, etc.)
-- "Hired Staff" = specifically hired a HUMAN in-house receptionist, front desk person, or employee to answer phones — NOT an AI, NOT a phone system
-- "IVR / Auto Attendant" = customer set up their own automated phone system, call routing, auto-attendant, or IVR — they no longer need live answering because an automated system handles it. NOT the same as "Hired Staff" (which requires a human hire).
-- "Call Forwarding Issue" = the customer's calls were not being forwarded/transferred/patched correctly — a technical problem with call routing or connectivity, NOT the customer choosing a different solution
-- "Wanted Features/Services We Don't Offer" = wanted a specific capability or integration that we simply don't offer
-- "Wanted Real Time Reporting / Portal" = specifically wanted live dashboards, a client portal, or real-time reporting access we don't provide
-- "Answering Service Included In Suite" = customer switched to a software/platform/CRM that bundles answering or receptionist service
-- "Doesn't See Value" = service didn't justify the cost in their view — not enough ROI, not useful enough. Distinct from "Not Enough Call Volume" (which is about call traffic, not perceived value)
-- "Not Enough Call Volume" = call traffic is too low to warrant the service — not a cost or value complaint, literally not enough calls
+
+INVOLUNTARY CANCELLATION (HIGHEST PRIORITY):
+- "Non-Payment" = WE closed the account because the customer did not pay, did not respond, NSF, payment declined, sent to collections, account terminated by Answering Legal for lack of communication, etc. This is an INVOLUNTARY cancellation — we cut them off, they did not voluntarily leave.
+- CSV NOTES ARE AUTHORITATIVE FOR NON-PAYMENT: If the CSV cancellation notes contain phrases like "non-payment", "non payment", "lack of communication", "no response", "NSF", "past due", "failed payment", "card declined", "sent to collections", "account closed due to", "we closed", "auto-cancelled", "involuntarily terminated" — classify as "Non-Payment" regardless of how positive or pleasant the customer's ticket messages sound. The CSV notes describe what actually ended the account; the ticket thread may just be a customer who was happy with the service but stopped paying.
+- "Non-Payment" overrides every other category. Even if the customer said they "loved the service" or "wanted to switch plans," if the CSV notes show the account was closed for non-payment or lack of communication, the reason is "Non-Payment".
+
+CATEGORY DEFINITIONS:
+- "Switched to AI Service" = replaced us with an AI answering/receptionist tool (Smith.ai, Lex, Goodcall, Rosie, etc.). MUST set competitorName to the AI company's name (e.g. "Smith.ai", "Goodcall").
+- "Went to Competitor" = switched to another HUMAN answering service (Ruby, PATLive, AnswerConnect, etc.). MUST set competitorName to the competitor's name.
+- "Hired Staff" = specifically hired a HUMAN in-house receptionist, front desk person, or employee to answer phones — NOT an AI, NOT a phone system, NOT a shared-office receptionist.
+- "Price Too High" = the price of our service was too high for the customer in general (not a specific rate increase event).
+- "Did Not Want to Pay Rate Increase / Overages" = customer specifically objects to a rate increase we issued, OR is leaving because of overage charges / going over their plan minutes. Distinct from general "Price Too High" — this is reactive to a specific bill event.
+- "Call Forwarding Issue" = the customer's calls were not being forwarded/transferred/patched correctly — a technical problem with call routing or connectivity, NOT the customer choosing a different solution.
+- "Wanted Features/Services We Don't Offer" = wanted a specific capability, integration, or service we don't provide.
+- "Wanted Real Time Reporting / Portal" = specifically wanted live dashboards, a client portal, or real-time reporting access we don't provide.
+- "Answering Service Included In Suite" = customer switched to a software/platform/CRM that bundles answering or receptionist service.
+- "Moved to Shared Office Space" = customer moved into a coworking / shared office / executive suite (WeWork, Regus, etc.) and the building/office now provides receptionist coverage. Distinct from "Answering Service Included In Suite" (which is software bundling) — this is a physical office move.
+- "Closed Practice" = the firm is permanently shutting down, dissolving, or going out of business. NOT the same as "Retired" — use Retired when the specific reason is the attorney retiring.
+- "Retired" = the attorney/principal is personally retiring or ending their career. Use this over "Closed Practice" when retirement is the specific stated reason.
+- "Leaving Firm" = the attorney is leaving the firm (joining a different firm, going in-house, etc.) but the firm itself continues.
+- "Fired" = the attorney was let go / terminated / dismissed from their position.
+- "Doesn't See Value" = service didn't justify the cost in their view — not enough ROI, not useful enough. Distinct from "Not Enough Call Volume" (which is about call traffic, not perceived value).
+- "Not Enough Call Volume" = call traffic is too low to warrant the service — not a cost or value complaint, literally not enough calls. Seasonal slowdowns (tax season ended, slow summer) also belong here, not in "Closed Practice".
+- "Appointed Judge" = the attorney was appointed/elected to the bench.
+
+OTHER RULES:
 - Agent asking to turn off call forwarding = post-cancellation cleanup. NOT a reason.
-- Base your answer on the customer's actual words in [Message] blocks, not agent templates or [Internal note] blocks.
-- PRICE RULE: If the customer is leaving for a competitor OR hiring staff/AI primarily because it is cheaper, the root reason is "Price Too High". Only use "Went to Competitor", "Hired Staff", or "Switched to AI Service" when price is NOT the stated driver.
-- CLOSED PRACTICE = the firm is permanently shutting down, the attorney is retiring, or the business is dissolving. A seasonal slowdown (tax season ended, slow summer, slow winter, fewer clients temporarily) is NOT "Closed Practice" — use "Not Enough Call Volume" instead. A CPA or accountant saying their busy season is over is "Not Enough Call Volume", not "Closed Practice".
+- Base your answer on the customer's actual words in [Message] blocks, not agent templates or [Internal note] blocks — EXCEPT for non-payment, where CSV notes are authoritative.
+- PRICE RULE: If the customer is leaving for a competitor OR hiring staff/AI primarily because it is cheaper, the root reason is "Price Too High". Only use "Went to Competitor", "Hired Staff", or "Switched to AI Service" when price is NOT the stated driver. Non-Payment still overrides Price Too High.
+- COMPETITOR / AI NAME REQUIRED: When the category is "Went to Competitor" you MUST extract and return the specific competitor company name in competitorName. When the category is "Switched to AI Service" you MUST extract and return the specific AI company name (e.g. "Smith.ai", "Lex", "Goodcall", "Rosie") in competitorName. If you genuinely cannot identify the specific company from the ticket or notes, set competitorName to null — but try hard to find it first.
 - SUMMARY RULE: Write a summary specific to THIS customer's actual ticket content. Do NOT copy or paraphrase summaries from other customers. Each summary must reference something specific to this customer's own words or situation.
 - QUALITY SUBCATEGORY: When category is "Quality", you must also set qualitySubcategory to the most specific type: "Missed Calls", "Message / Intake Errors", "Receptionist Conduct", or "General Quality". Use exactly one of these strings.
 
@@ -2889,12 +2940,20 @@ function analyzeTickets(customer, ticketData) {
   let best = scores[0];
   const second = scores[1];
 
-  // Price override: if price signals are strong and the top category is Competitor/AI/HiredStaff,
-  // price is the root cause — the competitor/AI was just the vehicle.
-  const priceScore = scores.find(s => s.category === 'Price Too High')?.score || 0;
-  const PRICE_OVERRIDE_CATEGORIES = new Set(['Went to Competitor', 'Switched to AI Service', 'Hired Staff']);
-  if (PRICE_OVERRIDE_CATEGORIES.has(best.category) && priceScore >= 4 && priceScore >= best.score * 0.6) {
-    best = scores.find(s => s.category === 'Price Too High');
+  // Non-Payment override: if the account was closed for non-payment / lack of communication
+  // (typically surfaced via CSV notes), that is the actual reason regardless of what the
+  // customer's tickets say. Involuntary cancellation trumps voluntary stated reasons.
+  const nonPayScore = scores.find(s => s.category === 'Non-Payment')?.score || 0;
+  if (nonPayScore >= 5) {
+    best = scores.find(s => s.category === 'Non-Payment');
+  } else {
+    // Price override: if price signals are strong and the top category is Competitor/AI/HiredStaff,
+    // price is the root cause — the competitor/AI was just the vehicle.
+    const priceScore = scores.find(s => s.category === 'Price Too High')?.score || 0;
+    const PRICE_OVERRIDE_CATEGORIES = new Set(['Went to Competitor', 'Switched to AI Service', 'Hired Staff']);
+    if (PRICE_OVERRIDE_CATEGORIES.has(best.category) && priceScore >= 4 && priceScore >= best.score * 0.6) {
+      best = scores.find(s => s.category === 'Price Too High');
+    }
   }
 
   const confidence = best.score === 0 ? 'Low' : best.score >= 8 && best.score >= second.score * 2 ? 'High' : best.score >= 4 ? 'Medium' : 'Low';
