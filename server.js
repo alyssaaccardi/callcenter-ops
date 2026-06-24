@@ -2775,7 +2775,7 @@ Critical rules:
 - CANCELLATION EVIDENCE REQUIRED: Only classify a churn reason when there is explicit evidence that the customer canceled, requested cancellation, was closed, or terminated service. Support tickets, complaints, technical issues, account updates, plan reductions, and resolved issues are NOT churn reasons. If no cancellation evidence exists, return "No Cancellation Evidence Found".
 - PLAN REDUCTIONS ARE NOT CHURN: A customer downgrading their plan, reducing minutes, or adjusting their subscription is NOT a cancellation. Do not classify these as any churn category.
 - Only return a category from the approved list above. Never invent new categories.
-- DO NOT GUESS. If the CSV notes and ticket conversation do not contain a clear, explicit reason, return "Unknown / Unspecified". Random guessing (e.g. picking "Went to AI" when no AI is mentioned anywhere, or "Downsizing Practice" with no downsizing language) is WORSE than returning Unknown. Confidence should reflect this: pick High only when the reason is explicit in notes or tickets; pick Low when you are inferring from weak signals.
+- BE DECISIVE, NOT TIMID. When the customer states any reason at all — even vaguely — pick the closest matching category and mark confidence Low or Medium. Reserve "Unknown / Unspecified" for the cases where the customer/notes truly say nothing about why (just "please cancel my account" with no further context). "Going in a different direction" → Went to Competitor (competitorName=null). "No longer need service" → Doesn't See Value. "Trying something new" → Went to Competitor. The ONLY thing that's worse than Unknown is HALLUCINATING a category that nothing in the notes or tickets supports (e.g. saying "Went to AI" when there is zero AI mention). Don't hallucinate, but don't bail to Unknown just because the reason is vague.
 
 PRIMARY SIGNAL — CSV CANCELLATION NOTES (READ THESE FIRST):
 The CSV cancellation notes are written by Answering Legal's ops team AFTER they closed the account. They are the authoritative record of the actual reason. Almost every row has a stated reason in the notes — phrases like "non-payment", "AI", "overages", "hired staff", "retiring", "cost", "downsizing", "switched to different service", "new phone system", "lack of communication", etc.
@@ -2803,8 +2803,8 @@ Map CSV note phrases to categories like this (case-insensitive):
 - "leaving firm", "left firm", "no longer at firm" → "Leaving Firm"
 - "fired", "let go", "dismissed" (from a job — distinct from disbarment) → "Fired"
 - "doesn't see value", "not worth it", "no ROI" → "Doesn't See Value"
-- "no longer needed", "service no longer needed", "no longer using" without any other detail in notes or tickets → check ticket context; if the ticket also gives no reason, use "Unknown / Unspecified"; if ticket suggests a specific reason, use that
-- "no reason given", "no reason stated", "did not give a reason" with NO other signal in notes or tickets → "Unknown / Unspecified"
+- "no longer needed", "service no longer needed", "no longer using", "no longer wanted services" → "Doesn't See Value" (Low/Medium confidence). The customer decided they didn't need us — that's a value/utility judgment. Only escalate to a more specific category if the ticket shows one (e.g. Hired Staff, IVR, Went to Competitor).
+- "no reason given", "no reason stated", "did not give a reason", "did not want to discuss" — first check the FULL ticket for any clue; if the ticket also has nothing, then "Unknown / Unspecified". Don't pick Unknown lazily — read the ticket carefully first.
 
 INVOLUNTARY CANCELLATION OVERRIDE:
 "Non-Payment" overrides every other category. Even if the customer's tickets sound happy or mention something else, if the CSV notes show the account was closed for non-payment, lack of communication, no response, or NSF — the reason is "Non-Payment".
@@ -2837,8 +2837,8 @@ CATEGORY DEFINITIONS:
 OTHER RULES:
 - Agent asking to turn off call forwarding = post-cancellation cleanup. NOT a reason.
 - "CF already turned off" / "they turned off CF" / "turned service off" / "removed DID" / "made inactive in CTI" = post-cancellation cleanup tasks. These are NOT "Call Forwarding Issue". Call Forwarding Issue means the customer's calls were not reaching us when they were supposed to (technical fault on our side or routing problem). It is rare. Default to other categories when CF is only mentioned in the context of disabling it after cancellation.
-- COMPETITOR-NAME REQUIRED FOR "Went to Competitor": Only classify as "Went to Competitor" when a specific human-answering competitor is explicitly named (Ruby, PATLive, AnswerConnect, MAP, Gabbyville, VoiceNation, Moneypenny, Abby Connect, Alert, Answering365, Nexa, Davinci, or a recognizable equivalent). Vague phrases like "different direction", "another route", "trying something new", "going another way", "exploring options", "using another service" WITHOUT a named competitor → "Unknown / Unspecified", not "Went to Competitor".
-- AI-NAME REQUIRED FOR "Switched to AI Service": Only classify as "Switched to AI Service" when the notes explicitly say "AI" / "went to AI" / "switched to AI" OR a specific AI tool is named (Smith.ai, Lex, Goodcall, Rosie, Numa, Answering.AI, Dialpad AI, Convoso, RingCentral AI, etc.). Do NOT guess this category from absence of evidence.
+- "Went to Competitor" — name when you can: When the customer says they switched / left for someone else but doesn't name a competitor (e.g. "going in a different direction", "another route", "trying something new", "using another service", "started with another service"), still classify as "Went to Competitor" with competitorName=null and Low confidence. When a competitor IS named (Ruby, PATLive, AnswerConnect, MAP, Gabbyville, VoiceNation, Moneypenny, Abby Connect, Alert, Answering365, Nexa, Davinci, or similar), set competitorName and use Medium/High confidence.
+- "Switched to AI Service" requires AI mention. Only use this category when the notes/ticket explicitly mention "AI", "AI receptionist", or a named AI tool (Smith.ai, Lex, Goodcall, Rosie, Numa, Answering.AI, Dialpad AI, Convoso, RingCentral AI, etc.). Do NOT pick this just because the customer left — if they just said "another service" with no AI language, use "Went to Competitor" instead.
 - PHONE-SYSTEM ≠ CALL FORWARDING ISSUE: "got a new phone system", "switched telephone service", "changed phone service", "bought new phone system", "Zoom Phone", "RingCentral", "set up new phone routing" → "IVR / Auto Attendant" (customer replaced us with their own phone infrastructure). NOT "Call Forwarding Issue".
 - "AI" + PHONE PRODUCT = AI WINS: If the notes or ticket mention AI (e.g. "RingCentral AI", "Zoom AI", "using AI with RingCentral", "AI receptionist on Vonage") → "Switched to AI Service", not "IVR / Auto Attendant". The AI capability is the differentiator; the phone product is just where it runs.
 - "ANSWERING OWN CALLS" → HIRED STAFF: "answering his own calls", "answering their own calls", "using his VM", "wants to be more hands on", "doing it himself", "handling calls in office" → "Hired Staff". The customer becoming their own receptionist counts as Hired Staff. Do NOT route these to "Doesn't See Value".
@@ -2859,14 +2859,15 @@ WORKED EXAMPLES (from real prior misclassifications — learn from these):
 - Notes: "Voided overage invoice for non payment" + "asked to cancel instead of pay overages". → "Non-Payment" overrides (we closed for non-pay even though overages were the trigger).
 - Notes: "answering his own calls" or "answering his own call or using his VM". → "Hired Staff" (customer IS the staff), NOT "Doesn't See Value".
 - Notes: "Wants to be more hands on in the office". → "Hired Staff".
-- Notes: "they are going in a different direction" with no competitor named. → "Unknown / Unspecified", NOT "Went to Competitor".
-- Notes: "he is trying something new" with no further info. → "Unknown / Unspecified".
-- Notes: "Using another service" with no name. → "Unknown / Unspecified". If a competitor is named in the ticket, then "Went to Competitor" with that name.
+- Notes: "they are going in a different direction" or "another route" with no competitor named. → "Went to Competitor" with competitorName=null, Low confidence.
+- Notes: "he is trying something new" / "exploring another option" with no further info. → "Went to Competitor" with competitorName=null, Low confidence.
+- Notes: "Using another service" / "started with another service" without a name. → "Went to Competitor" with competitorName=null, Low confidence.
 - Notes: "business restructuring" or "He restructured". → "Downsizing Practice".
 - Notes: "facing disbarment". → "Closed Practice" (career-ending, like retirement but involuntary).
-- Notes: "happy/just needed to pause for now" or "wants to cancel and come back at a later time". → "Unknown / Unspecified" (this is a pause, not a clear churn reason).
-- Notes: "no reason but was happy". → "Unknown / Unspecified". Do NOT pick a category just because you must — Unknown is the right answer when ops literally noted no reason.
-- Notes: "She wished not to discuss, just cancel" / "He did not want to share his reason". → "Unknown / Unspecified".
+- Notes: "happy/just needed to pause for now" or "wants to cancel and come back at a later time". → "Not Enough Call Volume" if the ticket suggests low usage, otherwise "Unknown / Unspecified".
+- Notes: "no reason but was happy". → "Unknown / Unspecified" (truly nothing to go on).
+- Notes: "She wished not to discuss, just cancel" / "He did not want to share his reason". → "Unknown / Unspecified" — customer explicitly declined to give a reason.
+- Notes: "service no longer needed" / "no longer wanted services" / "no longer needs service" with no other signal. → "Doesn't See Value" (Low confidence) — they decided the service wasn't needed enough to keep.
 - Notes: "we were ruining her business" or "agents didn't know who they were answering for" or "messages never sent" or "lost lead". → "Quality" with appropriate subcategory.
 - Notes blank but final reason column says "AI" or "Went to AI". → "Switched to AI Service". If ticket mentions specific AI tool, set competitorName.
 
