@@ -630,7 +630,7 @@ export default function ZendeskAuditor() {
   const [singleLoading, setSingleLoading] = useState(false);
   const [singleError, setSingleError] = useState('');
   const [chartFilter, setChartFilter] = useState(null); // { rows, label }
-  const [hiddenCats, setHiddenCats] = useState(new Set(['Unknown / Unspecified', 'No Cancellation Evidence Found']));
+  const [hiddenCats, setHiddenCats] = useState(new Set());
   const [dedupeMode, setDedupeMode] = useState(false);
 
   const handleFile = useCallback((f) => {
@@ -758,7 +758,7 @@ export default function ZendeskAuditor() {
     setError('');
     setChartFilter(null);
     setLookbackDays('');
-    setHiddenCats(new Set(['Unknown / Unspecified', 'No Cancellation Evidence Found']));
+    setHiddenCats(new Set());
     setDedupeMode(false);
   }, [handleCancel]);
 
