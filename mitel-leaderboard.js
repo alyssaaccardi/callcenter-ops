@@ -62,14 +62,37 @@ function parseFloat0(s) {
   return Number.isNaN(n) ? 0 : n;
 }
 
-// Split a row honoring both tab-separated and 2+ space-separated cells.
-// MiCC exports as tabs but pasting through some tools collapses to spaces.
-function splitRow(line) {
-  if (line.includes('\t')) {
-    return line.split('\t').map(c => c.trim());
+// Detect the delimiter MiCC's export uses. Defaults to tab; falls back to
+// comma (Excel-style CSV) or 2+ spaces (paste from a TSV-rendered table).
+function detectDelimiter(lines) {
+  // Sample the first 20 non-empty lines and count occurrences
+  let tabs = 0, commas = 0;
+  for (const l of lines.slice(0, 20)) {
+    tabs   += (l.match(/\t/g) || []).length;
+    commas += (l.match(/,/g) || []).length;
   }
-  // Fall back to runs of 2+ whitespace as a separator
-  return line.trim().split(/ {2,}|\t/).map(c => c.trim());
+  if (tabs >= 10)      return 'tab';
+  if (commas >= 10)    return 'comma';
+  return 'spaces';
+}
+
+function makeSplitter(delim) {
+  if (delim === 'tab')   return line => line.split('\t').map(c => c.trim());
+  if (delim === 'comma') return line => line.split(',').map(c => c.trim());
+  return line => line.trim().split(/ {2,}|\t/).map(c => c.trim());
+}
+
+// A "noise" row is one where every cell is empty (e.g. ",,,,,,,," in CSV).
+function isNoiseRow(cells) {
+  return cells.every(c => c.trim() === '');
+}
+
+// Trim leading empty cells from a row. Excel sometimes exports the title etc.
+// in column B with column A empty, which would shift all our indices.
+function leftStrip(cells) {
+  let i = 0;
+  while (i < cells.length && cells[i] === '') i++;
+  return cells.slice(i);
 }
 
 function parseDateRange(line) {
@@ -80,32 +103,46 @@ function parseDateRange(line) {
 }
 
 function parseReport(raw) {
-  const lines = raw
+  const allLines = raw
     .replace(/\r\n?/g, '\n')
     .split('\n')
     .map(l => l.replace(/\s+$/, ''))   // trim trailing whitespace
     .filter(l => l.trim().length > 0);
 
-  if (lines.length < 6) throw new Error('Report too short — expected at least 6 lines');
+  if (allLines.length < 6) throw new Error('Report too short — expected at least 6 non-empty lines');
 
-  // Metadata lines (1-4) — peel off until we hit the column header (row containing "Reporting" and "Full name")
-  const headerIdx = lines.findIndex(l => /\bReporting\b/.test(l) && /\bFull name\b/.test(l));
+  const delim    = detectDelimiter(allLines);
+  const splitter = makeSplitter(delim);
+
+  // Split each line into cells, then drop noise rows (all-empty cells, e.g. a row of just commas)
+  const rows = allLines
+    .map(splitter)
+    .filter(cells => !isNoiseRow(cells))
+    // strip any leading empty cells so the title etc. don't slide off into column B
+    .map(leftStrip);
+
+  // Header row contains "Reporting" and "Full name"
+  const headerIdx = rows.findIndex(cells => {
+    const joined = cells.join(' | ');
+    return /\bReporting\b/.test(joined) && /\bFull name\b/.test(joined);
+  });
   if (headerIdx === -1) throw new Error('Could not find column header row ("Reporting" + "Full name")');
-  if (headerIdx < 1) throw new Error('Metadata lines missing before header');
 
-  const metaLines = lines.slice(0, headerIdx);
-  const title       = metaLines[0] || '';
-  const groupInfo   = metaLines[1] || '';
-  const periodLine  = metaLines[2] || '';
-  const createdLine = metaLines[3] || '';
+  const metaRows = rows.slice(0, headerIdx).map(cells => cells.join(' ').replace(/\s+/g, ' ').trim());
+
+  // Pull metadata lines by content rather than position — order in MiCC exports varies slightly
+  const title       = metaRows.find(l => /Performance by Agent/i.test(l)) || metaRows[0] || '';
+  const groupInfo   = metaRows.find(l => /AgentGroup|\[Main/i.test(l))     || '';
+  const periodLine  = metaRows.find(l => /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(l) && !/Created on/i.test(l)) || '';
+  const createdLine = metaRows.find(l => /^Created on/i.test(l))           || '';
   const { startDate, endDate } = parseDateRange(periodLine);
   const createdMatch = createdLine.match(/Created on (.+?) by (.+)$/);
 
   // Data rows: everything after the header until "Totals" (or EOF)
-  const dataLines = lines.slice(headerIdx + 1);
-  const totalsIdx = dataLines.findIndex(l => /^Totals\b/i.test(l.trim()));
-  const agentLines = totalsIdx === -1 ? dataLines : dataLines.slice(0, totalsIdx);
-  const totalsLine = totalsIdx === -1 ? null : dataLines[totalsIdx];
+  const dataRows  = rows.slice(headerIdx + 1);
+  const totalsIdx = dataRows.findIndex(cells => /^total/i.test((cells[0] || '').trim()));
+  const agentRows = totalsIdx === -1 ? dataRows : dataRows.slice(0, totalsIdx);
+  const totalsRow = totalsIdx === -1 ? null : dataRows[totalsIdx];
 
   function rowToObject(cells) {
     const row = {};
@@ -123,23 +160,20 @@ function parseReport(raw) {
     return row;
   }
 
-  const agents = agentLines
-    .map(splitRow)
+  const agents = agentRows
     .filter(cells => cells.length >= COLUMNS.length - 2) // tolerate trailing empty cells
     .map(rowToObject);
 
   let totals = null;
-  if (totalsLine) {
-    // Totals row has an empty Reporting cell — pad the front so column indices line up
-    const cells = splitRow(totalsLine);
-    // First cell is "Totals". Reporting ID and name slots are empty in this export
-    // — but the splitRow above strips the empties. So we shift one in.
-    if (cells[0].toLowerCase().startsWith('total')) {
-      // Insert an empty "name" cell at index 1 if numbers start at index 1
-      // Detect: if cells[1] is purely numeric, the "name" cell was collapsed.
-      if (cells.length === COLUMNS.length - 1) cells.splice(1, 0, '');
+  if (totalsRow) {
+    // The Totals row label "Totals" lives in the Reporting column with the name
+    // column usually empty. We want the numeric cells to line up with the schema,
+    // so insert an empty name cell when the data shifted left.
+    const cells = [...totalsRow];
+    if (/^total/i.test(cells[0] || '')) {
+      if (cells.length === COLUMNS.length - 1) cells.splice(1, 0, ''); // missing name cell
     }
-    cells[0] = ''; // drop "Totals" from the Reporting cell
+    cells[0] = ''; // drop "Totals" label from the Reporting slot
     totals = rowToObject(cells);
     totals.fullName = 'Totals';
   }
