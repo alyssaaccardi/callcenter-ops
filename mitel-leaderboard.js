@@ -245,6 +245,161 @@ function deleteSnapshot(id) {
   return true;
 }
 
+// ── Aggregation ──────────────────────────────────────────────────────────────
+//
+// Combine snapshots whose period falls inside [from, to] into one per-agent
+// view. Sums for counts and durations; *weighted* averages for handle-time
+// and percent-of-shift (plain means would lie when weeks differ in volume).
+//
+// Returns:
+//   {
+//     range:       { from, to },          // echoed
+//     snapshots:   [{id, startDate, endDate, agentCount}], // included
+//     overlaps:    [{a, b}],              // pairs of snapshot ids with overlapping dates
+//     totals:      {acdCalls, ...},       // grand totals across the range
+//     agents:      [{...per-agent aggregate...}],
+//     columns:     COLUMNS,
+//   }
+
+function parseMDY(s) {
+  if (!s) return null;
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (!m) return null;
+  const [, mo, d, y] = m;
+  return new Date(parseInt(y, 10), parseInt(mo, 10) - 1, parseInt(d, 10));
+}
+
+function inRange(snap, from, to) {
+  const s = parseMDY(snap.startDate);
+  const e = parseMDY(snap.endDate);
+  if (!s || !e) return false;
+  // Treat snapshot as included if it overlaps the range at all.
+  if (from && e < from) return false;
+  if (to   && s > to)   return false;
+  return true;
+}
+
+function detectOverlaps(snaps) {
+  const pairs = [];
+  for (let i = 0; i < snaps.length; i++) {
+    for (let j = i + 1; j < snaps.length; j++) {
+      const a = snaps[i], b = snaps[j];
+      const aStart = parseMDY(a.startDate);
+      const aEnd   = parseMDY(a.endDate);
+      const bStart = parseMDY(b.startDate);
+      const bEnd   = parseMDY(b.endDate);
+      if (!aStart || !aEnd || !bStart || !bEnd) continue;
+      if (aStart <= bEnd && bStart <= aEnd) {
+        pairs.push({ a: a.id, b: b.id });
+      }
+    }
+  }
+  return pairs;
+}
+
+function aggregate({ from, to } = {}) {
+  const fromDate = from ? new Date(from) : null;
+  const toDate   = to   ? new Date(to)   : null;
+  const all      = loadAll();
+  const included = all.filter(s => inRange(s, fromDate, toDate));
+
+  // Per-agent accumulator keyed by extension (reportingId) — names can change spelling,
+  // extensions are stable.
+  const byAgent = new Map();
+  const sumFields  = ['acdCalls', 'nonAcdCalls', 'outboundCalls', 'requeued', 'accountCodes'];
+  const timeFields = ['shiftDurationSec', 'acdHandlingSec', 'nonAcdHandlingSec', 'outboundHandlingSec', 'makeBusySec', 'dndSec'];
+
+  for (const snap of included) {
+    for (const a of snap.agents || []) {
+      const key = a.reportingId || a.fullName;
+      if (!key) continue;
+      let agg = byAgent.get(key);
+      if (!agg) {
+        agg = { reportingId: a.reportingId, fullName: a.fullName, snapshotsContributed: 0 };
+        for (const f of sumFields) agg[f] = 0;
+        for (const f of timeFields) agg[f] = 0;
+        byAgent.set(key, agg);
+      }
+      agg.snapshotsContributed += 1;
+      agg.fullName = a.fullName || agg.fullName;  // prefer most recent name spelling
+      for (const f of sumFields)  agg[f] += (a[f]  || 0);
+      for (const f of timeFields) agg[f] += (a[f]  || 0);
+    }
+  }
+
+  // Derive averages + percentages from the sums.
+  const agents = [];
+  for (const agg of byAgent.values()) {
+    const fmt = (sec) => {
+      sec = Math.max(0, Math.round(sec || 0));
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    };
+    const row = { ...agg };
+    // Echo time strings for display
+    for (const f of timeFields) row[f.replace(/Sec$/, '')] = fmt(agg[f]);
+    // Weighted average handle time = total ACD handling / ACD calls
+    row.acdHandlingAvgSec = agg.acdCalls > 0 ? Math.round(agg.acdHandlingSec / agg.acdCalls) : 0;
+    row.acdHandlingAvg    = fmt(row.acdHandlingAvgSec);
+    row.nonAcdHandlingAvgSec = agg.nonAcdCalls > 0 ? Math.round(agg.nonAcdHandlingSec / agg.nonAcdCalls) : 0;
+    row.nonAcdHandlingAvg    = fmt(row.nonAcdHandlingAvgSec);
+    row.outboundHandlingAvgSec = agg.outboundCalls > 0 ? Math.round(agg.outboundHandlingSec / agg.outboundCalls) : 0;
+    row.outboundHandlingAvg    = fmt(row.outboundHandlingAvgSec);
+    // Weighted percentages: time on each state / total shift
+    const shift = agg.shiftDurationSec || 0;
+    row.acdPct       = shift > 0 ? Math.round((agg.acdHandlingSec      / shift) * 1000) / 10 : 0;
+    row.nonAcdPct    = shift > 0 ? Math.round((agg.nonAcdHandlingSec   / shift) * 1000) / 10 : 0;
+    row.outboundPct  = shift > 0 ? Math.round((agg.outboundHandlingSec / shift) * 1000) / 10 : 0;
+    row.makeBusyPct  = shift > 0 ? Math.round((agg.makeBusySec         / shift) * 1000) / 10 : 0;
+    row.dndPct       = shift > 0 ? Math.round((agg.dndSec              / shift) * 1000) / 10 : 0;
+    agents.push(row);
+  }
+
+  // Grand totals
+  const totals = {};
+  for (const f of sumFields)  totals[f] = agents.reduce((a, r) => a + (r[f] || 0), 0);
+  for (const f of timeFields) totals[f] = agents.reduce((a, r) => a + (r[f] || 0), 0);
+  totals.fullName = 'Totals';
+  totals.snapshotsContributed = included.length;
+
+  return {
+    range: { from: from || null, to: to || null },
+    snapshots: included.map(s => ({
+      id: s.id, startDate: s.startDate, endDate: s.endDate,
+      periodLine: s.periodLine, agentCount: s.agents?.length || 0,
+    })),
+    overlaps: detectOverlaps(included),
+    totals,
+    agents,
+    columns: COLUMNS,
+  };
+}
+
+// Return the full history of one agent (by extension) across every snapshot.
+function agentHistory(reportingId) {
+  if (!reportingId) return { reportingId, rows: [] };
+  const rows = [];
+  for (const snap of loadAll()) {
+    const a = (snap.agents || []).find(x => String(x.reportingId) === String(reportingId));
+    if (!a) continue;
+    rows.push({
+      snapshotId: snap.id,
+      startDate:  snap.startDate,
+      endDate:    snap.endDate,
+      ...a,
+    });
+  }
+  // Newest first by parsed start date when possible
+  rows.sort((a, b) => {
+    const ad = parseMDY(a.startDate)?.getTime() || 0;
+    const bd = parseMDY(b.startDate)?.getTime() || 0;
+    return bd - ad;
+  });
+  return { reportingId, fullName: rows[0]?.fullName || '', rows };
+}
+
 module.exports = {
   COLUMNS,
   parseReport,
@@ -252,4 +407,6 @@ module.exports = {
   getSnapshot,
   saveSnapshot,
   deleteSnapshot,
+  aggregate,
+  agentHistory,
 };

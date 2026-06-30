@@ -3524,6 +3524,18 @@ app.get('/api/mitel-leaderboard', requireAuth, (req, res) => {
   res.json({ snapshots: mitelLeaderboard.listSnapshots() });
 });
 
+// Aggregate snapshots whose period falls in [from, to] into one per-agent view.
+// Dates are ISO yyyy-mm-dd (omit for "all time").
+app.get('/api/mitel-leaderboard/aggregate', requireAuth, (req, res) => {
+  const { from, to } = req.query;
+  res.json(mitelLeaderboard.aggregate({ from, to }));
+});
+
+// Per-agent history — every row for one extension across all snapshots.
+app.get('/api/mitel-leaderboard/agent/:reportingId', requireAuth, (req, res) => {
+  res.json(mitelLeaderboard.agentHistory(req.params.reportingId));
+});
+
 // Fetch a single snapshot with full agent rows
 app.get('/api/mitel-leaderboard/:id', requireAuth, (req, res) => {
   const snap = mitelLeaderboard.getSnapshot(req.params.id);
