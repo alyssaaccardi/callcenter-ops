@@ -605,7 +605,7 @@ export default function MitelLeaderboard() {
             <>
               <div className="section-title" style={{ marginTop: 22, cursor: 'pointer' }} onClick={() => setShowLowSample(v => !v)}>
                 <span className="lowsample-chevron">{showLowSample ? '▼' : '▶'}</span>
-                Low Sample Size ({processed.lowSample.length} agents — &lt;10 shift hrs or &lt;100 ACD calls)
+                Low Sample Size ({processed.lowSample.length} agents — &lt;4 shift hrs or &lt;50 ACD calls)
               </div>
               {showLowSample && (
                 <div className="mitel-lb-table-wrap">
@@ -642,7 +642,7 @@ export default function MitelLeaderboard() {
           <div className="methodology">
             <strong>Efficiency Score (0–100):</strong> {METRICS.map(m => `${Math.round(m.weight * 100)}% ${m.label.toLowerCase()}`).join(' + ')}.
             Metrics are min-max normalized across ranked agents for the current view. Lower is better for handle time
-            (with a 60s floor to prevent over-rewarding rushed calls). Ranking requires ≥10 shift hours <em>and</em> ≥100 ACD calls.
+            (with a 60s floor to prevent over-rewarding rushed calls). Ranking requires a completed shift (≥4 hours, covering both 4hr and 8hr standard shifts) <em>and</em> ≥50 ACD calls.
           </div>
         </>
       )}

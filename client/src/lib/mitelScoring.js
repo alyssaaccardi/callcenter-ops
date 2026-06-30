@@ -4,7 +4,10 @@
 // added by editing METRICS — `compute` and `score` will pick them up
 // automatically as long as the source values are present on each agent row.
 
-export const SAMPLE_MINS = { shiftHours: 10, acdCalls: 100 };
+// Threshold for inclusion in the ranked leaderboard. ≥4 shift hours covers
+// the standard part-time shift (4hr) and full-time (8hr) — anyone below
+// likely worked a partial shift or didn't show up the full period.
+export const SAMPLE_MINS = { shiftHours: 4, acdCalls: 50 };
 
 // Each metric: where the value comes from, which direction is "good", its
 // weight in the final 0-100 score, and an optional floor that prevents
