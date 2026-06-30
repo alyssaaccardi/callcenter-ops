@@ -2,22 +2,31 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
+import { processAgents, scoreMapByExtension, METRICS } from '../lib/mitelScoring';
 import './MitelLeaderboard.css';
 
-// Columns shown on the table. Keys match both /api/mitel-leaderboard/:id and the
-// aggregated payload from /api/mitel-leaderboard/aggregate (same agent shape).
-const TABLE_COLS = [
-  { key: 'fullName',         label: 'Agent',             align: 'left',  type: 'text', defaultDir: 'asc' },
-  { key: 'reportingId',      label: 'Ext',               align: 'left',  type: 'text', defaultDir: 'asc' },
-  { key: 'acdCalls',         label: 'ACD',               align: 'right', type: 'int',  defaultDir: 'desc' },
-  { key: 'nonAcdCalls',      label: 'Non-ACD',           align: 'right', type: 'int',  defaultDir: 'desc' },
-  { key: 'outboundCalls',    label: 'Outbound',          align: 'right', type: 'int',  defaultDir: 'desc' },
-  { key: 'shiftDuration',    label: 'Shift',             align: 'right', type: 'time', defaultDir: 'desc' },
-  { key: 'acdHandling',      label: 'ACD Time',          align: 'right', type: 'time', defaultDir: 'desc' },
-  { key: 'acdHandlingAvg',   label: 'Avg Handle',        align: 'right', type: 'time', defaultDir: 'desc' },
-  { key: 'acdPct',           label: 'ACD %',             align: 'right', type: 'pct',  defaultDir: 'desc' },
-  { key: 'makeBusyPct',      label: 'Make Busy %',       align: 'right', type: 'pct',  defaultDir: 'asc'  },
-  { key: 'dndPct',           label: 'DND %',             align: 'right', type: 'pct',  defaultDir: 'asc'  },
+// Columns for the Full Agent Table. Order matches the spec.
+const FULL_COLS = [
+  { key: 'fullName',           label: 'Agent',           align: 'left',  type: 'text', defaultDir: 'asc' },
+  { key: 'shiftHours',         label: 'Shift Hrs',       align: 'right', type: 'num1', defaultDir: 'desc' },
+  { key: 'acdCalls',           label: 'ACD',             align: 'right', type: 'int',  defaultDir: 'desc' },
+  { key: 'callsPerHour',       label: 'Calls / Hr',      align: 'right', type: 'num1', defaultDir: 'desc' },
+  { key: 'acdHandlingAvgSec',  label: 'Avg Handle',      align: 'right', type: 'time', defaultDir: 'desc' },
+  { key: 'occupancy',          label: 'Occ %',           align: 'right', type: 'pct',  defaultDir: 'desc' },
+  { key: 'makeBusyPct',        label: 'Make Busy %',     align: 'right', type: 'pct',  defaultDir: 'asc'  },
+  { key: 'dndPct',             label: 'DND %',           align: 'right', type: 'pct',  defaultDir: 'asc'  },
+  { key: 'availability',       label: 'Avail %',         align: 'right', type: 'pct',  defaultDir: 'desc' },
+  { key: 'efficiencyScore',    label: 'Score',           align: 'right', type: 'num1', defaultDir: 'desc' },
+];
+
+// Compact columns for Top 10 / Bottom 10 / Low Sample tables
+const COMPACT_COLS = [
+  { key: 'fullName',           label: 'Agent',           align: 'left',  type: 'text' },
+  { key: 'efficiencyScore',    label: 'Score',           align: 'right', type: 'num1' },
+  { key: 'callsPerHour',       label: 'Calls / Hr',      align: 'right', type: 'num1' },
+  { key: 'occupancy',          label: 'Occ %',           align: 'right', type: 'pct'  },
+  { key: 'acdHandlingAvgSec',  label: 'Avg Handle',      align: 'right', type: 'time' },
+  { key: 'availability',       label: 'Avail %',         align: 'right', type: 'pct'  },
 ];
 
 const RANGE_PRESETS = [
@@ -37,6 +46,13 @@ function fmtTime(sec) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+function fmtMMSS(sec) {
+  if (!sec || sec <= 0) return '—';
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 function isoDate(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -44,7 +60,6 @@ function isoDate(d) {
   return `${y}-${m}-${dd}`;
 }
 
-// Convert a preset key to {from, to} as ISO yyyy-mm-dd, or {} for "all time".
 function rangeForPreset(key) {
   const now = new Date();
   if (key === 'all') return { from: null, to: null };
@@ -66,17 +81,34 @@ function rangeForPreset(key) {
 
 function compareCell(a, b, col, dir) {
   let av, bv;
-  if (col.type === 'time') { av = a[col.key + 'Sec'] || 0; bv = b[col.key + 'Sec'] || 0; }
-  else if (col.type === 'int' || col.type === 'pct') { av = a[col.key] || 0; bv = b[col.key] || 0; }
+  if (col.type === 'time') { av = a[col.key] || 0; bv = b[col.key] || 0; }
+  else if (col.type === 'int' || col.type === 'pct' || col.type === 'num1') { av = a[col.key] || 0; bv = b[col.key] || 0; }
   else { av = (a[col.key] || '').toString().toLowerCase(); bv = (b[col.key] || '').toString().toLowerCase(); }
   if (av < bv) return dir === 'asc' ? -1 : 1;
   if (av > bv) return dir === 'asc' ? 1  : -1;
   return 0;
 }
 
+function renderCell(a, col) {
+  const v = a[col.key];
+  if (col.type === 'time') return fmtMMSS(a[col.key] || 0);
+  if (col.type === 'pct')  return (v != null ? `${v}%` : '—');
+  if (col.type === 'int')  return (v ?? 0).toLocaleString();
+  if (col.type === 'num1') return (v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return v ?? '';
+}
+
 function periodLabel(snap) {
   if (snap?.startDate && snap?.endDate) return `${snap.startDate} – ${snap.endDate}`;
   return snap?.periodLine || 'Unknown period';
+}
+
+function TrendArrow({ delta, suffix }) {
+  if (delta == null) return null;
+  const rounded = Math.round(delta * 10) / 10;
+  if (Math.abs(rounded) < 0.5) return <span className="trend trend-flat">= </span>;
+  if (rounded > 0)              return <span className="trend trend-up">▲ {rounded.toFixed(1)}{suffix || ''}</span>;
+  return                              <span className="trend trend-down">▼ {Math.abs(rounded).toFixed(1)}{suffix || ''}</span>;
 }
 
 export default function MitelLeaderboard() {
@@ -88,6 +120,7 @@ export default function MitelLeaderboard() {
   const [snapshots, setSnapshots] = useState([]);
   const [activeId, setActiveId]   = useState(null);
   const [snap, setSnap]           = useState(null);
+  const [prevSnap, setPrevSnap]   = useState(null);  // for trend arrows
   const [agg, setAgg]             = useState(null);
   const [loading, setLoading]     = useState(true);
 
@@ -95,16 +128,16 @@ export default function MitelLeaderboard() {
   const [customFrom, setCustomFrom]   = useState('');
   const [customTo,   setCustomTo]     = useState('');
 
-  const [sortKey, setSortKey] = useState('acdCalls');
+  const [sortKey, setSortKey] = useState('efficiencyScore');
   const [sortDir, setSortDir] = useState('desc');
-  const [showInactive, setShowInactive] = useState(false);
   const [filter, setFilter]   = useState('');
+  const [showLowSample, setShowLowSample] = useState(false);
 
   const [importOpen, setImportOpen] = useState(false);
   const [pasteText, setPasteText]   = useState('');
   const [importing, setImporting]   = useState(false);
 
-  const [drillAgent, setDrillAgent] = useState(null);     // { reportingId, fullName, rows }
+  const [drillAgent, setDrillAgent] = useState(null);
   const [drillLoading, setDrillLoading] = useState(false);
 
   const fetchSnapshots = useCallback(async () => {
@@ -121,22 +154,40 @@ export default function MitelLeaderboard() {
     }
   }, [activeId, toast]);
 
-  // Initial load
   useEffect(() => { fetchSnapshots().finally(() => setLoading(false)); }, []);  // eslint-disable-line
 
-  // Snapshot view — fetch one snapshot at a time
+  // Snapshot view — also fetch the previous-period snapshot for week-over-week trends
   useEffect(() => {
     if (viewMode !== 'snapshot' || !activeId) return;
     let cancelled = false;
     setLoading(true);
     api.get(`/api/mitel-leaderboard/${activeId}`)
-      .then(r => { if (!cancelled) setSnap(r.data); })
+      .then(async r => {
+        if (cancelled) return;
+        setSnap(r.data);
+        // Find the snapshot immediately preceding this one by start date
+        const sorted = [...snapshots].sort((a, b) => {
+          const ad = new Date(a.startDate || 0).getTime();
+          const bd = new Date(b.startDate || 0).getTime();
+          return bd - ad;
+        });
+        const idx = sorted.findIndex(s => s.id === activeId);
+        const prev = idx >= 0 ? sorted[idx + 1] : null;
+        if (prev) {
+          try {
+            const pr = await api.get(`/api/mitel-leaderboard/${prev.id}`);
+            if (!cancelled) setPrevSnap(pr.data);
+          } catch { if (!cancelled) setPrevSnap(null); }
+        } else if (!cancelled) {
+          setPrevSnap(null);
+        }
+      })
       .catch(() => { if (!cancelled) toast('Could not load snapshot', 'error'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [viewMode, activeId, toast]);
+  }, [viewMode, activeId, snapshots, toast]);
 
-  // Combined view — fetch aggregated data whenever the range changes
+  // Combined view — aggregate endpoint
   useEffect(() => {
     if (viewMode !== 'combined') return;
     let cancelled = false;
@@ -154,6 +205,18 @@ export default function MitelLeaderboard() {
     return () => { cancelled = true; };
   }, [viewMode, rangePreset, customFrom, customTo, toast]);
 
+  // Process data through scoring pipeline — single source of truth for the page
+  const processed = useMemo(() => {
+    const sourceAgents = viewMode === 'combined' ? (agg?.agents || []) : (snap?.agents || []);
+    return processAgents(sourceAgents);
+  }, [viewMode, snap, agg]);
+
+  // Previous-period score lookup for trend arrows
+  const prevScores = useMemo(() => {
+    if (viewMode !== 'snapshot' || !prevSnap?.agents) return new Map();
+    return scoreMapByExtension(prevSnap.agents);
+  }, [viewMode, prevSnap]);
+
   function clickHeader(col) {
     if (sortKey === col.key) {
       setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -163,21 +226,32 @@ export default function MitelLeaderboard() {
     }
   }
 
-  // Data source for the table is whichever view is active
-  const sourceAgents = viewMode === 'combined' ? (agg?.agents || []) : (snap?.agents || []);
+  const ranked = processed.ranked;
 
-  const rows = useMemo(() => {
-    if (!sourceAgents.length) return [];
-    const col = TABLE_COLS.find(c => c.key === sortKey) || TABLE_COLS[2];
+  const filteredRanked = useMemo(() => {
     const filterLower = filter.trim().toLowerCase();
-    return sourceAgents
-      .filter(a => {
-        if (!showInactive && a.acdCalls === 0 && (a.shiftDurationSec || 0) === 0) return false;
-        if (filterLower && !(a.fullName || '').toLowerCase().includes(filterLower) && !String(a.reportingId || '').includes(filterLower)) return false;
-        return true;
-      })
-      .sort((a, b) => compareCell(a, b, col, sortDir));
-  }, [sourceAgents, sortKey, sortDir, showInactive, filter]);
+    if (!filterLower) return ranked;
+    return ranked.filter(a =>
+      (a.fullName || '').toLowerCase().includes(filterLower) ||
+      String(a.reportingId || '').includes(filterLower)
+    );
+  }, [ranked, filter]);
+
+  const sortedForTable = useMemo(() => {
+    const col = FULL_COLS.find(c => c.key === sortKey) || FULL_COLS[FULL_COLS.length - 1];
+    return [...filteredRanked].sort((a, b) => compareCell(a, b, col, sortDir));
+  }, [filteredRanked, sortKey, sortDir]);
+
+  // Top 10 = highest scores; Bottom 10 = lowest, but only among ranked
+  const top10    = ranked.slice(0, 10);
+  const bottom10 = ranked.length > 10 ? ranked.slice(-10).reverse() : [];
+
+  // Trend arrows: difference vs previous-period agent (by extension)
+  function trendFor(a, field) {
+    const prev = prevScores.get(String(a.reportingId));
+    if (!prev) return null;
+    return (a[field] || 0) - (prev[field] || 0);
+  }
 
   async function submitImport() {
     if (!pasteText.trim()) { toast('Paste the report first', 'error'); return; }
@@ -247,18 +321,48 @@ export default function MitelLeaderboard() {
     }
   }
 
-  function renderCell(a, col) {
-    const v = a[col.key];
-    if (col.type === 'time') return fmtTime(a[col.key + 'Sec'] || 0);
-    if (col.type === 'pct')  return (v != null ? `${v}%` : '—');
-    if (col.type === 'int')  return (v ?? 0).toLocaleString();
-    return v ?? '';
-  }
-
-  const totals = viewMode === 'combined' ? agg?.totals : snap?.totals;
-  const hiddenCount = sourceAgents.length - rows.length;
+  const summary = processed.summary;
   const overlaps    = agg?.overlaps?.length || 0;
   const includedSnaps = agg?.snapshots || [];
+
+  function renderCompactTable(rows, opts = {}) {
+    const { showTrend = false, showRank = true } = opts;
+    return (
+      <div className="mitel-lb-table-wrap">
+        <table className="mitel-lb-table">
+          <thead>
+            <tr>
+              {showRank && <th className="rank-col">#</th>}
+              {COMPACT_COLS.map(col => (
+                <th key={col.key} className={col.align === 'right' ? 'align-right' : ''}>{col.label}</th>
+              ))}
+              {showTrend && <th className="align-right">Δ vs last</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((a, idx) => (
+              <tr key={(a.reportingId || '') + a.fullName}>
+                {showRank && <td className="rank-col">{idx + 1}</td>}
+                {COMPACT_COLS.map(col => (
+                  <td key={col.key} className={col.align === 'right' ? 'align-right' : ''}>
+                    {col.key === 'fullName'
+                      ? <button className="agent-link" onClick={() => openDrill(a)}>{a.fullName}</button>
+                      : renderCell(a, col)}
+                  </td>
+                ))}
+                {showTrend && (
+                  <td className="align-right">
+                    <TrendArrow delta={trendFor(a, 'efficiencyScore')} />
+                  </td>
+                )}
+              </tr>
+            ))}
+            {rows.length === 0 && <tr><td colSpan={COMPACT_COLS.length + (showRank ? 1 : 0) + (showTrend ? 1 : 0)} className="empty-row">No agents.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 
   return (
     <div className="mitel-lb">
@@ -266,7 +370,7 @@ export default function MitelLeaderboard() {
         <div>
           <h1>Mitel Leaderboard</h1>
           <div className="mitel-lb-sub">
-            Agent group performance imported from MiCC's "Agent Group Performance by Agent" report.
+            Efficiency-focused view of MiCC's "Agent Group Performance by Agent" report — normalized for shift length.
           </div>
         </div>
         <div className="mitel-lb-actions">
@@ -283,7 +387,7 @@ export default function MitelLeaderboard() {
           className={`mode-btn ${viewMode === 'snapshot' ? 'active' : ''}`}
           onClick={() => setViewMode('snapshot')}
         >
-          Snapshot
+          Weekly
         </button>
         <button
           className={`mode-btn ${viewMode === 'combined' ? 'active' : ''}`}
@@ -293,11 +397,7 @@ export default function MitelLeaderboard() {
         </button>
         <div style={{ flex: 1 }} />
         {viewMode === 'snapshot' && snapshots.length > 0 && (
-          <select
-            className="mitel-lb-select"
-            value={activeId || ''}
-            onChange={e => setActiveId(e.target.value)}
-          >
+          <select className="mitel-lb-select" value={activeId || ''} onChange={e => setActiveId(e.target.value)}>
             {snapshots.map(s => (
               <option key={s.id} value={s.id}>
                 {periodLabel(s)} ({s.agentCount} agents)
@@ -307,11 +407,7 @@ export default function MitelLeaderboard() {
         )}
         {viewMode === 'combined' && (
           <>
-            <select
-              className="mitel-lb-select"
-              value={rangePreset}
-              onChange={e => setRangePreset(e.target.value)}
-            >
+            <select className="mitel-lb-select" value={rangePreset} onChange={e => setRangePreset(e.target.value)}>
               {RANGE_PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
             </select>
             {rangePreset === 'custom' && (
@@ -350,15 +446,17 @@ export default function MitelLeaderboard() {
             <div className="meta-value">{(snap.groupInfo || '').replace(/\s+/g, ' ').trim()}</div>
           </div>
           <div className="meta-card">
+            <div className="meta-label">Compared to</div>
+            <div className="meta-value">
+              {prevSnap ? `${prevSnap.startDate} – ${prevSnap.endDate}` : <span style={{ color: 'var(--muted, #6b7a99)' }}>no earlier snapshot</span>}
+            </div>
+          </div>
+          <div className="meta-card">
             <div className="meta-label">Imported</div>
             <div className="meta-value">
               {snap.importedAt ? new Date(snap.importedAt).toLocaleString() : '—'}
               {snap.importedBy && <span className="meta-sub"> · by {snap.importedBy}</span>}
             </div>
-          </div>
-          <div className="meta-card">
-            <div className="meta-label">Source</div>
-            <div className="meta-value">{snap.createdAt || '—'} <span className="meta-sub">· {snap.createdBy || ''}</span></div>
           </div>
         </div>
       )}
@@ -368,9 +466,7 @@ export default function MitelLeaderboard() {
           <div className="mitel-lb-meta">
             <div className="meta-card">
               <div className="meta-label">Range</div>
-              <div className="meta-value">
-                {agg.range.from || 'beginning'} → {agg.range.to || 'now'}
-              </div>
+              <div className="meta-value">{agg.range.from || 'beginning'} → {agg.range.to || 'now'}</div>
             </div>
             <div className="meta-card">
               <div className="meta-label">Snapshots included</div>
@@ -389,13 +485,11 @@ export default function MitelLeaderboard() {
               </div>
             </div>
           </div>
-
           {overlaps > 0 && (
             <div className="mitel-lb-warn">
               ⚠️ {overlaps} pair{overlaps === 1 ? '' : 's'} of snapshots in this range have overlapping date ranges. Agents in the overlap are counted twice. Delete the redundant imports for accurate numbers.
             </div>
           )}
-
           {includedSnaps.length === 0 && (
             <div className="mitel-lb-empty">No snapshots fall within this range.</div>
           )}
@@ -404,24 +498,49 @@ export default function MitelLeaderboard() {
 
       {(snap || agg) && (
         <>
-          {totals && (
-            <div className="mitel-lb-totals">
-              <div className="totals-tile"><div className="totals-num">{(totals.acdCalls || 0).toLocaleString()}</div><div className="totals-label">ACD calls</div></div>
-              <div className="totals-tile"><div className="totals-num">{(totals.nonAcdCalls || 0).toLocaleString()}</div><div className="totals-label">Non-ACD</div></div>
-              <div className="totals-tile"><div className="totals-num">{(totals.outboundCalls || 0).toLocaleString()}</div><div className="totals-label">Outbound</div></div>
-              <div className="totals-tile"><div className="totals-num">{fmtTime(totals.shiftDurationSec)}</div><div className="totals-label">Total shift</div></div>
-              <div className="totals-tile"><div className="totals-num">{fmtTime(totals.acdHandlingSec)}</div><div className="totals-label">ACD handling</div></div>
-              <div className="totals-tile">
-                <div className="totals-num">
-                  {totals.shiftDurationSec > 0
-                    ? `${Math.round((totals.acdHandlingSec / totals.shiftDurationSec) * 1000) / 10}%`
-                    : '—'}
-                </div>
-                <div className="totals-label">ACD % shift</div>
-              </div>
+          {/* ── Executive Summary ──────────────────────────── */}
+          <div className="section-title">Executive Summary</div>
+          <div className="mitel-lb-totals">
+            <div className="totals-tile">
+              <div className="totals-num">{summary.avgCallsPerHour.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</div>
+              <div className="totals-label">Avg Calls / Hr</div>
             </div>
-          )}
+            <div className="totals-tile">
+              <div className="totals-num">{summary.avgOccupancy}%</div>
+              <div className="totals-label">Avg Occupancy</div>
+            </div>
+            <div className="totals-tile">
+              <div className="totals-num">{fmtMMSS(summary.avgHandleSec)}</div>
+              <div className="totals-label">Avg Handle Time</div>
+            </div>
+            <div className="totals-tile">
+              <div className="totals-num">{summary.avgAvailability}%</div>
+              <div className="totals-label">Avg Availability</div>
+            </div>
+            <div className="totals-tile">
+              <div className="totals-num">{summary.rankedCount}</div>
+              <div className="totals-label">Ranked Agents</div>
+            </div>
+            <div className="totals-tile">
+              <div className="totals-num">{summary.lowSampleCount}</div>
+              <div className="totals-label">Low Sample</div>
+            </div>
+          </div>
 
+          {/* ── Top 10 / Bottom 10 ────────────────────────── */}
+          <div className="two-col">
+            <div className="col">
+              <div className="section-title">🏆 Top 10 Most Efficient</div>
+              {renderCompactTable(top10, { showTrend: viewMode === 'snapshot' && prevSnap })}
+            </div>
+            <div className="col">
+              <div className="section-title">📉 Bottom 10 (coaching opportunities)</div>
+              {renderCompactTable(bottom10, { showTrend: viewMode === 'snapshot' && prevSnap })}
+            </div>
+          </div>
+
+          {/* ── Filter bar ────────────────────────────────── */}
+          <div className="section-title" style={{ marginTop: 18 }}>Full Agent Table</div>
           <div className="mitel-lb-toolbar">
             <input
               type="text"
@@ -430,10 +549,6 @@ export default function MitelLeaderboard() {
               value={filter}
               onChange={e => setFilter(e.target.value)}
             />
-            <label className="mitel-lb-toggle">
-              <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
-              Show inactive ({hiddenCount} hidden)
-            </label>
             {canWrite && viewMode === 'snapshot' && snap && (
               <button className="btn btn-ghost" onClick={deleteSnapshot} style={{ marginLeft: 'auto', color: '#b91c1c' }}>
                 Delete this import
@@ -441,12 +556,13 @@ export default function MitelLeaderboard() {
             )}
           </div>
 
+          {/* ── Full Agent Table ─────────────────────────── */}
           <div className="mitel-lb-table-wrap">
             <table className="mitel-lb-table">
               <thead>
                 <tr>
                   <th className="rank-col">#</th>
-                  {TABLE_COLS.map(col => (
+                  {FULL_COLS.map(col => (
                     <th
                       key={col.key}
                       className={`${col.align === 'right' ? 'align-right' : ''} ${sortKey === col.key ? 'sorted' : ''}`}
@@ -460,29 +576,78 @@ export default function MitelLeaderboard() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((a, idx) => (
-                  <tr key={a.reportingId + a.fullName}>
+                {sortedForTable.map((a, idx) => (
+                  <tr key={(a.reportingId || '') + a.fullName}>
                     <td className="rank-col">{idx + 1}</td>
-                    {TABLE_COLS.map(col => (
+                    {FULL_COLS.map(col => (
                       <td key={col.key} className={col.align === 'right' ? 'align-right' : ''}>
                         {col.key === 'fullName' ? (
-                          <button className="agent-link" onClick={() => openDrill(a)}>
-                            {a.fullName}
-                          </button>
+                          <button className="agent-link" onClick={() => openDrill(a)}>{a.fullName}</button>
+                        ) : col.key === 'efficiencyScore' && viewMode === 'snapshot' ? (
+                          <>
+                            <span className="score-badge">{renderCell(a, col)}</span>
+                            {prevSnap && <TrendArrow delta={trendFor(a, 'efficiencyScore')} />}
+                          </>
                         ) : renderCell(a, col)}
                       </td>
                     ))}
                   </tr>
                 ))}
-                {rows.length === 0 && (
-                  <tr><td colSpan={TABLE_COLS.length + 1} className="empty-row">No agents match the filter.</td></tr>
+                {sortedForTable.length === 0 && (
+                  <tr><td colSpan={FULL_COLS.length + 1} className="empty-row">No agents match the filter.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
+
+          {/* ── Low Sample Size section ──────────────────── */}
+          {processed.lowSample.length > 0 && (
+            <>
+              <div className="section-title" style={{ marginTop: 22, cursor: 'pointer' }} onClick={() => setShowLowSample(v => !v)}>
+                <span className="lowsample-chevron">{showLowSample ? '▼' : '▶'}</span>
+                Low Sample Size ({processed.lowSample.length} agents — &lt;10 shift hrs or &lt;100 ACD calls)
+              </div>
+              {showLowSample && (
+                <div className="mitel-lb-table-wrap">
+                  <table className="mitel-lb-table">
+                    <thead>
+                      <tr>
+                        <th>Agent</th>
+                        <th className="align-right">Shift Hrs</th>
+                        <th className="align-right">ACD</th>
+                        <th className="align-right">Calls / Hr</th>
+                        <th className="align-right">Avg Handle</th>
+                        <th className="align-right">Avail %</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {processed.lowSample.map(a => (
+                        <tr key={(a.reportingId || '') + a.fullName}>
+                          <td><button className="agent-link" onClick={() => openDrill(a)}>{a.fullName}</button></td>
+                          <td className="align-right">{a.shiftHours.toFixed(1)}</td>
+                          <td className="align-right">{(a.acdCalls || 0).toLocaleString()}</td>
+                          <td className="align-right">{a.callsPerHour.toFixed(1)}</td>
+                          <td className="align-right">{fmtMMSS(a.acdHandlingAvgSec || 0)}</td>
+                          <td className="align-right">{a.availability}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── Methodology footnote ─────────────────────── */}
+          <div className="methodology">
+            <strong>Efficiency Score (0–100):</strong> {METRICS.map(m => `${Math.round(m.weight * 100)}% ${m.label.toLowerCase()}`).join(' + ')}.
+            Metrics are min-max normalized across ranked agents for the current view. Lower is better for handle time
+            (with a 60s floor to prevent over-rewarding rushed calls). Ranking requires ≥10 shift hours <em>and</em> ≥100 ACD calls.
+          </div>
         </>
       )}
 
+      {/* ── Import modal ───────────────────────────────── */}
       {importOpen && (
         <div className="mitel-lb-modal" onClick={e => { if (e.target === e.currentTarget) setImportOpen(false); }}>
           <div className="mitel-lb-modal-content">
@@ -502,9 +667,7 @@ export default function MitelLeaderboard() {
                   <span className="file-upload-button">📁 Upload .txt / .tsv / .csv</span>
                 </label>
               </div>
-
               <div className="modal-divider"><span>or paste</span></div>
-
               <textarea
                 className="paste-area"
                 placeholder="Paste the entire report here, starting with 'Agent Group Performance by Agent'..."
@@ -513,7 +676,6 @@ export default function MitelLeaderboard() {
                 disabled={importing}
                 rows={12}
               />
-
               <div className="modal-actions">
                 <button className="btn btn-ghost" onClick={() => setImportOpen(false)} disabled={importing}>Cancel</button>
                 <button className="btn btn-primary" onClick={submitImport} disabled={importing || !pasteText.trim()}>
@@ -525,6 +687,7 @@ export default function MitelLeaderboard() {
         </div>
       )}
 
+      {/* ── Drill-down modal ───────────────────────────── */}
       {drillAgent && (
         <div className="mitel-lb-modal" onClick={e => { if (e.target === e.currentTarget) setDrillAgent(null); }}>
           <div className="mitel-lb-modal-content mitel-lb-drill">
@@ -542,32 +705,33 @@ export default function MitelLeaderboard() {
                     <thead>
                       <tr>
                         <th>Week</th>
+                        <th className="align-right">Shift Hrs</th>
                         <th className="align-right">ACD</th>
-                        <th className="align-right">Non-ACD</th>
-                        <th className="align-right">Outbound</th>
-                        <th className="align-right">Shift</th>
-                        <th className="align-right">ACD Time</th>
+                        <th className="align-right">Calls / Hr</th>
                         <th className="align-right">Avg Handle</th>
-                        <th className="align-right">ACD %</th>
-                        <th className="align-right">Make Busy %</th>
-                        <th className="align-right">DND %</th>
+                        <th className="align-right">Occ %</th>
+                        <th className="align-right">Avail %</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {drillAgent.rows.map(r => (
-                        <tr key={r.snapshotId}>
-                          <td>{r.startDate || '?'} → {r.endDate || '?'}</td>
-                          <td className="align-right">{(r.acdCalls || 0).toLocaleString()}</td>
-                          <td className="align-right">{(r.nonAcdCalls || 0).toLocaleString()}</td>
-                          <td className="align-right">{(r.outboundCalls || 0).toLocaleString()}</td>
-                          <td className="align-right">{fmtTime(r.shiftDurationSec)}</td>
-                          <td className="align-right">{fmtTime(r.acdHandlingSec)}</td>
-                          <td className="align-right">{fmtTime(r.acdHandlingAvgSec)}</td>
-                          <td className="align-right">{r.acdPct ?? 0}%</td>
-                          <td className="align-right">{r.makeBusyPct ?? 0}%</td>
-                          <td className="align-right">{r.dndPct ?? 0}%</td>
-                        </tr>
-                      ))}
+                      {drillAgent.rows.map(r => {
+                        const shiftHrs = (r.shiftDurationSec || 0) / 3600;
+                        const cph = shiftHrs > 0 ? (r.acdCalls || 0) / shiftHrs : 0;
+                        const mb = (r.shiftDurationSec || 0) > 0 ? ((r.makeBusySec || 0) / r.shiftDurationSec) * 100 : 0;
+                        const dd = (r.shiftDurationSec || 0) > 0 ? ((r.dndSec || 0)      / r.shiftDurationSec) * 100 : 0;
+                        const av = Math.max(0, 100 - mb - dd);
+                        return (
+                          <tr key={r.snapshotId}>
+                            <td>{r.startDate || '?'} → {r.endDate || '?'}</td>
+                            <td className="align-right">{shiftHrs.toFixed(1)}</td>
+                            <td className="align-right">{(r.acdCalls || 0).toLocaleString()}</td>
+                            <td className="align-right">{cph.toFixed(1)}</td>
+                            <td className="align-right">{fmtMMSS(r.acdHandlingAvgSec || 0)}</td>
+                            <td className="align-right">{r.acdPct ?? 0}%</td>
+                            <td className="align-right">{av.toFixed(1)}%</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
