@@ -780,7 +780,13 @@ app.get('/api/bandwidth/dids', requireAuth, async (req, res) => {
 
         const r = await axios.get(
           `https://api.bandwidth.com/api/accounts/${accountId}/sites/${siteId}/sippeers/${peerId}/tns`,
-          { headers: authHeader, params, maxRedirects: 5 }
+          {
+            headers: { ...authHeader, Accept: 'application/xml' },
+            params,
+            maxRedirects: 5,
+            responseType: 'text',
+            transformResponse: [d => d],
+          }
         );
         const xml = r.data;
         count += (xml.match(/<FullNumber>/g) || []).length;
