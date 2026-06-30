@@ -249,7 +249,7 @@ function renderStatus(state, message, updatedAt) {
 
 async function fetchStatus() {
   try {
-    const r = await fetch(BACKEND + '/api/status');
+    const r = await fetch(BACKEND + '/api/widget/status');
     if (!r.ok) throw new Error();
     const d  = await r.json();
     const cc = CC === 'savvy' ? d.savvyPhone : d.mitelClassic;
@@ -286,7 +286,7 @@ function renderSms(entries) {
 
 async function fetchSms() {
   try {
-    const r = await fetch(BACKEND + '/api/sms-history?limit=50');
+    const r = await fetch(BACKEND + '/api/widget/sms-history?limit=50');
     if (!r.ok) throw new Error();
     const data = await r.json();
     const cutoff = Date.now() - 8 * 60 * 60 * 1000;

@@ -109,8 +109,8 @@ export default function TechTVPage() {
       api.get('/api/zendesk/queue-stats',   { params: { team: 'tech', ...tParam } }),
       api.get('/api/zendesk/stale-tickets', { params: { team: 'tech', hours: 24, ...tParam } }),
       api.get('/api/zendesk/leaderboard',   { params: { team: 'tech', period: 'this-week', ...tParam } }),
-      api.get('/api/status'),
-      api.get('/api/hubspot/dids'),
+      api.get('/api/status',                { params: tParam }),
+      api.get('/api/hubspot/dids',          { params: tParam }),
     ]);
 
     if (queueRes.status === 'fulfilled') setQueue(queueRes.value.data);

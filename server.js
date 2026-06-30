@@ -9,7 +9,7 @@ const https = require('https');
 const session = require('express-session');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { passport, requireAuth, requireRole, listUsers, addUser, removeUser } = require('./auth');
+const { passport, requireAuth, requireRole, isAuthedOrKey, listUsers, addUser, removeUser } = require('./auth');
 const multer = require('multer');
 const XLSX   = require('xlsx');
 const Anthropic = require('@anthropic-ai/sdk');
@@ -326,8 +326,9 @@ app.post('/api/activity-log', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// Public SMS history — readable by the Wix site widget with API key
-app.get('/api/sms-history', (req, res) => {
+// Internal SMS history — full record incl. recipient phone numbers / sender.
+// Wix widget reads sanitized data from /api/widget/sms-history instead.
+app.get('/api/sms-history', requireAuth, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 100);
   res.json(smsHistory.slice(0, limit));
 });
@@ -397,8 +398,65 @@ function saveStatusStore() {
 
 let statusStore = loadStatusStore();
 
-app.get('/api/status', (req, res) => {
+// Middleware: accepts a TV session token via ?t= OR delegates to requireAuth
+// (which accepts session cookie or X-API-Key on GETs). Used on endpoints that
+// must be reachable by both the internal React app and the office TV displays.
+function tvOrAuth(req, res, next) {
+  const token = req.query.t;
+  if (token) {
+    const sessions = loadTvSessions();
+    if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
+    return next();
+  }
+  return requireAuth(req, res, next);
+}
+
+app.get('/api/status', tvOrAuth, (req, res) => {
   res.json(statusStore);
+});
+
+// ─── Public Widget Endpoints (no auth — for the Wix embed) ───────────────────
+// Return only the fields the widget renders. Strips employee names, internal
+// flags, and unrelated systems' state so a public scrape can't pivot from them.
+function setWidgetCors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'no-store');
+}
+
+app.get('/api/widget/status', (req, res) => {
+  setWidgetCors(res);
+  const pick = (s) => s ? { state: s.state, message: s.message || '' } : { state: 'UP', message: '' };
+  res.json({
+    mitelClassic: pick(statusStore.mitelClassic),
+    savvyPhone:   pick(statusStore.savvyPhone),
+    updatedAt:    statusStore.updatedAt,
+  });
+});
+
+app.get('/api/widget/sms-history', (req, res) => {
+  setWidgetCors(res);
+  const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+  // Strip fields that aren't needed publicly (e.g. sender identity, recipient phone numbers)
+  const safe = smsHistory.slice(0, limit).map(e => ({
+    message: e.message,
+    sentAt:  e.sentAt,
+    groups:  e.groups || [],
+  }));
+  res.json(safe);
+});
+
+app.get('/api/widget/staff-broadcast', (req, res) => {
+  setWidgetCors(res);
+  const b = loadBroadcast();
+  if (!b) return res.json({ empty: true });
+  // Drop `updatedBy` so the broadcast author's name isn't exposed publicly
+  res.json({
+    title:     b.title     || '',
+    body:      b.body      || '',
+    imageUrl:  b.imageUrl  || '',
+    links:     b.links     || [],
+    updatedAt: b.updatedAt || null,
+  });
 });
 
 app.post('/api/status', requireAuth, async (req, res) => {
@@ -678,7 +736,7 @@ app.post('/api/smsto/send', requireAuth, async (req, res) => {
 });
 
 // ─── Bandwidth: DID Counts ─────────────────────────────────────────────────────
-app.get('/api/bandwidth/dids', async (req, res) => {
+app.get('/api/bandwidth/dids', requireAuth, async (req, res) => {
   try {
     const accountId = process.env.BANDWIDTH_ACCOUNT_ID;
     const clientId = process.env.BANDWIDTH_API_TOKEN;
@@ -868,9 +926,8 @@ function saveBroadcast(data) {
   fs.writeFileSync(STAFF_BROADCAST_FILE, JSON.stringify(data, null, 2));
 }
 
-// Public — no auth — Wix embed fetches this (open CORS so Wix domains can fetch it)
-app.get('/api/staff-broadcast', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+// Internal — full record incl. author identity. Wix embed uses /api/widget/staff-broadcast.
+app.get('/api/staff-broadcast', requireAuth, (req, res) => {
   const b = loadBroadcast();
   if (!b) return res.json({ empty: true });
   res.json(b);
@@ -1044,7 +1101,7 @@ app.get('/api/monday/support-tasks', async (req, res) => {
   if (token) {
     const sessions = loadTvSessions();
     if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
-  } else if (!req.isAuthenticated()) {
+  } else if (!isAuthedOrKey(req)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
@@ -1174,7 +1231,7 @@ app.get('/api/monday/support-stats', async (req, res) => {
   if (token) {
     const sessions = loadTvSessions();
     if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
-  } else if (!req.isAuthenticated()) {
+  } else if (!isAuthedOrKey(req)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
@@ -1331,7 +1388,7 @@ app.get('/api/zendesk/stale-tickets', async (req, res) => {
   if (token) {
     const sessions = loadTvSessions();
     if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
-  } else if (!req.isAuthenticated()) {
+  } else if (!isAuthedOrKey(req)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
@@ -1387,7 +1444,7 @@ app.get('/api/zendesk/csat', async (req, res) => {
   if (token) {
     const sessions = loadTvSessions();
     if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
-  } else if (!req.isAuthenticated()) {
+  } else if (!isAuthedOrKey(req)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
@@ -1500,7 +1557,7 @@ app.get('/api/zendesk/leaderboard', async (req, res) => {
   if (token) {
     const sessions = loadTvSessions();
     if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
-  } else if (!req.isAuthenticated()) {
+  } else if (!isAuthedOrKey(req)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
@@ -1779,7 +1836,7 @@ app.get('/api/zendesk/queue-stats', async (req, res) => {
   if (token) {
     const sessions = loadTvSessions();
     if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
-  } else if (!req.isAuthenticated()) {
+  } else if (!isAuthedOrKey(req)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   try {
@@ -1827,7 +1884,7 @@ const HS_STAGE_AVAILABLE     = '249924503';
 const HS_STAGE_INSTANT_AL    = '1214659642';
 const HS_STAGE_INSTANT_RS    = '1295878407';
 
-app.get('/api/hubspot/dids', async (req, res) => {
+app.get('/api/hubspot/dids', tvOrAuth, async (req, res) => {
   try {
     const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
     if (!token) return res.status(500).json({ error: 'HUBSPOT_PRIVATE_APP_TOKEN not configured' });
@@ -1874,8 +1931,7 @@ app.get('/api/hubspot/dids', async (req, res) => {
 // ─── Monday.com: Account Review Board ────────────────────────────────────────
 const ACCOUNT_REVIEW_BOARD_ID = '18374393367';
 
-app.get('/api/monday/account-review', async (req, res) => {
-  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Unauthorized' });
+app.get('/api/monday/account-review', requireAuth, async (req, res) => {
 
   const apiKey = process.env.MONDAY_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'Monday.com credentials not configured' });
@@ -2032,7 +2088,7 @@ async function pollXcallyBuffer() {
 pollXcallyBuffer();
 setInterval(pollXcallyBuffer, 60 * 1000);
 
-app.get('/api/xcally/queue', async (req, res) => {
+app.get('/api/xcally/queue', requireAuth, async (req, res) => {
   try {
     const base = process.env.XCALLY_URL;
     const user = process.env.XCALLY_USER;
@@ -2106,7 +2162,7 @@ app.get('/api/mitel/queue-stats', (req, res) => {
   if (token) {
     const sessions = loadTvSessions();
     if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
-  } else if (!req.isAuthenticated()) {
+  } else if (!isAuthedOrKey(req)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   if (!process.env.MITEL_POLLER_SECRET) return res.json({ unconfigured: true });
@@ -2120,7 +2176,7 @@ app.get('/api/mitel/queue-stats/stream', (req, res) => {
   if (token) {
     const sessions = loadTvSessions();
     if (!sessions.has(token)) return res.status(401).end();
-  } else if (!req.isAuthenticated()) {
+  } else if (!isAuthedOrKey(req)) {
     return res.status(401).end();
   }
 
@@ -2198,9 +2254,7 @@ async function getMitelClToken() {
 }
 
 // GET /api/mitel/cloudlink/calls — returns raw call data from all configured endpoints
-app.get('/api/mitel/cloudlink/calls', async (req, res) => {
-  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Unauthorized' });
-
+app.get('/api/mitel/cloudlink/calls', requireAuth, async (req, res) => {
   const appId     = process.env.MITEL_CL_APP_ID;
   const endpoints = (process.env.MITEL_CL_ENDPOINTS || '').split(',').map(s => s.trim()).filter(Boolean);
 

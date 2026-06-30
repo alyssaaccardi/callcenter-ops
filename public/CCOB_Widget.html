@@ -159,12 +159,11 @@ html, body {
 
 <script>
 // ── Config from URL params ──────────────────────────────────────────────────
-// Usage: CCOB_Widget.html?cc=savvy&key=YOUR_KEY&backend=https://your-server.com
+// Usage: CCOB_Widget.html?cc=savvy&backend=https://your-server.com
 // cc: "savvy" (default) or "mitel"
 // name: override the displayed system name; set to "" to show just "Operational"/"Down"
 const params  = new URLSearchParams(window.location.search);
 const CC      = params.get('cc') || 'savvy';
-const API_KEY = params.get('key') || '';
 const BACKEND = (params.get('backend') || window.location.origin).replace(/\/$/, '');
 const POLL_MS = 30000;
 
@@ -200,16 +199,8 @@ function render(state, message, updatedAt) {
 }
 
 async function fetchStatus() {
-  if (!API_KEY) {
-    render('error', '', null);
-    document.getElementById('updated').textContent = 'key param missing';
-    return;
-  }
-
   try {
-    const resp = await fetch(`${BACKEND}/api/status`, {
-      headers: { 'x-api-key': API_KEY }
-    });
+    const resp = await fetch(`${BACKEND}/api/widget/status`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
 

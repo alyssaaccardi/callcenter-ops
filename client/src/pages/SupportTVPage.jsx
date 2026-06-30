@@ -129,8 +129,8 @@ export default function SupportTVPage() {
     const [tasksRes, staleRes, statusRes, hsDidRes, lbRes] = await Promise.allSettled([
       api.get(`/api/monday/support-tasks${q}`),
       api.get(`/api/zendesk/stale-tickets?team=support${tParam}`),
-      api.get('/api/status'),
-      api.get('/api/hubspot/dids'),
+      api.get('/api/status', { params: tObj }),
+      api.get('/api/hubspot/dids', { params: tObj }),
       api.get('/api/zendesk/leaderboard', { params: { team: 'support', period: 'today', ...tObj } }),
     ]);
 

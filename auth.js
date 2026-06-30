@@ -52,14 +52,42 @@ passport.deserializeUser((email, done) => {
 });
 
 const DEV_USER = { email: 'dev@local', name: 'Dev User', role: 'super_admin', additionalRoles: [] };
+const API_KEY_USER = { email: 'api-key@ccops', name: 'API Key', role: 'api', additionalRoles: [] };
+
+// Read-only API key — accepted on GET requests via X-API-Key header.
+// Lets the dev team pull data without a Google session. Does NOT satisfy requireRole.
+function checkApiKey(req) {
+  const expected = process.env.DEV_API_KEY;
+  if (!expected || req.method !== 'GET') return false;
+  const provided = req.headers['x-api-key'];
+  return provided && provided === expected;
+}
 
 function requireAuth(req, res, next) {
   if (isDev && !process.env.GOOGLE_CLIENT_ID) {
     req.user = req.user || DEV_USER;
     return next();
   }
+  if (checkApiKey(req)) {
+    req.user = req.user || API_KEY_USER;
+    return next();
+  }
   if (req.isAuthenticated()) return next();
   res.status(401).json({ error: 'Unauthorized' });
+}
+
+// Boolean form of requireAuth — for inline checks (e.g. routes that already
+// branch on a TV session token).
+function isAuthedOrKey(req) {
+  if (isDev && !process.env.GOOGLE_CLIENT_ID) {
+    req.user = req.user || DEV_USER;
+    return true;
+  }
+  if (checkApiKey(req)) {
+    req.user = req.user || API_KEY_USER;
+    return true;
+  }
+  return req.isAuthenticated();
 }
 
 function requireRole(...roles) {
@@ -91,4 +119,4 @@ function removeUser(email) {
   saveUsers(users);
 }
 
-module.exports = { passport, requireAuth, requireRole, listUsers, addUser, removeUser };
+module.exports = { passport, requireAuth, requireRole, isAuthedOrKey, listUsers, addUser, removeUser };
