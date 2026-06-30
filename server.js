@@ -13,6 +13,7 @@ const { passport, requireAuth, requireRole, isAuthedOrKey, listUsers, addUser, r
 const multer = require('multer');
 const XLSX   = require('xlsx');
 const Anthropic = require('@anthropic-ai/sdk');
+const mitelLeaderboard = require('./mitel-leaderboard');
 
 https.globalAgent.setMaxListeners(50);
 require('events').EventEmitter.defaultMaxListeners = 50;
@@ -3504,6 +3505,52 @@ app.get('/api/zendesk-auditor/results/:jobId', requireRole('super_admin', 'zende
   const job = auditorJobs.get(jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
   res.json(job);
+});
+
+// ─── Mitel 3300 Leaderboard ──────────────────────────────────────────────────
+// Import + browse "Agent Group Performance by Agent" reports exported from MiCC.
+const mitelLeaderboardUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+// List all imported snapshots (lightweight — no agent rows)
+app.get('/api/mitel-leaderboard', requireAuth, (req, res) => {
+  res.json({ snapshots: mitelLeaderboard.listSnapshots() });
+});
+
+// Fetch a single snapshot with full agent rows
+app.get('/api/mitel-leaderboard/:id', requireAuth, (req, res) => {
+  const snap = mitelLeaderboard.getSnapshot(req.params.id);
+  if (!snap) return res.status(404).json({ error: 'Snapshot not found' });
+  res.json(snap);
+});
+
+// Import a new report — accepts either raw text in the JSON body or a multipart file upload.
+// requireRole gates writes: only ops/admin can import or delete.
+app.post(
+  '/api/mitel-leaderboard/import',
+  requireRole('super_admin', 'call_center_ops'),
+  mitelLeaderboardUpload.single('file'),
+  (req, res) => {
+    let raw = '';
+    if (req.file)             raw = req.file.buffer.toString('utf8');
+    else if (req.body?.text)  raw = String(req.body.text);
+    if (!raw.trim()) return res.status(400).json({ error: 'No report content provided' });
+
+    try {
+      const parsed = mitelLeaderboard.parseReport(raw);
+      const importedBy = req.user?.name || req.user?.email || 'unknown';
+      const saved = mitelLeaderboard.saveSnapshot(parsed, importedBy);
+      res.json({ ok: true, snapshot: { id: saved.id, periodLine: saved.periodLine, agentCount: saved.agents.length } });
+    } catch (err) {
+      console.error('Mitel leaderboard import error:', err.message);
+      res.status(400).json({ error: 'Failed to parse report', details: err.message });
+    }
+  }
+);
+
+app.delete('/api/mitel-leaderboard/:id', requireRole('super_admin', 'call_center_ops'), (req, res) => {
+  const ok = mitelLeaderboard.deleteSnapshot(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'Snapshot not found' });
+  res.json({ ok: true });
 });
 
 // ─── React SPA Catch-All ─────────────────────────────────────────────────────

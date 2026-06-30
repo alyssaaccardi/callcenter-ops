@@ -25,6 +25,7 @@ import DialedInPage from './pages/DialedInPage';
 import SupportTVPage from './pages/SupportTVPage';
 import WhatsNew from './components/WhatsNew';
 import ZendeskAuditor from './modules/ZendeskAuditor';
+import MitelLeaderboard from './modules/MitelLeaderboard';
 
 function Dashboard() {
   const { user } = useAuth();
@@ -51,6 +52,7 @@ function DashboardInner({ user, defaultModule }) {
     sms:                isOps     ? <SmsModule />               : null,
     slack:              isOps     ? <SlackWorkflows />           : null,
     monday:             isOps     ? <AgentBoard />              : null,
+    'mitel-leaderboard': isOps    ? <MitelLeaderboard />         : null,
     'support-center':   isSupport ? <SupportCenter />           : null,
     'account-review':   isSupport ? <AccountReview />           : null,
     'team-leaderboard': isSupport ? <TeamLeaderboard />         : null,
