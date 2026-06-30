@@ -85,7 +85,9 @@ app.use(helmet({
   },
 }));
 
-app.use(express.json());
+// 5MB is well above any current payload (MiCC leaderboard reports + staff broadcast
+// posts can comfortably exceed the 100KB default).
+app.use(express.json({ limit: '5mb' }));
 
 app.use(session({
   secret: process.env.SESSION_SECRET || 'dev-secret-change-in-prod',
@@ -3539,6 +3541,7 @@ app.post(
     let raw = '';
     if (req.file)             raw = req.file.buffer.toString('utf8');
     else if (req.body?.text)  raw = String(req.body.text);
+    console.log(`[mitel-leaderboard] import: file=${!!req.file} text-len=${req.body?.text?.length || 0} raw-len=${raw.length}`);
     if (!raw.trim()) return res.status(400).json({ error: 'No report content provided' });
 
     try {
