@@ -3536,6 +3536,29 @@ app.get('/api/mitel-leaderboard/agent/:reportingId', requireAuth, (req, res) => 
   res.json(mitelLeaderboard.agentHistory(req.params.reportingId));
 });
 
+// Excluded extensions (admins, supervisors, system accounts) — hidden from rankings.
+app.get('/api/mitel-leaderboard/exclusions', requireAuth, (req, res) => {
+  res.json({ exclusions: mitelLeaderboard.loadExclusions() });
+});
+
+app.post('/api/mitel-leaderboard/exclusions', requireRole('super_admin', 'call_center_ops'), (req, res) => {
+  const { extension, name, reason } = req.body || {};
+  if (!extension) return res.status(400).json({ error: 'extension is required' });
+  try {
+    const addedBy = req.user?.name || req.user?.email || 'unknown';
+    const entry = mitelLeaderboard.addExclusion(extension, { name, reason, addedBy });
+    res.json({ ok: true, entry });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/mitel-leaderboard/exclusions/:extension', requireRole('super_admin', 'call_center_ops'), (req, res) => {
+  const ok = mitelLeaderboard.removeExclusion(req.params.extension);
+  if (!ok) return res.status(404).json({ error: 'Exclusion not found' });
+  res.json({ ok: true });
+});
+
 // Fetch a single snapshot with full agent rows
 app.get('/api/mitel-leaderboard/:id', requireAuth, (req, res) => {
   const snap = mitelLeaderboard.getSnapshot(req.params.id);

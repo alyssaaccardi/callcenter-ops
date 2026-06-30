@@ -120,11 +120,20 @@ export function applyScores(rankedAgents, metrics = METRICS) {
 export function processAgents(rawAgents, opts = {}) {
   const thresholds = opts.thresholds || SAMPLE_MINS;
   const metrics    = opts.metrics    || METRICS;
+  // Excluded extensions never appear in any pool or in normalization bounds.
+  const excludeSet = new Set((opts.excludedExtensions || []).map(String));
 
-  const derived = (rawAgents || [])
-    // Skip the trainees/system-account rows entirely — they'd just clutter both pools
+  const excluded = [];
+  const derivedAll = (rawAgents || [])
     .filter(a => (a.shiftDurationSec || 0) > 0 || (a.acdCalls || 0) > 0)
     .map(computeDerived);
+
+  // Split out excluded agents into their own bucket so the UI can list them.
+  const derived = [];
+  for (const a of derivedAll) {
+    if (excludeSet.has(String(a.reportingId))) excluded.push(a);
+    else derived.push(a);
+  }
 
   const ranked    = derived.filter(a => meetsSampleThreshold(a, thresholds));
   const lowSample = derived.filter(a => !meetsSampleThreshold(a, thresholds));
@@ -139,6 +148,7 @@ export function processAgents(rawAgents, opts = {}) {
   return {
     ranked: scored.sort((a, b) => b.efficiencyScore - a.efficiencyScore),
     lowSample,
+    excluded,
     summary: {
       avgCallsPerHour: avg('callsPerHour'),
       avgOccupancy:    avg('occupancy'),
@@ -146,14 +156,15 @@ export function processAgents(rawAgents, opts = {}) {
       avgAvailability: avg('availability'),
       rankedCount:     scored.length,
       lowSampleCount:  lowSample.length,
+      excludedCount:   excluded.length,
     },
   };
 }
 
 // Build a quick lookup of efficiency scores keyed by extension — useful for
 // week-over-week trend arrows.
-export function scoreMapByExtension(rawAgents) {
-  const { ranked } = processAgents(rawAgents);
+export function scoreMapByExtension(rawAgents, excludedExtensions = []) {
+  const { ranked } = processAgents(rawAgents, { excludedExtensions });
   const map = new Map();
   for (const a of ranked) map.set(String(a.reportingId), a);
   return map;

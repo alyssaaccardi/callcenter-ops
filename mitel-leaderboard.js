@@ -16,7 +16,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const STORE_FILE = path.join(__dirname, 'mitel-leaderboard.json');
+const STORE_FILE      = path.join(__dirname, 'mitel-leaderboard.json');
+const EXCLUSIONS_FILE = path.join(__dirname, 'mitel-leaderboard-exclusions.json');
 
 const COLUMNS = [
   { key: 'reportingId',       label: 'Reporting' },
@@ -400,6 +401,43 @@ function agentHistory(reportingId) {
   return { reportingId, fullName: rows[0]?.fullName || '', rows };
 }
 
+// ── Exclusions ───────────────────────────────────────────────────────────────
+// Extensions that should be hidden from leaderboard rankings (admins,
+// supervisors, system accounts, QA reviewers, etc.). Stored as JSON array of
+// { extension, name, reason, addedBy, addedAt } so the UI can show context.
+
+function loadExclusions() {
+  try {
+    const arr = JSON.parse(fs.readFileSync(EXCLUSIONS_FILE, 'utf8'));
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+
+function saveExclusions(arr) {
+  fs.writeFileSync(EXCLUSIONS_FILE, JSON.stringify(arr, null, 2));
+}
+
+function addExclusion(extension, { name = '', reason = '', addedBy = 'unknown' } = {}) {
+  const ext = String(extension).trim();
+  if (!ext) throw new Error('extension is required');
+  const all = loadExclusions();
+  // Replace existing entry for the same extension so updates don't duplicate
+  const filtered = all.filter(e => String(e.extension) !== ext);
+  const entry = { extension: ext, name, reason, addedBy, addedAt: new Date().toISOString() };
+  filtered.push(entry);
+  saveExclusions(filtered);
+  return entry;
+}
+
+function removeExclusion(extension) {
+  const ext = String(extension).trim();
+  const all = loadExclusions();
+  const next = all.filter(e => String(e.extension) !== ext);
+  if (next.length === all.length) return false;
+  saveExclusions(next);
+  return true;
+}
+
 module.exports = {
   COLUMNS,
   parseReport,
@@ -409,4 +447,7 @@ module.exports = {
   deleteSnapshot,
   aggregate,
   agentHistory,
+  loadExclusions,
+  addExclusion,
+  removeExclusion,
 };

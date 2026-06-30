@@ -140,6 +140,12 @@ export default function MitelLeaderboard() {
   const [drillAgent, setDrillAgent] = useState(null);
   const [drillLoading, setDrillLoading] = useState(false);
 
+  const [exclusions, setExclusions] = useState([]);
+  const [exclOpen,   setExclOpen]   = useState(false);
+  const [newExclExt,    setNewExclExt]    = useState('');
+  const [newExclName,   setNewExclName]   = useState('');
+  const [newExclReason, setNewExclReason] = useState('');
+
   const fetchSnapshots = useCallback(async () => {
     try {
       const r = await api.get('/api/mitel-leaderboard');
@@ -154,7 +160,15 @@ export default function MitelLeaderboard() {
     }
   }, [activeId, toast]);
 
+  const fetchExclusions = useCallback(async () => {
+    try {
+      const r = await api.get('/api/mitel-leaderboard/exclusions');
+      setExclusions(r.data?.exclusions || []);
+    } catch { /* non-fatal; UI just won't filter */ }
+  }, []);
+
   useEffect(() => { fetchSnapshots().finally(() => setLoading(false)); }, []);  // eslint-disable-line
+  useEffect(() => { fetchExclusions(); }, [fetchExclusions]);
 
   // Snapshot view — also fetch the previous-period snapshot for week-over-week trends
   useEffect(() => {
@@ -205,17 +219,21 @@ export default function MitelLeaderboard() {
     return () => { cancelled = true; };
   }, [viewMode, rangePreset, customFrom, customTo, toast]);
 
+  const excludedExtensions = useMemo(() => exclusions.map(e => e.extension), [exclusions]);
+
   // Process data through scoring pipeline — single source of truth for the page
   const processed = useMemo(() => {
     const sourceAgents = viewMode === 'combined' ? (agg?.agents || []) : (snap?.agents || []);
-    return processAgents(sourceAgents);
-  }, [viewMode, snap, agg]);
+    return processAgents(sourceAgents, { excludedExtensions });
+  }, [viewMode, snap, agg, excludedExtensions]);
 
-  // Previous-period score lookup for trend arrows
+  // Previous-period score lookup for trend arrows — also exclude admins so
+  // their inclusion in last week's pool doesn't shift the normalization
+  // bounds for the trend comparison.
   const prevScores = useMemo(() => {
     if (viewMode !== 'snapshot' || !prevSnap?.agents) return new Map();
-    return scoreMapByExtension(prevSnap.agents);
-  }, [viewMode, prevSnap]);
+    return scoreMapByExtension(prevSnap.agents, excludedExtensions);
+  }, [viewMode, prevSnap, excludedExtensions]);
 
   function clickHeader(col) {
     if (sortKey === col.key) {
@@ -307,6 +325,43 @@ export default function MitelLeaderboard() {
     }
   }
 
+  async function addExclusion() {
+    const ext = newExclExt.trim();
+    if (!ext) { toast('Extension is required', 'error'); return; }
+    try {
+      await api.post('/api/mitel-leaderboard/exclusions', {
+        extension: ext,
+        name:      newExclName.trim(),
+        reason:    newExclReason.trim(),
+      });
+      setNewExclExt('');
+      setNewExclName('');
+      setNewExclReason('');
+      await fetchExclusions();
+      toast(`Excluded ext ${ext}`, 'success');
+    } catch (err) {
+      const msg = err.response?.data?.error || err.message;
+      toast(`Could not add exclusion: ${msg}`, 'error');
+    }
+  }
+
+  async function removeExclusion(extension) {
+    try {
+      await api.delete(`/api/mitel-leaderboard/exclusions/${encodeURIComponent(extension)}`);
+      await fetchExclusions();
+    } catch {
+      toast('Could not remove exclusion', 'error');
+    }
+  }
+
+  // Quick "exclude this person" action from a table row — preloads the modal.
+  function startExcludeFor(agent) {
+    setNewExclExt(String(agent.reportingId || ''));
+    setNewExclName(agent.fullName || '');
+    setNewExclReason('');
+    setExclOpen(true);
+  }
+
   async function openDrill(agent) {
     if (!agent?.reportingId) return;
     setDrillAgent({ reportingId: agent.reportingId, fullName: agent.fullName, rows: [] });
@@ -374,6 +429,9 @@ export default function MitelLeaderboard() {
           </div>
         </div>
         <div className="mitel-lb-actions">
+          <button className="btn btn-ghost" onClick={() => setExclOpen(true)}>
+            👤 Exclusions {exclusions.length > 0 && <span className="excl-pill">{exclusions.length}</span>}
+          </button>
           {canWrite && (
             <button className="btn btn-primary" onClick={() => setImportOpen(true)}>
               + Import Report
@@ -687,13 +745,147 @@ export default function MitelLeaderboard() {
         </div>
       )}
 
+      {/* ── Exclusions modal ───────────────────────────── */}
+      {exclOpen && (
+        <div className="mitel-lb-modal" onClick={e => { if (e.target === e.currentTarget) setExclOpen(false); }}>
+          <div className="mitel-lb-modal-content mitel-lb-excl">
+            <div className="modal-header">
+              <h2>Excluded Extensions</h2>
+              <button className="modal-close" onClick={() => setExclOpen(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 13, color: 'var(--muted, #6b7a99)', marginTop: 0, marginBottom: 14 }}>
+                Admins, supervisors, QA reviewers, and other extensions that shouldn't be evaluated as call-handling agents. Excluded extensions never appear on the leaderboard, the Top/Bottom 10 boards, the Full Agent Table, or the Low Sample list.
+              </p>
+
+              {canWrite ? (
+                <div className="excl-form">
+                  <input
+                    type="text"
+                    className="mitel-lb-filter"
+                    placeholder="Extension (e.g. 2063)"
+                    value={newExclExt}
+                    onChange={e => setNewExclExt(e.target.value)}
+                    style={{ flex: '0 0 150px' }}
+                  />
+                  <input
+                    type="text"
+                    className="mitel-lb-filter"
+                    placeholder="Name (optional)"
+                    value={newExclName}
+                    onChange={e => setNewExclName(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <input
+                    type="text"
+                    className="mitel-lb-filter"
+                    placeholder="Reason (optional)"
+                    value={newExclReason}
+                    onChange={e => setNewExclReason(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <button className="btn btn-primary" onClick={addExclusion} disabled={!newExclExt.trim()}>Add</button>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: 'var(--muted, #6b7a99)', marginBottom: 14 }}>
+                  Read-only — only super admins and Call Center Ops can edit exclusions.
+                </div>
+              )}
+
+              {exclusions.length === 0 ? (
+                <div className="mitel-lb-empty" style={{ padding: 24, marginTop: 14 }}>No extensions excluded yet.</div>
+              ) : (
+                <div className="mitel-lb-table-wrap" style={{ marginTop: 14 }}>
+                  <table className="mitel-lb-table">
+                    <thead>
+                      <tr>
+                        <th>Ext</th>
+                        <th>Name</th>
+                        <th>Reason</th>
+                        <th>Added</th>
+                        {canWrite && <th></th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {exclusions.map(e => (
+                        <tr key={e.extension}>
+                          <td><strong>{e.extension}</strong></td>
+                          <td>{e.name || '—'}</td>
+                          <td>{e.reason || '—'}</td>
+                          <td style={{ fontSize: 12, color: 'var(--muted, #6b7a99)' }}>
+                            {e.addedAt ? new Date(e.addedAt).toLocaleDateString() : '—'}
+                            {e.addedBy && <> · {e.addedBy}</>}
+                          </td>
+                          {canWrite && (
+                            <td className="align-right">
+                              <button className="btn btn-ghost" onClick={() => removeExclusion(e.extension)} style={{ color: '#b91c1c', padding: '4px 10px' }}>
+                                Remove
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* If the current view contains rows that match an exclusion, list them
+                  so the user can sanity-check that they hid the right people. */}
+              {processed.excluded?.length > 0 && (
+                <>
+                  <div className="section-title" style={{ marginTop: 18 }}>
+                    Excluded agents in this view ({processed.excluded.length})
+                  </div>
+                  <div className="mitel-lb-table-wrap">
+                    <table className="mitel-lb-table">
+                      <thead>
+                        <tr>
+                          <th>Ext</th>
+                          <th>Name</th>
+                          <th className="align-right">Shift Hrs</th>
+                          <th className="align-right">ACD</th>
+                          <th className="align-right">Calls / Hr</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {processed.excluded.map(a => (
+                          <tr key={(a.reportingId || '') + a.fullName}>
+                            <td>{a.reportingId}</td>
+                            <td>{a.fullName}</td>
+                            <td className="align-right">{a.shiftHours.toFixed(1)}</td>
+                            <td className="align-right">{(a.acdCalls || 0).toLocaleString()}</td>
+                            <td className="align-right">{a.callsPerHour.toFixed(1)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Drill-down modal ───────────────────────────── */}
       {drillAgent && (
         <div className="mitel-lb-modal" onClick={e => { if (e.target === e.currentTarget) setDrillAgent(null); }}>
           <div className="mitel-lb-modal-content mitel-lb-drill">
             <div className="modal-header">
               <h2>{drillAgent.fullName || 'Agent'} <span className="drill-ext">· ext {drillAgent.reportingId}</span></h2>
-              <button className="modal-close" onClick={() => setDrillAgent(null)}>×</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {canWrite && drillAgent.reportingId && !exclusions.find(e => String(e.extension) === String(drillAgent.reportingId)) && (
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => { startExcludeFor(drillAgent); setDrillAgent(null); }}
+                    style={{ fontSize: 12 }}
+                  >
+                    Exclude this agent
+                  </button>
+                )}
+                <button className="modal-close" onClick={() => setDrillAgent(null)}>×</button>
+              </div>
             </div>
             <div className="modal-body">
               {drillLoading && <div className="mitel-lb-empty" style={{ padding: 30 }}>Loading…</div>}
