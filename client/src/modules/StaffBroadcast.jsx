@@ -8,73 +8,125 @@ import './StaffBroadcast.css';
 const EMBED_URL = 'https://ops.answeringlegal.com/api/widget/staff-broadcast';
 
 function buildEmbedCode() {
-  return `<div id="al-bc"></div>
-<style>
-  #al-bc, #al-bc *, #al-bc *::before, #al-bc *::after { box-sizing: border-box; }
-  #al-bc {
-    font-family: "Helvetica Neue", Arial, system-ui, sans-serif;
-    width: 100%; max-width: 520px; margin: 0 auto;
-  }
-  #al-bc .al-bc-shell {
-    position: relative;
+  return `<style>
+  html,body{margin:0;padding:0;background:#0b1a30;}
+  #al-hero *, #al-hero *::before, #al-hero *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  #al-hero {
+    --blue:#3D7BFF; --gold:#FFC53D; --gold-hi:#FFDE86; --mint:#5FE3B3;
+    --lilac:#A78BFF; --text:#EAF0FF; --mist:#9DB2D8;
+    position: relative; width: 100%; min-height: 560px;
+    padding: clamp(40px,6vh,68px) 0;
+    border-radius: 30px; overflow: hidden;
+    display: grid; place-items: center;
+    font-family: "Helvetica Neue", Arial, system-ui, sans-serif; color: var(--text);
     background: radial-gradient(140% 120% at 50% -10%, #123163 0%, #0A183A 45%, #070F22 100%);
-    border-radius: 22px;
-    padding: 18px;
-    box-shadow: 0 18px 40px rgba(0,0,0,.35);
-    overflow: hidden;
+    isolation: isolate;
   }
-  #al-bc .al-bc-card {
-    background: rgba(255,255,255,.07);
-    border: 1px solid rgba(255,255,255,.14);
-    border-radius: 16px;
-    overflow: hidden;
-    text-align: left;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-    animation: al-bc-rise .45s ease both;
+  #al-hero .blob { position:absolute; z-index:0; border-radius:50%; filter:blur(60px); opacity:.55; pointer-events:none; }
+  #al-hero .b1 { width:46%; height:60%; left:-8%; top:-18%; background:var(--blue); animation:al-d1 19s ease-in-out infinite alternate; }
+  #al-hero .b2 { width:40%; height:55%; right:-6%; top:8%; background:var(--gold); opacity:.38; animation:al-d2 23s ease-in-out infinite alternate; }
+  #al-hero .b3 { width:42%; height:52%; left:18%; bottom:-22%; background:var(--lilac); opacity:.34; animation:al-d3 26s ease-in-out infinite alternate; }
+  #al-hero .b4 { width:30%; height:40%; right:14%; bottom:-14%; background:var(--mint); opacity:.30; animation:al-d1 21s ease-in-out infinite alternate-reverse; }
+  @keyframes al-d1 { to { transform:translate3d(8%,6%,0) scale(1.15); } }
+  @keyframes al-d2 { to { transform:translate3d(-7%,9%,0) scale(1.1); } }
+  @keyframes al-d3 { to { transform:translate3d(6%,-8%,0) scale(1.12); } }
+
+  #al-hero .eq {
+    position:absolute; left:0; right:0; bottom:0; z-index:1; height:34%;
+    display:flex; align-items:flex-end; justify-content:center;
+    gap:clamp(4px,1.1vw,9px); padding:0 6%; pointer-events:none;
+    -webkit-mask-image:linear-gradient(90deg,transparent,#000 18%,#000 82%,transparent);
+    mask-image:linear-gradient(90deg,transparent,#000 18%,#000 82%,transparent);
   }
-  #al-bc .al-bc-img { width: 100%; height: auto; max-height: 200px; object-fit: cover; display: block; }
-  #al-bc .al-bc-in { padding: 18px 20px; }
-  #al-bc .al-bc-eyebrow {
-    font-size: 11px; font-weight: 800; letter-spacing: .14em;
-    text-transform: uppercase; color: #5FE3B3; margin-bottom: 9px;
+  #al-hero .eq span {
+    flex:1; max-width:22px; border-radius:8px 8px 0 0;
+    background:linear-gradient(180deg,var(--gold-hi),var(--gold) 40%,rgba(95,227,179,.35));
+    transform-origin:bottom; height:22%; animation:al-eq 1.4s ease-in-out infinite;
   }
-  #al-bc .al-bc-title {
-    font-size: 17px; font-weight: 800; color: #fff;
-    line-height: 1.3; margin-bottom: 6px; letter-spacing: -.01em;
+  @keyframes al-eq { 0%,100%{height:16%; opacity:.55} 50%{height:86%; opacity:1} }
+  #al-hero .eq span:nth-child(1){animation-delay:-.2s} #al-hero .eq span:nth-child(2){animation-delay:-.9s}
+  #al-hero .eq span:nth-child(3){animation-delay:-.4s} #al-hero .eq span:nth-child(4){animation-delay:-1.1s}
+  #al-hero .eq span:nth-child(5){animation-delay:-.6s} #al-hero .eq span:nth-child(6){animation-delay:-.1s}
+  #al-hero .eq span:nth-child(7){animation-delay:-1.3s} #al-hero .eq span:nth-child(8){animation-delay:-.5s}
+  #al-hero .eq span:nth-child(9){animation-delay:-1s} #al-hero .eq span:nth-child(10){animation-delay:-.3s}
+  #al-hero .eq span:nth-child(11){animation-delay:-.8s} #al-hero .eq span:nth-child(12){animation-delay:-1.2s}
+  #al-hero .eq span:nth-child(13){animation-delay:-.2s} #al-hero .eq span:nth-child(14){animation-delay:-.7s}
+  #al-hero .eq span:nth-child(15){animation-delay:-1.1s}
+
+  #al-hero .stage { position:relative; z-index:3; text-align:center; padding:0 clamp(24px,5vw,56px); max-width:760px; width:100%; }
+  #al-hero .logo-wrap { margin:0 auto 22px; }
+  #al-hero #al-logo { max-height:96px; max-width:260px; width:auto; display:block; margin:0 auto; filter:drop-shadow(0 10px 30px rgba(0,0,0,.45)); }
+
+  #al-hero .sticker {
+    display:inline-flex; align-items:center; gap:7px; background:var(--mint);
+    color:#06331F; font-weight:800; font-size:13px; letter-spacing:.02em;
+    padding:8px 15px; border-radius:999px; transform:rotate(-5deg); margin-bottom:18px;
+    box-shadow:0 8px 24px rgba(95,227,179,.35); animation:al-wiggle 5s 1s ease-in-out infinite;
   }
-  #al-bc .al-bc-body {
-    font-size: 14px; line-height: 1.6; color: #9DB2D8;
-    white-space: pre-wrap; word-wrap: break-word;
+  @keyframes al-wiggle { 0%,92%,100%{transform:rotate(-5deg)} 95%{transform:rotate(-9deg)} 98%{transform:rotate(-2deg)} }
+
+  #al-hero .greet { font-weight:700; font-size:clamp(15px,2.4vw,20px); color:var(--mist); text-transform:lowercase; margin-bottom:6px; }
+  #al-hero h1 { font-weight:800; font-size:clamp(52px,12vw,118px); line-height:.9; letter-spacing:-.05em; text-transform:lowercase; }
+  #al-hero h1 .pop { background:linear-gradient(100deg,var(--gold-hi),var(--gold) 40%,var(--mint)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  #al-hero .tagline { margin-top:20px; color:var(--mist); font-weight:500; font-size:clamp(14px,2vw,18px); }
+
+  #al-hero .al-bc { width:100%; max-width:520px; margin:30px auto 0; }
+  #al-hero .al-bc-card {
+    background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.14);
+    border-radius:18px; overflow:hidden; text-align:left;
+    -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
+    box-shadow:0 18px 40px rgba(0,0,0,.35); animation:al-rise .45s ease both;
   }
-  #al-bc .al-bc-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-  #al-bc .al-bc-btn {
-    display: inline-block; padding: 8px 16px; border-radius: 999px;
-    text-decoration: none; font-size: 13px; font-weight: 700; line-height: 1;
-    color: #06331F;
-    background: linear-gradient(100deg, #FFDE86, #FFC53D);
-    transition: filter .15s;
+  #al-hero .al-bc-img { width:100%; height:auto; max-height:200px; object-fit:cover; display:block; }
+  #al-hero .al-bc-in { padding:18px 20px; }
+  #al-hero .al-bc-eyebrow { font-size:11px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--mint); margin-bottom:9px; }
+  #al-hero .al-bc-title { font-size:17px; font-weight:800; color:#fff; line-height:1.3; margin-bottom:6px; letter-spacing:-.01em; }
+  #al-hero .al-bc-body { font-size:14px; line-height:1.6; color:var(--mist); white-space:pre-wrap; word-wrap:break-word; }
+  #al-hero .al-bc-links { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+  #al-hero .al-bc-btn {
+    display:inline-block; padding:8px 16px; border-radius:999px; text-decoration:none;
+    font-size:13px; font-weight:700; line-height:1; color:#06331F;
+    background:linear-gradient(100deg,var(--gold-hi),var(--gold)); transition:filter .15s;
   }
-  #al-bc .al-bc-btn:hover { filter: brightness(1.06); }
-  #al-bc .al-bc-rest { background: rgba(255,255,255,.045); }
-  #al-bc .al-bc-rest-in { display: flex; align-items: center; gap: 12px; padding: 14px 18px; }
-  #al-bc .al-bc-dot {
-    width: 9px; height: 9px; border-radius: 50%; flex: none;
-    background: #5FE3B3;
-    box-shadow: 0 0 0 4px rgba(95,227,179,.18);
-    animation: al-bc-breath 2.4s ease-in-out infinite;
-  }
-  #al-bc .al-bc-rest-lbl {
-    font-size: 11px; font-weight: 800; letter-spacing: .14em;
-    text-transform: uppercase; color: #5FE3B3; margin-bottom: 2px;
-  }
-  #al-bc .al-bc-rest-txt { font-size: 13px; color: #9DB2D8; font-weight: 500; }
-  @keyframes al-bc-breath { 0%,100%{opacity:.45} 50%{opacity:1} }
-  @keyframes al-bc-rise { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:none} }
+  #al-hero .al-bc-btn:hover { filter:brightness(1.06); }
+  #al-hero .al-bc-rest { background:rgba(255,255,255,.045); }
+  #al-hero .al-bc-rest-in { display:flex; align-items:center; gap:12px; padding:14px 18px; }
+  #al-hero .al-bc-dot { width:9px; height:9px; border-radius:50%; flex:none; background:var(--mint); box-shadow:0 0 0 4px rgba(95,227,179,.18); animation:al-breath 2.4s ease-in-out infinite; }
+  @keyframes al-breath { 0%,100%{opacity:.45} 50%{opacity:1} }
+  #al-hero .al-bc-rest-txt { font-size:13px; color:var(--mist); font-weight:500; }
+  #al-hero .al-bc-rest-lbl { font-size:11px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--mint); margin-bottom:2px; }
+
+  @keyframes al-rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+
   @media (prefers-reduced-motion: reduce) {
-    #al-bc *, #al-bc *::before, #al-bc *::after { animation: none !important; }
+    #al-hero * { animation:none !important; }
+    #al-hero .eq span { height:48%; }
   }
 </style>
+<div id="al-hero">
+  <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div><div class="blob b4"></div>
+
+  <div class="eq" aria-hidden="true">
+    <span></span><span></span><span></span><span></span><span></span>
+    <span></span><span></span><span></span><span></span><span></span>
+    <span></span><span></span><span></span><span></span><span></span>
+  </div>
+
+  <div class="stage">
+    <div class="logo-wrap">
+      <!-- LOGO: uncomment the line below and paste your logo URL between the quotes -->
+      <!-- <img id="al-logo" src="PASTE_LOGO_URL_HERE" alt="Answering Legal"> -->
+    </div>
+    <span class="sticker">✦ 24/7 crew</span>
+    <div class="greet">hey, team</div>
+    <h1>always <span class="pop">on.</span></h1>
+    <p class="tagline">every call. every shift. we got you.</p>
+
+    <!-- ops manager broadcast renders here -->
+    <div id="al-bc" class="al-bc"></div>
+  </div>
+</div>
 <script>
 (function(){
   var el = document.getElementById('al-bc');
@@ -82,19 +134,19 @@ function buildEmbedCode() {
   function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function renderResting(){
     el.innerHTML =
-      '<div class="al-bc-shell"><div class="al-bc-card al-bc-rest">' +
-        '<div class="al-bc-rest-in">' +
+      '<div class="al-bc-card al-bc-rest">' +
+        '<div class="al-bc-in al-bc-rest-in">' +
           '<span class="al-bc-dot"></span>' +
           '<div>' +
             '<div class="al-bc-rest-lbl">from ops</div>' +
             '<div class="al-bc-rest-txt">all quiet — no updates right now</div>' +
           '</div>' +
         '</div>' +
-      '</div></div>';
+      '</div>';
   }
   function render(d){
     if (!d || d.empty){ renderResting(); return; }
-    var s = '<div class="al-bc-shell"><div class="al-bc-card">';
+    var s = '<div class="al-bc-card">';
     if (d.imageUrl) s += '<img class="al-bc-img" src="' + esc(d.imageUrl) + '" alt="">';
     s += '<div class="al-bc-in">';
     s += '<div class="al-bc-eyebrow">● from ops</div>';
@@ -107,7 +159,7 @@ function buildEmbedCode() {
       });
       s += '</div>';
     }
-    s += '</div></div></div>';
+    s += '</div></div>';
     el.innerHTML = s;
     var img = el.querySelector('.al-bc-img');
     if (img) img.onerror = function(){ this.style.display = 'none'; };
@@ -360,7 +412,8 @@ export default function StaffBroadcast() {
             <div className="card-title">Wix Embed Code</div>
             <p className="sb-embed-hint">
               In the Wix editor, add an <strong>HTML iFrame</strong> element to your homepage
-              and paste this code. It auto-refreshes every 30 seconds.
+              and paste this code. Size the iFrame around <strong>760&nbsp;×&nbsp;720&nbsp;px</strong>
+              so the hero renders without clipping. It auto-refreshes every 30 seconds.
             </p>
             <pre className="sb-embed-code">{buildEmbedCode()}</pre>
             <button className="btn btn-secondary sb-copy-btn" onClick={copyEmbed}>
