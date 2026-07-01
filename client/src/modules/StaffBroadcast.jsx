@@ -9,35 +9,121 @@ const EMBED_URL = 'https://ops.answeringlegal.com/api/widget/staff-broadcast';
 
 function buildEmbedCode() {
   return `<div id="al-bc"></div>
+<style>
+  #al-bc, #al-bc *, #al-bc *::before, #al-bc *::after { box-sizing: border-box; }
+  #al-bc {
+    font-family: "Helvetica Neue", Arial, system-ui, sans-serif;
+    width: 100%; max-width: 520px; margin: 0 auto;
+  }
+  #al-bc .al-bc-shell {
+    position: relative;
+    background: radial-gradient(140% 120% at 50% -10%, #123163 0%, #0A183A 45%, #070F22 100%);
+    border-radius: 22px;
+    padding: 18px;
+    box-shadow: 0 18px 40px rgba(0,0,0,.35);
+    overflow: hidden;
+  }
+  #al-bc .al-bc-card {
+    background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 16px;
+    overflow: hidden;
+    text-align: left;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    animation: al-bc-rise .45s ease both;
+  }
+  #al-bc .al-bc-img { width: 100%; height: auto; max-height: 200px; object-fit: cover; display: block; }
+  #al-bc .al-bc-in { padding: 18px 20px; }
+  #al-bc .al-bc-eyebrow {
+    font-size: 11px; font-weight: 800; letter-spacing: .14em;
+    text-transform: uppercase; color: #5FE3B3; margin-bottom: 9px;
+  }
+  #al-bc .al-bc-title {
+    font-size: 17px; font-weight: 800; color: #fff;
+    line-height: 1.3; margin-bottom: 6px; letter-spacing: -.01em;
+  }
+  #al-bc .al-bc-body {
+    font-size: 14px; line-height: 1.6; color: #9DB2D8;
+    white-space: pre-wrap; word-wrap: break-word;
+  }
+  #al-bc .al-bc-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  #al-bc .al-bc-btn {
+    display: inline-block; padding: 8px 16px; border-radius: 999px;
+    text-decoration: none; font-size: 13px; font-weight: 700; line-height: 1;
+    color: #06331F;
+    background: linear-gradient(100deg, #FFDE86, #FFC53D);
+    transition: filter .15s;
+  }
+  #al-bc .al-bc-btn:hover { filter: brightness(1.06); }
+  #al-bc .al-bc-rest { background: rgba(255,255,255,.045); }
+  #al-bc .al-bc-rest-in { display: flex; align-items: center; gap: 12px; padding: 14px 18px; }
+  #al-bc .al-bc-dot {
+    width: 9px; height: 9px; border-radius: 50%; flex: none;
+    background: #5FE3B3;
+    box-shadow: 0 0 0 4px rgba(95,227,179,.18);
+    animation: al-bc-breath 2.4s ease-in-out infinite;
+  }
+  #al-bc .al-bc-rest-lbl {
+    font-size: 11px; font-weight: 800; letter-spacing: .14em;
+    text-transform: uppercase; color: #5FE3B3; margin-bottom: 2px;
+  }
+  #al-bc .al-bc-rest-txt { font-size: 13px; color: #9DB2D8; font-weight: 500; }
+  @keyframes al-bc-breath { 0%,100%{opacity:.45} 50%{opacity:1} }
+  @keyframes al-bc-rise { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:none} }
+  @media (prefers-reduced-motion: reduce) {
+    #al-bc *, #al-bc *::before, #al-bc *::after { animation: none !important; }
+  }
+</style>
 <script>
 (function(){
-  var el=document.getElementById('al-bc');
-  function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  var el = document.getElementById('al-bc');
+  if (!el) return;
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function renderResting(){
+    el.innerHTML =
+      '<div class="al-bc-shell"><div class="al-bc-card al-bc-rest">' +
+        '<div class="al-bc-rest-in">' +
+          '<span class="al-bc-dot"></span>' +
+          '<div>' +
+            '<div class="al-bc-rest-lbl">from ops</div>' +
+            '<div class="al-bc-rest-txt">all quiet — no updates right now</div>' +
+          '</div>' +
+        '</div>' +
+      '</div></div>';
+  }
   function render(d){
-    if(!d||d.empty){el.style.display='none';return;}
-    el.style.display='block';
-    var s='<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.08);max-width:520px;">';
-    if(d.imageUrl) s+='<img src="'+esc(d.imageUrl)+'" style="width:100%;height:auto;display:block;max-height:240px;object-fit:cover;">';
-    s+='<div style="padding:20px 22px;">';
-    if(d.title) s+='<div style="font-size:18px;font-weight:700;color:#1a1a3e;margin-bottom:8px;line-height:1.3;">'+esc(d.title)+'</div>';
-    if(d.body)  s+='<div style="font-size:14px;line-height:1.65;color:#444;margin-bottom:14px;white-space:pre-wrap;">'+esc(d.body)+'</div>';
-    if(d.links&&d.links.length){
-      s+='<div style="display:flex;flex-wrap:wrap;gap:8px;">';
+    if (!d || d.empty){ renderResting(); return; }
+    var s = '<div class="al-bc-shell"><div class="al-bc-card">';
+    if (d.imageUrl) s += '<img class="al-bc-img" src="' + esc(d.imageUrl) + '" alt="">';
+    s += '<div class="al-bc-in">';
+    s += '<div class="al-bc-eyebrow">● from ops</div>';
+    if (d.title) s += '<div class="al-bc-title">' + esc(d.title) + '</div>';
+    if (d.body)  s += '<div class="al-bc-body">' + esc(d.body) + '</div>';
+    if (d.links && d.links.length){
+      s += '<div class="al-bc-links">';
       d.links.forEach(function(l){
-        s+='<a href="'+esc(l.url)+'" target="_blank" style="display:inline-block;padding:7px 18px;background:#1a6fe8;color:#fff;border-radius:20px;text-decoration:none;font-size:13px;font-weight:600;line-height:1;">'+esc(l.label||l.url)+'</a>';
+        s += '<a class="al-bc-btn" href="' + esc(l.url) + '" target="_blank" rel="noopener">' + esc(l.label||l.url) + '</a>';
       });
-      s+='</div>';
+      s += '</div>';
     }
-    s+='</div></div>';
-    el.innerHTML=s;
+    s += '</div></div></div>';
+    el.innerHTML = s;
+    var img = el.querySelector('.al-bc-img');
+    if (img) img.onerror = function(){ this.style.display = 'none'; };
   }
   function load(){
-    var x=new XMLHttpRequest();
-    x.open('GET','${EMBED_URL}');
-    x.onload=function(){try{render(JSON.parse(x.responseText));}catch(e){}};
-    x.send();
+    try {
+      var x = new XMLHttpRequest();
+      x.open('GET', '${EMBED_URL}');
+      x.onload = function(){ try { render(JSON.parse(x.responseText)); } catch(e){ renderResting(); } };
+      x.onerror = function(){ renderResting(); };
+      x.send();
+    } catch(e){ renderResting(); }
   }
-  load();setInterval(load,30000);
+  renderResting();
+  load();
+  setInterval(load, 30000);
 })();
 <\/script>`;
 }
@@ -230,33 +316,44 @@ export default function StaffBroadcast() {
 
           <div className="card">
             <div className="card-title">Preview</div>
-            {!hasContent ? (
-              <div className="sb-preview-empty">Nothing to preview yet</div>
-            ) : (
-              <div className="sb-preview">
-                {imageUrl && !imgError && (
-                  <img
-                    src={imageUrl}
-                    alt=""
-                    className="sb-preview-img"
-                    onError={() => setImgError(true)}
-                  />
-                )}
-                <div className="sb-preview-body-wrap">
-                  {title && <div className="sb-preview-title">{title}</div>}
-                  {body  && <div className="sb-preview-body">{body}</div>}
-                  {previewLinks.length > 0 && (
-                    <div className="sb-preview-link-pills">
-                      {previewLinks.map((l, i) => (
-                        <a key={i} href={l.url} target="_blank" rel="noreferrer" className="sb-preview-pill">
-                          {l.label || l.url}
-                        </a>
-                      ))}
-                    </div>
+            <div className="sb-preview">
+              {hasContent ? (
+                <div className="sb-preview-inner">
+                  {imageUrl && !imgError && (
+                    <img
+                      src={imageUrl}
+                      alt=""
+                      className="sb-preview-img"
+                      onError={() => setImgError(true)}
+                    />
                   )}
+                  <div className="sb-preview-body-wrap">
+                    <div className="sb-preview-eyebrow">● from ops</div>
+                    {title && <div className="sb-preview-title">{title}</div>}
+                    {body  && <div className="sb-preview-body">{body}</div>}
+                    {previewLinks.length > 0 && (
+                      <div className="sb-preview-link-pills">
+                        {previewLinks.map((l, i) => (
+                          <a key={i} href={l.url} target="_blank" rel="noreferrer" className="sb-preview-pill">
+                            {l.label || l.url}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="sb-preview-inner">
+                  <div className="sb-preview-rest">
+                    <span className="sb-preview-rest-dot" />
+                    <div>
+                      <div className="sb-preview-rest-lbl">from ops</div>
+                      <div className="sb-preview-rest-txt">all quiet — no updates right now</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="card">
