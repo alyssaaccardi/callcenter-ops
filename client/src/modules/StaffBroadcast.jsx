@@ -3,7 +3,9 @@ import { useApp } from '../context/AppContext';
 import api from '../api';
 import './StaffBroadcast.css';
 
-const EMBED_URL = 'https://ops.answeringlegal.com/api/staff-broadcast';
+// Public endpoint — no auth, sanitized payload (no updatedBy). The internal
+// dashboard still uses /api/staff-broadcast (auth-required) for edit/delete.
+const EMBED_URL = 'https://ops.answeringlegal.com/api/widget/staff-broadcast';
 
 function buildEmbedCode() {
   return `<div id="al-bc"></div>
