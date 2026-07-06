@@ -2388,18 +2388,40 @@ function normalizeMatchText(s) {
     .trim();
 }
 
+// Common firm / business boilerplate that carries no discriminating signal.
+// A search for "Law Office of Mark Winn" must not match "Law Office of Anthony
+// Lana" 60% just because they share "law office of". Score only on the
+// non-boilerplate tokens (the actual identifying words).
+const NAME_STOPWORDS = new Set([
+  'the', 'an', 'of', 'and',
+  'law', 'laws', 'office', 'offices', 'firm', 'firms',
+  'attorney', 'attorneys', 'esq', 'esquire', 'legal', 'group', 'groups',
+  'llc', 'lc', 'pllc', 'pc', 'pa', 'llp', 'lp', 'inc', 'corp', 'company', 'co',
+  'associates', 'associate', 'partners', 'partner', 'chartered', 'services',
+  'practice', 'practices', 'counsel', 'counselors',
+]);
+
 // Score a candidate name/text against a target (accountName). Returns 0..1.
-// 1.0 = exact normalized match, 0.95 = phrase substring, else fraction of target
-// tokens present in candidate. Short tokens (< 2 chars) are ignored on both sides.
+// 1.0 = exact normalized match, 0.95 = phrase substring, else fraction of
+// *discriminating* target tokens present in candidate (stopwords stripped).
+// Short tokens (< 2 chars) are ignored on both sides.
 function nameMatchScore(target, candidate) {
   const t = normalizeMatchText(target);
   const c = normalizeMatchText(candidate);
   if (!t || !c) return 0;
   if (t === c) return 1.0;
   if (c.includes(t)) return 0.95;
-  const tTokens = new Set(t.split(' ').filter(w => w.length >= 2));
-  const cTokens = new Set(c.split(' ').filter(w => w.length >= 2));
+
+  const tRaw = t.split(' ').filter(w => w.length >= 2);
+  const cRaw = c.split(' ').filter(w => w.length >= 2);
+  let tTokens = new Set(tRaw.filter(w => !NAME_STOPWORDS.has(w)));
+  let cTokens = new Set(cRaw.filter(w => !NAME_STOPWORDS.has(w)));
+  // If stripping leaves nothing on either side (extreme-boilerplate input),
+  // fall back to raw tokens so we still return *some* signal.
+  if (tTokens.size === 0) tTokens = new Set(tRaw);
+  if (cTokens.size === 0) cTokens = new Set(cRaw);
   if (tTokens.size === 0 || cTokens.size === 0) return 0;
+
   let hits = 0;
   for (const w of tTokens) if (cTokens.has(w)) hits++;
   return hits / tTokens.size;
@@ -3509,7 +3531,7 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
       baseResult.matchType = 'noteTicketId';
     } else {
       const match = await matchCustomer(row);
-      console.log(`[auditor:lookup] match → ${match ? `org:${match.zdOrgName} userIds:[${match.zdUserIds?.join(',')}]` : 'null'}`);
+      console.log(`[auditor:lookup] match → ${match ? `org:${match.zdOrgName} source:${match.matchType} score:${match.matchScore} conf:${match.matchConfidence} userIds:[${match.zdUserIds?.join(',')}]` : 'null'}`);
       if (!match) return res.json({ ...baseResult, status: 'no_match' });
 
       baseResult.matchedOrg = match.zdOrgName;
