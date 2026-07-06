@@ -3018,14 +3018,14 @@ Map CSV note phrases to categories like this (case-insensitive):
 - "switched to different service", "another service", "using another service", "started with another service" → "Went to Competitor" (extract competitor name from ticket if present)
 - "hired staff", "has staff", "staff in office", "hired a receptionist", "front desk", "in-house" → "Hired Staff"
 - "answering his own calls", "answering their own calls", "wants to be more hands on", "doing it himself", "using his VM", "answering himself" → "Hired Staff" (the customer IS the staff)
-- "overages", "doesn't want to pay overages", "going over minutes", "exceeded plan", "rate increase", "price increase" → "Did Not Want to Pay Rate Increase / Overages"
-- "too expensive", "cost", "price", "cutting expenses", "cheaper", "can't afford" (when not tied to overages) → "Price Too High"
+- "overages", "doesn't want to pay overages", "going over minutes", "exceeded plan", "rate increase", "price increase", "unpredictable overages", "unpredictable minute usage", "unable to predict price", "unable to predict the bill", "excessive costs", "excessive charges", "spiky bill" → "Did Not Want to Pay Rate Increase / Overages"
+- "too expensive", "cost", "price", "cutting expenses", "cheaper", "can't afford" (when not tied to overages or a specific rate change) → "Price Too High"
 - "retiring", "retired", "retirement" → "Retired"
 - "closed practice", "closed firm", "going out of business", "dissolving", "disbarment", "facing disbarment" → "Closed Practice" (use "Fired" only if explicitly fired/let go from a position)
 - "downsizing", "restructuring", "business restructuring", "scaling back" → "Downsizing Practice"
 - "low call volume", "not enough calls", "cost vs. call volume", "slow season", "tax season over" → "Not Enough Call Volume"
-- "new phone system", "got a new phone", "changed phone service", "switched telephone service", "zoom phone service", "automated phone system", "IVR", "auto attendant", "phone tree", "set up call routing" → "IVR / Auto Attendant"
-- "quality", "messages never sent", "lost lead", "ruining business", "agents didn't know", "unhappy with service", "service no longer the quality", "bad service" → "Quality"
+- "new phone system", "got a new phone", "changed phone service", "switched telephone service", "zoom phone service", "automated phone system", "IVR", "auto attendant", "phone tree", "set up call routing", "answering machine", "using an answering machine", "will use voicemail", "using our own voicemail" → "IVR / Auto Attendant"
+- "quality", "messages never sent", "lost lead", "ruining business", "agents didn't know", "unhappy with service", "service no longer the quality", "bad service", "billing error", "billing dispute", "billed incorrectly", "improperly charged", "wrongly charged", "double-charged", "charged despite downgrade", "charged the wrong plan" → "Quality"
 - "moved to shared office", "wework", "regus", "shared office space", "coworking" → "Moved to Shared Office Space"
 - "answering service included in suite", "bundled with software" → "Answering Service Included In Suite"
 - "wanted real time reporting", "wanted portal", "wanted dashboard" → "Wanted Real Time Reporting / Portal"
@@ -3035,6 +3035,11 @@ Map CSV note phrases to categories like this (case-insensitive):
 - "doesn't see value", "not worth it", "no ROI" → "Doesn't See Value"
 - "no longer needed", "service no longer needed", "no longer using", "no longer wanted services" → "Doesn't See Value" (Low/Medium confidence). The customer decided they didn't need us — that's a value/utility judgment. Only escalate to a more specific category if the ticket shows one (e.g. Hired Staff, IVR, Went to Competitor).
 - "no reason given", "no reason stated", "did not give a reason", "did not want to discuss" — first check the FULL ticket for any clue; if the ticket also has nothing, then "Unknown / Unspecified". Don't pick Unknown lazily — read the ticket carefully first.
+
+DISAMBIGUATION RULES (apply BEFORE choosing the category):
+- Overages vs. Price Too High: If "overages", "minutes", "went over", or "unpredictable bill/price" appears, use "Did Not Want to Pay Rate Increase / Overages" even when the customer ALSO says the service is expensive or over budget. Overages/rate-increase is the specific driver — reserve "Price Too High" for customers whose only complaint is the base rate with no reference to overages, minutes, or a rate-change event.
+- Billing error vs. Overages: If the customer complains about being CHARGED INCORRECTLY (charged after downgrade, wrong plan applied, disputed line item, billing mistake) — that is a SERVICE quality issue, not a pricing decision. Category = "Quality" (qualitySubcategory: "General Quality"). The customer isn't unhappy with the price, they're unhappy that we billed them wrong.
+- Answering machine / voicemail replacement: If the customer says they'll use an "answering machine" or "voicemail" going forward, that is IVR / Auto Attendant — an automated replacement for our human receptionists.
 
 INVOLUNTARY CANCELLATION OVERRIDE:
 "Non-Payment" overrides every other category. Even if the customer's tickets sound happy or mention something else, if the CSV notes show the account was closed for non-payment, lack of communication, no response, or NSF — the reason is "Non-Payment".
@@ -3113,7 +3118,29 @@ function parseAuditResponse(raw, ticketData) {
   try {
     parsed = JSON.parse(jsonStr);
   } catch (e) {
-    throw new Error(`AI returned non-JSON: ${raw.slice(0, 120)}`);
+    // Salvage path: Gemini responses occasionally truncate mid-string when
+    // hitting maxOutputTokens. If the *scalar* fields (category, confidence,
+    // competitorName) are already complete before the failure, we can still
+    // classify the row instead of erroring out the whole lookup.
+    const salvaged = {};
+    const grab = (key) => {
+      const m = jsonStr.match(new RegExp(`"${key}"\\s*:\\s*(?:"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)"|null|(\\w+))`));
+      return m ? (m[1] ?? m[2] ?? null) : null;
+    };
+    const cat = grab('category');
+    if (cat && AUDITOR_CATEGORIES.includes(cat)) {
+      salvaged.category = cat;
+      salvaged.confidence = grab('confidence') || 'Low';
+      salvaged.competitorName = grab('competitorName');
+      salvaged.qualitySubcategory = grab('qualitySubcategory');
+      salvaged.summary = grab('summary') || '(response truncated)';
+      salvaged.reasoning = grab('reasoning') || '';
+      salvaged.estimatedCancellationDate = grab('estimatedCancellationDate');
+      console.warn(`[auditor] Salvaged category "${cat}" from truncated Gemini response (${raw.length} chars)`);
+      parsed = salvaged;
+    } else {
+      throw new Error(`AI returned non-JSON: ${raw.slice(0, 120)}`);
+    }
   }
   const category = AUDITOR_CATEGORIES.includes(parsed.category) ? parsed.category : 'Unknown / Unspecified';
 
@@ -3169,7 +3196,18 @@ async function geminiAnalyzeTickets(customer, ticketData, cutoff) {
   const prompt = buildAuditPrompt(customer, ticketData, cutoff);
   const resp = await axios.post(
     'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
-    { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 1024, temperature: 0.1, thinkingConfig: { thinkingBudget: 0 } } },
+    {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        // Raised from 1024 — long tickets were truncating the JSON mid-string
+        // (Spencer Charif on 2026-07-06). responseMimeType enforces JSON at
+        // Gemini's end so we don't get prose-with-code-fences either.
+        maxOutputTokens: 2048,
+        temperature: 0.1,
+        responseMimeType: 'application/json',
+        thinkingConfig: { thinkingBudget: 0 },
+      },
+    },
     { headers: { 'X-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, timeout: 20000 }
   );
   const raw = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
