@@ -518,7 +518,9 @@ function SingleResult({ r, onClear }) {
       </div>
 
       {r.status === 'no_match' && (
-        <div style={{ fontSize: 13, color: '#b45309' }}>No Zendesk user found. Try a different name or email address.</div>
+        <div style={{ fontSize: 13, color: '#b45309' }}>
+          No confident Zendesk match for that name. Add the email domain (e.g. <code>ezdivorce.com</code>) or a specific ticket ID in Notes to narrow it down.
+        </div>
       )}
       {r.status === 'error' && (
         <div style={{ fontSize: 13, color: '#dc2626' }}>{r.error}</div>
@@ -625,7 +627,7 @@ export default function ZendeskAuditor() {
   const fileInputRef = useRef(null);
   const readerRef = useRef(null);
   const [lookbackDays, setLookbackDays] = useState('');  // '' = all time
-  const [singleForm, setSingleForm] = useState({ accountName: '', customerEmail: '', notes: '' });
+  const [singleForm, setSingleForm] = useState({ accountName: '', customerEmail: '', emailDomain: '', notes: '' });
   const [singleResult, setSingleResult] = useState(null);
   const [singleLoading, setSingleLoading] = useState(false);
   const [singleError, setSingleError] = useState('');
@@ -850,7 +852,18 @@ export default function ZendeskAuditor() {
                     />
                   </div>
                 </div>
-                <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <div className="form-row">
+                    <label className="field-label">
+                      Email Domain <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={singleForm.emailDomain}
+                      onChange={e => setSingleForm(f => ({ ...f, emailDomain: e.target.value }))}
+                      placeholder="ezdivorce.com"
+                    />
+                  </div>
                   <div className="form-row">
                     <label className="field-label">Notes / Ticket IDs <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
                     <input

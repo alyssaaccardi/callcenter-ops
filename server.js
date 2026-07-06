@@ -2380,26 +2380,76 @@ async function zdAuditorGet(url, params = {}) {
   return resp.data;
 }
 
+function normalizeMatchText(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[&,.()"'\/\\\-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Score a candidate name/text against a target (accountName). Returns 0..1.
+// 1.0 = exact normalized match, 0.95 = phrase substring, else fraction of target
+// tokens present in candidate. Short tokens (< 2 chars) are ignored on both sides.
+function nameMatchScore(target, candidate) {
+  const t = normalizeMatchText(target);
+  const c = normalizeMatchText(candidate);
+  if (!t || !c) return 0;
+  if (t === c) return 1.0;
+  if (c.includes(t)) return 0.95;
+  const tTokens = new Set(t.split(' ').filter(w => w.length >= 2));
+  const cTokens = new Set(c.split(' ').filter(w => w.length >= 2));
+  if (tTokens.size === 0 || cTokens.size === 0) return 0;
+  let hits = 0;
+  for (const w of tTokens) if (cTokens.has(w)) hits++;
+  return hits / tTokens.size;
+}
+
 async function matchCustomer(row) {
   const base = zdBase();
   const userSet = new Map();
-  const nameQuery = row.accountName || row.orgName;
+  const nameQuery = row.accountName || row.orgName || '';
+  const domain = String(row.emailDomain || '').toLowerCase().trim();
 
-  // Run email and name searches in parallel
+  // Track which users came from which signal so we can weight confidence later
+  const emailHits = new Set();
+  const domainHits = new Set();
+
   const searches = [];
+
+  // Signal 1 — exact email match
   if (row.customerEmail) {
     searches.push(
       zdAuditorGet(`${base}/users/search`, { query: `email:${row.customerEmail}` })
-        .then(data => { for (const u of (data.users || [])) userSet.set(u.id, u); })
+        .then(data => { for (const u of (data.users || [])) { userSet.set(u.id, u); emailHits.add(u.id); } })
         .catch(() => {})
     );
   }
+
+  // Signal 2 — domain match (find users whose email ends in @domain)
+  if (domain) {
+    searches.push(
+      zdAuditorGet(`${base}/users/search`, { query: `email:*@${domain}`, per_page: 25 })
+        .then(data => {
+          for (const u of (data.users || [])) {
+            if (u.role !== 'agent' && u.role !== 'admin') { userSet.set(u.id, u); domainHits.add(u.id); }
+          }
+        })
+        .catch(() => {})
+    );
+  }
+
+  // Signal 3 — name search (broader, per_page bumped; short tokens now preserved)
   if (nameQuery) {
     const clean = nameQuery.replace(/[&,.()"'\/\\]/g, ' ').replace(/\s+/g, ' ').trim();
-    const q = clean.split(' ').filter(w => w.length > 2).slice(0, 4).join(' ');
-    if (q.length >= 3) {
+    // Bug fix: previously filtered w.length > 2 which dropped "EZ" from "EZ Divorce"
+    // (leaving the search as just "Divorce" and matching any random Divorce customer).
+    // Keep any token of length >= 2 so short-but-critical name components survive.
+    const tokens = clean.split(' ').filter(w => w.length >= 2);
+    const q = tokens.slice(0, 5).join(' ');
+    if (q.length >= 2) {
       searches.push(
-        zdAuditorGet(`${base}/users/search`, { query: q, per_page: 10 })
+        zdAuditorGet(`${base}/users/search`, { query: q, per_page: 25 })
           .then(data => {
             for (const u of (data.users || [])) {
               if (u.role !== 'agent' && u.role !== 'admin') userSet.set(u.id, u);
@@ -2409,29 +2459,124 @@ async function matchCustomer(row) {
       );
     }
   }
+
+  // Signal 4 — direct organization search by name (highest-signal for firm/account names)
+  const orgCandidates = new Map(); // orgId -> org
+  if (nameQuery) {
+    const cleanForOrg = nameQuery.replace(/["]/g, '').trim();
+    if (cleanForOrg.length >= 2) {
+      searches.push(
+        zdAuditorGet(`${base}/search`, { query: `type:organization ${cleanForOrg}`, per_page: 10 })
+          .then(data => {
+            for (const org of (data.results || [])) {
+              if (org && org.id && (org.result_type === 'organization' || org.name)) {
+                orgCandidates.set(org.id, org);
+              }
+            }
+          })
+          .catch(() => {})
+      );
+    }
+  }
+
   await Promise.all(searches);
 
-  if (userSet.size === 0) return null;
-
   const users = [...userSet.values()];
-  const userWithOrg = users.find(u => u.organization_id);
-  const zdOrgId = userWithOrg?.organization_id || null;
 
-  let zdOrgName = nameQuery || users[0].name;
-  if (zdOrgId) {
-    try {
-      const orgData = await zdAuditorGet(`${base}/organizations/${zdOrgId}`);
-      zdOrgName = orgData.organization?.name || zdOrgName;
-    } catch (e) { /* fall through */ }
+  // Fetch org details for every unique organization_id referenced by returned users
+  const userOrgIds = [...new Set(users.filter(u => u.organization_id).map(u => u.organization_id))];
+  const missingOrgIds = userOrgIds.filter(id => !orgCandidates.has(id));
+  const fetched = await Promise.all(
+    missingOrgIds.map(id => zdAuditorGet(`${base}/organizations/${id}`)
+      .then(d => d.organization)
+      .catch(() => null))
+  );
+  for (const org of fetched) { if (org && org.id) orgCandidates.set(org.id, org); }
+
+  if (users.length === 0 && orgCandidates.size === 0) return null;
+
+  // Build scored candidate list. Each candidate is either an org (preferred) or an orgless user.
+  const candidates = [];
+
+  for (const [orgId, org] of orgCandidates) {
+    const usersInOrg = users.filter(u => u.organization_id === orgId);
+    let score = 0;
+    let source = 'orgName';
+
+    // Strongest — exact email match landed in this org
+    if (usersInOrg.some(u => emailHits.has(u.id))) { score = 1.0; source = 'email'; }
+
+    // Domain match — user email or org.domain_names
+    if (domain) {
+      const userDomainMatch = usersInOrg.some(u =>
+        domainHits.has(u.id) || String(u.email || '').toLowerCase().endsWith('@' + domain)
+      );
+      const orgDomainMatch = Array.isArray(org.domain_names) &&
+        org.domain_names.some(d => String(d).toLowerCase() === domain);
+      if (orgDomainMatch && score < 0.95) { score = 0.95; source = source === 'email' ? source : 'orgDomain'; }
+      else if (userDomainMatch && score < 0.9)  { score = 0.9;  source = source === 'email' ? source : 'userDomain'; }
+    }
+
+    // Name overlap on the org's own name
+    if (nameQuery) {
+      const ns = nameMatchScore(nameQuery, org.name);
+      if (ns > score) { score = ns; source = 'orgName'; }
+    }
+
+    candidates.push({
+      user: usersInOrg[0] || null,
+      users: usersInOrg,
+      org,
+      score,
+      source,
+    });
   }
+
+  // Orgless users (rare, but keep them as fallback candidates)
+  for (const u of users) {
+    if (u.organization_id) continue;
+    let score = 0;
+    let source = 'userName';
+    if (emailHits.has(u.id)) { score = 1.0; source = 'email'; }
+    if (domain && (domainHits.has(u.id) || String(u.email || '').toLowerCase().endsWith('@' + domain))) {
+      if (score < 0.9) { score = 0.9; source = source === 'email' ? source : 'userDomain'; }
+    }
+    if (nameQuery) {
+      const ns = nameMatchScore(nameQuery, u.name);
+      if (ns > score) { score = ns; source = 'userName'; }
+    }
+    candidates.push({ user: u, users: [u], org: null, score, source });
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  const best = candidates[0];
+  if (!best) return null;
+
+  // Minimum score gate. When only accountName was provided (no email, no domain),
+  // demand a stronger name overlap so we don't hand Gemini tickets from a random
+  // customer that happens to share one word with the query.
+  const hadStrongSignal = emailHits.size > 0 || domainHits.size > 0;
+  const MIN_SCORE = hadStrongSignal ? 0.3 : 0.6;
+  if (best.score < MIN_SCORE) {
+    console.log(`[auditor:match] rejected best candidate — score ${best.score.toFixed(2)} < ${MIN_SCORE} (source=${best.source})`);
+    return null;
+  }
+
+  const zdOrgId = best.org?.id || best.user?.organization_id || null;
+  const zdOrgName = best.org?.name || best.user?.name || nameQuery;
+  const zdUserId = best.user?.id || null;
+  const zdUserIds = best.users.filter(u => u).map(u => u.id).slice(0, 5);
+
+  const matchConfidence = best.score >= 0.9 ? 'High' : best.score >= 0.5 ? 'Medium' : 'Low';
 
   return {
     zdOrgId,
     zdOrgName,
-    zdUserId: users[0].id,
-    zdUserIds: users.map(u => u.id).slice(0, 5),
-    matchType: userSet.size > 1 ? 'emailAndName' : 'singleSearch',
-    matchConfidence: zdOrgId ? 'High' : 'Medium',
+    zdUserId,
+    zdUserIds: zdUserIds.length ? zdUserIds : (zdUserId ? [zdUserId] : []),
+    matchType: best.source,
+    matchConfidence,
+    matchScore: Math.round(best.score * 100) / 100,
   };
 }
 
@@ -3314,10 +3459,20 @@ app.get('/api/zendesk-auditor/categories', requireRole('super_admin', 'zendesk_a
 
 // Single-customer lookup — same logic as batch, returns directly with CSAT pulse
 app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_auditor'), async (req, res) => {
+  // Normalize a domain input like "@ezdivorce.com", "https://www.ezdivorce.com/",
+  // "www.EZDivorce.com", or a full email "hi@ezdivorce.com" down to "ezdivorce.com".
+  function sanitizeDomain(raw) {
+    let d = String(raw || '').trim().toLowerCase();
+    if (!d) return '';
+    d = d.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/^@+/, '');
+    if (d.includes('@')) d = d.split('@').pop();     // email → domain
+    d = d.split('/')[0].split('?')[0].split(':')[0]; // strip path/query/port
+    return d.trim();
+  }
   const row = {
     accountName: String(req.body.accountName || '').trim(),
     customerEmail: String(req.body.customerEmail || '').trim(),
-    emailDomain: String(req.body.emailDomain || '').trim(),
+    emailDomain: sanitizeDomain(req.body.emailDomain),
     orgName: String(req.body.orgName || '').trim(),
     notes: String(req.body.notes || '').trim(),
   };
