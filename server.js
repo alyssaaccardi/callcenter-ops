@@ -3341,7 +3341,7 @@ async function runAuditJob(jobId, rows) {
       accountName: row.accountName || '',
       emailDomain: row.emailDomain || '',
       customerEmail: row.customerEmail || '',
-      matchedOrg: null, matchConfidence: null, matchType: null,
+      matchedOrg: null, matchConfidence: null, matchType: null, zdOrgId: null,
       category: null, competitorName: null, summary: null,
       confidence: null, reasoning: null,
       estimatedCancellationDate: null, exitDateSource: null,
@@ -3375,6 +3375,7 @@ async function runAuditJob(jobId, rows) {
         baseResult.matchedOrg = match.zdOrgName;
         baseResult.matchConfidence = match.matchConfidence;
         baseResult.matchType = match.matchType;
+        baseResult.zdOrgId = match.zdOrgId || null;
 
         // Phase 1 + Phase 2 in parallel
         const [phase1, phase2] = await Promise.all([
@@ -3507,7 +3508,7 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
     accountName: row.accountName || row.orgName || '',
     emailDomain: row.emailDomain || (row.customerEmail ? (row.customerEmail.split('@')[1] || '') : ''),
     customerEmail: row.customerEmail || '',
-    matchedOrg: null, matchConfidence: null, matchType: null,
+    matchedOrg: null, matchConfidence: null, matchType: null, zdOrgId: null,
     category: null, competitorName: null, summary: null,
     confidence: null, reasoning: null,
     supportingTicketIds: [], ticketSubjects: [], ticketDates: [],
@@ -3537,6 +3538,7 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
       baseResult.matchedOrg = match.zdOrgName;
       baseResult.matchConfidence = match.matchConfidence;
       baseResult.matchType = match.matchType;
+      baseResult.zdOrgId = match.zdOrgId || null;
 
       // Fetch more tickets than batch mode to get better CSAT coverage
       for (const t of await getRecentSolvedTickets(match, 15)) {

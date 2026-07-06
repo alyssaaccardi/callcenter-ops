@@ -979,11 +979,27 @@ export default function ZendeskAuditor() {
     return new Date(r.estimatedCancellationDate + 'T00:00:00') >= viewCutoff;
   });
 
-  // Compute per-customer repeat counts and best (most recent) entry
+  // Dedup key for the repeat-cancellation counter. Prefer the stable Zendesk
+  // organization ID — the display name drifts because Zendesk appends person
+  // suffixes like "Kalamaya Goscha (Amy)" that varied across lookups, splitting
+  // one customer into multiple keys. Fall back to a normalized name only when
+  // zdOrgId is missing (no_match rows, orgless users).
+  function repeatKey(r) {
+    if (r.zdOrgId) return `zd:${r.zdOrgId}`;
+    const raw = r.matchedOrg || r.accountName || r.customerEmail || '';
+    return raw
+      .toLowerCase()
+      .replace(/\s*\([^)]*\)\s*/g, ' ')                    // strip "(Amy)" style suffixes
+      .replace(/[&,.()"'\/\\\-]/g, ' ')                    // strip punctuation
+      .replace(/\b(the|of|and|law|laws?|office?s?|firms?|attorneys?|group|legal|llc|pllc|pc|pa|llp|inc|corp|co|associates?|partners?|chartered|services|practice)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   const countByKey = new Map();
   const bestByKey = new Map();
   for (const r of windowedResults) {
-    const key = (r.matchedOrg || r.accountName || r.customerEmail || '').toLowerCase().trim();
+    const key = repeatKey(r);
     if (!key) continue;
     countByKey.set(key, (countByKey.get(key) || 0) + 1);
     const d = r.estimatedCancellationDate || '';
@@ -995,7 +1011,7 @@ export default function ZendeskAuditor() {
 
   // Enrich with repeat metadata (non-mutating)
   const enriched = windowedResults.map(r => {
-    const key = (r.matchedOrg || r.accountName || r.customerEmail || '').toLowerCase().trim();
+    const key = repeatKey(r);
     const count = key ? (countByKey.get(key) || 1) : 1;
     if (count <= 1) return r;
     return { ...r, _repeatCount: count, _isMostRecent: bestSet.has(r) };
