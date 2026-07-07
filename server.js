@@ -2348,6 +2348,12 @@ function normalizeAuditorRow(raw) {
       normalized.customerEmail = String(val || '').trim();
     else if (['orgname','organizationname','org','organization'].includes(k))
       normalized.orgName = String(val || '').trim();
+    else if (['tenant','chargeovertenant','businesstype'].includes(k) && !normalized.chargeoverTenant) {
+      const t = String(val || '').trim().toUpperCase();
+      if (['AL', 'RS'].includes(t)) normalized.chargeoverTenant = t;
+      else if (/^answering\s*legal$/i.test(String(val || '').trim())) normalized.chargeoverTenant = 'AL';
+      else if (/^ring\s*savvy$/i.test(String(val || '').trim())) normalized.chargeoverTenant = 'RS';
+    }
     else if (k.includes('note') || k.includes('reason') || k.includes('comment') || k.includes('description') || k.includes('details')) {
       const v = String(val || '').trim();
       if (v && !NOTE_NOISE_VALUES.has(v.toLowerCase())) noteFragments.push(v);
@@ -2689,6 +2695,189 @@ async function getCancellationKeywordTickets(match) {
     const comments = await fetchTicketComments(t.id);
     return { id: t.id, subject: t.subject, created_at: t.created_at, comments };
   }));
+}
+
+// ─── ChargeOver enrichment (dual-tenant AL + RS) ─────────────────────────────
+// Ops records cancellation categories in the subscription's custom_3 field
+// (custom_6 = quality subcategory, custom_4 = secondary). About 80% of recent
+// cancellations have custom_3 populated with a category that already aligns
+// with AUDITOR_CATEGORIES (with minor casing/punctuation drift, normalized
+// below). The remaining ~20% are blank/Unknown — those are where the AI's
+// Zendesk analysis is the primary reason.
+
+const CHARGEOVER_TENANTS = {
+  AL: {
+    url: process.env.CHARGEOVER_AL_URL || '',
+    auth: (process.env.CHARGEOVER_AL_PUBLIC_KEY && process.env.CHARGEOVER_AL_PRIVATE_KEY)
+      ? Buffer.from(`${process.env.CHARGEOVER_AL_PUBLIC_KEY}:${process.env.CHARGEOVER_AL_PRIVATE_KEY}`).toString('base64')
+      : '',
+  },
+  RS: {
+    url: process.env.CHARGEOVER_RS_URL || '',
+    auth: (process.env.CHARGEOVER_RS_PUBLIC_KEY && process.env.CHARGEOVER_RS_PRIVATE_KEY)
+      ? Buffer.from(`${process.env.CHARGEOVER_RS_PUBLIC_KEY}:${process.env.CHARGEOVER_RS_PRIVATE_KEY}`).toString('base64')
+      : '',
+  },
+};
+
+async function chargeoverGet(tenant, endpoint, params = {}) {
+  const cfg = CHARGEOVER_TENANTS[tenant];
+  if (!cfg?.url || !cfg?.auth) throw new Error(`ChargeOver tenant "${tenant}" not configured`);
+  const resp = await axios.get(`${cfg.url}${endpoint}`, {
+    params,
+    headers: { Authorization: `Basic ${cfg.auth}` },
+    timeout: 8000,
+  });
+  return resp.data?.response ?? null;
+}
+
+// ChargeOver custom_3 values → AUDITOR_CATEGORIES (case-insensitive keys).
+// null value means "treat as unset" (Unknown / blank) — AI should fill in.
+const CHARGEOVER_CATEGORY_MAP = {
+  'price is too high': 'Price Too High',
+  'quality': 'Quality',
+  'hired staff': 'Hired Staff',
+  'went to competitor': 'Went to Competitor',
+  'not enough call volume': 'Not Enough Call Volume',
+  'closed practice/retired': 'Closed Practice',
+  'closed practice': 'Closed Practice',
+  'retired': 'Retired',
+  'non-payment': 'Non-Payment',
+  'non payment': 'Non-Payment',
+  "doesnt see value in service": "Doesn't See Value",
+  "doesn't see value in service": "Doesn't See Value",
+  'call forwarding issue': 'Call Forwarding Issue',
+  'downsizing practice': 'Downsizing Practice',
+  'fired': 'Fired',
+  'leaving firm': 'Leaving Firm',
+  'wanted real time reporting/portal': 'Wanted Real Time Reporting / Portal',
+  "wanted features or services we dont offer": "Wanted Features/Services We Don't Offer",
+  "wanted features or services we don't offer": "Wanted Features/Services We Don't Offer",
+  'did not want to pay rate increase/overages': 'Did Not Want to Pay Rate Increase / Overages',
+  'answering service included in "suite/co-work space"': 'Answering Service Included In Suite',
+  'answering service included in suite/co-work space': 'Answering Service Included In Suite',
+  'went to ai': 'Switched to AI Service',
+  'appointed judge': 'Appointed Judge',
+  'unknown': null,
+  '': null,
+};
+
+const CHARGEOVER_QUALITY_SUBCAT_MAP = {
+  'inconsistent call handling': 'Receptionist Conduct',
+  'incorrect message details': 'Message / Intake Errors',
+  'low professionalism or poor tone from agents': 'Receptionist Conduct',
+  'ring/hold times': 'Missed Calls',
+  'limited product or business knowledge by agents': 'Receptionist Conduct',
+  'missed or dropped calls': 'Missed Calls',
+  'insufficient help from support teams': 'General Quality',
+  'unknown': 'General Quality',
+};
+
+function normalizeChargeoverCategory(raw) {
+  if (raw == null) return null;
+  const k = String(raw).toLowerCase().trim();
+  if (!k) return null;
+  return CHARGEOVER_CATEGORY_MAP[k] ?? null;
+}
+
+function normalizeChargeoverQualitySubcat(raw) {
+  if (raw == null) return null;
+  const k = String(raw).toLowerCase().trim();
+  return CHARGEOVER_QUALITY_SUBCAT_MAP[k] ?? null;
+}
+
+// Look up a single tenant by email (superuser_email — where email actually
+// lives on customer records) with a company-name fallback. Returns the first
+// customer + their most recent subscription (canceled preferred).
+async function lookupChargeoverCustomer(tenant, { email, company }) {
+  let customers = [];
+  if (email) {
+    try {
+      customers = await chargeoverGet(tenant, '/customer', {
+        where: `superuser_email:EQUALS:${email}`,
+        limit: 5,
+      }) || [];
+    } catch (e) { /* ignore, fall through */ }
+  }
+  if (customers.length === 0 && company) {
+    try {
+      customers = await chargeoverGet(tenant, '/customer', {
+        where: `company:CONTAINS:${company}`,
+        limit: 5,
+      }) || [];
+    } catch (e) { /* ignore */ }
+  }
+  if (customers.length === 0) return null;
+  const cust = customers[0];
+
+  let subs = [];
+  try {
+    subs = await chargeoverGet(tenant, '/package', {
+      where: `customer_id:EQUALS:${cust.customer_id}`,
+      order: 'cancel_datetime:desc',
+      limit: 5,
+    }) || [];
+  } catch (e) { /* leave subs empty */ }
+
+  const canceledSub = subs.find(s => s.package_status_str === 'canceled-manual');
+  const activeSub   = subs.find(s => s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
+  const sub = canceledSub || activeSub || subs[0] || null;
+
+  return {
+    tenant,
+    customerId: cust.customer_id,
+    company: cust.company || null,
+    email: cust.superuser_email || cust.email || null,
+    status: cust.customer_status_str || null,
+    admin: cust.admin_name || null,
+    mrr: cust.mrr ?? null,
+    arr: cust.arr ?? null,
+    balance: cust.balance ?? null,
+    canceledAt: sub?.cancel_datetime?.slice(0, 10) || null,
+    category: normalizeChargeoverCategory(sub?.custom_3),
+    categoryRaw: sub?.custom_3 || null,
+    secondaryCategory: normalizeChargeoverCategory(sub?.custom_4),
+    qualitySubcategory: normalizeChargeoverQualitySubcat(sub?.custom_6),
+    planTier: sub?.custom_2 || null,
+    overageRate: sub?.custom_1 || null,
+    daysOverdue: sub?.days_overdue ?? 0,
+    amountOverdue: sub?.amount_overdue ?? 0,
+    subStatus: sub?.package_status_str || null,
+    url: cust.url_self || null,
+  };
+}
+
+// Query one or both tenants. When 'both', prefer canceled over active, else
+// prefer first tenant that returned a hit.
+async function enrichWithChargeover({ email, company, tenant }) {
+  if (!CHARGEOVER_TENANTS.AL.url && !CHARGEOVER_TENANTS.RS.url) return null;
+  const tenants = tenant && ['AL', 'RS'].includes(tenant) ? [tenant] : ['AL', 'RS'];
+  const results = [];
+  for (const t of tenants) {
+    if (!CHARGEOVER_TENANTS[t]?.auth) continue;
+    try {
+      const r = await lookupChargeoverCustomer(t, { email, company });
+      if (r) results.push(r);
+    } catch (e) {
+      console.warn(`[chargeover:${t}] lookup failed: ${e.message}`);
+    }
+  }
+  if (results.length === 0) return null;
+  results.sort((a, b) => {
+    // Prefer canceled subs, then active, then anything
+    const rank = r => r.subStatus === 'canceled-manual' ? 0 : r.subStatus?.startsWith('active') ? 1 : 2;
+    return rank(a) - rank(b);
+  });
+  return results[0];
+}
+
+function computeAuditAgreement(chargeoverCategory, aiCategory) {
+  if (chargeoverCategory && aiCategory) {
+    return chargeoverCategory === aiCategory ? 'agree' : 'disagree';
+  }
+  if (chargeoverCategory && !aiCategory) return 'chargeover-only';
+  if (aiCategory && !chargeoverCategory) return 'ai-only';
+  return 'none';
 }
 
 // ─── Known competitor / AI service name lookup ────────────────────────────────
@@ -3384,6 +3573,7 @@ async function runAuditJob(jobId, rows) {
       confidence: null, reasoning: null,
       estimatedCancellationDate: null, exitDateSource: null,
       supportingTicketIds: [], ticketSubjects: [], ticketDates: [],
+      aiCategory: null, chargeover: null, primarySource: null, agreement: 'none',
       status: 'done', error: null,
       zdSubdomain: process.env.ZENDESK_SUBDOMAIN || '',
       _originalRow: rawRow,
@@ -3469,9 +3659,24 @@ async function runAuditJob(jobId, rows) {
         lastDate: lastRatedTicket?.created_at?.slice(0, 10) || null,
       };
 
-      const analysis = await runAnalysis(row, tickets, cutoff);
-      baseResult.category = analysis.category;
-      baseResult.qualitySubcategory = analysis.qualitySubcategory || null;
+      const [analysis, chargeover] = await Promise.all([
+        runAnalysis(row, tickets, cutoff),
+        enrichWithChargeover({
+          email: row.customerEmail || null,
+          company: baseResult.matchedOrg || row.accountName || null,
+          tenant: row.chargeoverTenant,
+        }).catch(() => null),
+      ]);
+
+      // Dual-source reconciliation: ChargeOver custom_3 (ops-recorded) wins
+      // when populated; AI fills the gap when ChargeOver is blank/Unknown.
+      baseResult.aiCategory = analysis.category || null;
+      baseResult.chargeover = chargeover;
+      const primary = chargeover?.category || analysis.category || null;
+      baseResult.primarySource = chargeover?.category ? 'chargeover' : (analysis.category ? 'ai' : null);
+      baseResult.agreement = computeAuditAgreement(chargeover?.category || null, analysis.category || null);
+      baseResult.category = primary;
+      baseResult.qualitySubcategory = chargeover?.qualitySubcategory || analysis.qualitySubcategory || null;
       baseResult.competitorName = analysis.competitorName || null;
       baseResult.summary = analysis.summary;
       baseResult.confidence = analysis.confidence;
@@ -3479,11 +3684,13 @@ async function runAuditJob(jobId, rows) {
       baseResult.supportingTicketIds = analysis.supporting_ticket_ids || [];
       baseResult.analysisMethod = analysis.analysisMethod || 'ai';
 
-      // Exit date: use AI-extracted date if available, otherwise fall back to most recent ticket
+      // Exit date: prefer ChargeOver's canceled_at (authoritative), then AI, then last ticket.
       const sortedTickets = tickets.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       const latestTicket = sortedTickets[0];
-      if (analysis.estimatedCancellationDate) {
-        // Clamp: if filter active and AI date is before cutoff, use last ticket instead
+      if (chargeover?.canceledAt) {
+        baseResult.estimatedCancellationDate = chargeover.canceledAt;
+        baseResult.exitDateSource = 'chargeover';
+      } else if (analysis.estimatedCancellationDate) {
         const aiDate = new Date(analysis.estimatedCancellationDate + 'T00:00:00');
         if (cutoff && aiDate < cutoff) {
           baseResult.estimatedCancellationDate = latestTicket?.created_at?.slice(0, 10) || null;
@@ -3536,6 +3743,7 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
     emailDomain: sanitizeDomain(req.body.emailDomain),
     orgName: String(req.body.orgName || '').trim(),
     notes: String(req.body.notes || '').trim(),
+    chargeoverTenant: ['AL', 'RS'].includes(req.body.chargeoverTenant) ? req.body.chargeoverTenant : null,
   };
 
   if (!row.accountName && !row.customerEmail && !row.orgName) {
@@ -3551,6 +3759,10 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
     confidence: null, reasoning: null,
     supportingTicketIds: [], ticketSubjects: [], ticketDates: [],
     csat: null, status: 'done', error: null,
+    // Dual-source classification: aiCategory = Gemini's read of Zendesk tickets;
+    // chargeover.category = ops-recorded reason in ChargeOver subscription.custom_3.
+    // `category` is the primary answer displayed to ops (ChargeOver if set, else AI).
+    aiCategory: null, chargeover: null, primarySource: null, agreement: 'none',
     zdSubdomain: process.env.ZENDESK_SUBDOMAIN || '',
   };
 
@@ -3628,13 +3840,28 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
       lastDate: last?.created_at?.slice(0, 10) || null,
     };
 
-    const analysis = await runAnalysis(row, tickets, lookbackCutoff);
+    // Run Gemini analysis + ChargeOver enrichment in parallel — Gemini is
+    // ~5-10s, ChargeOver is ~1s, no reason to sequence.
+    const [analysis, chargeover] = await Promise.all([
+      runAnalysis(row, tickets, lookbackCutoff),
+      enrichWithChargeover({
+        email: row.customerEmail || null,
+        company: baseResult.matchedOrg || row.accountName || null,
+        tenant: row.chargeoverTenant,
+      }).catch(() => null),
+    ]);
+
     const sortedLookup = tickets.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     const latestLookup = sortedLookup[0];
-    let exitDate = analysis.estimatedCancellationDate || null;
-    let exitDateSource = exitDate ? 'explicit' : null;
-    if (exitDate) {
-      // Clamp: if filter active and AI date is before cutoff, use last ticket instead
+    // Exit date preference: ChargeOver's canceled_at (authoritative) > AI-extracted > last ticket
+    let exitDate = null;
+    let exitDateSource = null;
+    if (chargeover?.canceledAt) {
+      exitDate = chargeover.canceledAt;
+      exitDateSource = 'chargeover';
+    } else if (analysis.estimatedCancellationDate) {
+      exitDate = analysis.estimatedCancellationDate;
+      exitDateSource = 'explicit';
       if (lookbackCutoff && new Date(exitDate + 'T00:00:00') < lookbackCutoff) {
         exitDate = latestLookup?.created_at?.slice(0, 10) || null;
         exitDateSource = exitDate ? 'last_ticket' : null;
@@ -3643,9 +3870,21 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
       exitDate = latestLookup?.created_at?.slice(0, 10) || null;
       exitDateSource = exitDate ? 'last_ticket' : null;
     }
+
+    // Reconcile primary category: ChargeOver custom_3 wins when set, AI fills gaps.
+    const aiCategory = analysis.category || null;
+    const coCategory = chargeover?.category || null;
+    const primarySource = coCategory ? 'chargeover' : (aiCategory ? 'ai' : null);
+    const primaryCategory = coCategory || aiCategory || null;
+    const agreement = computeAuditAgreement(coCategory, aiCategory);
+
     return res.json({
       ...baseResult,
-      category: analysis.category,
+      category: primaryCategory,
+      aiCategory,
+      chargeover,
+      primarySource,
+      agreement,
       competitorName: analysis.competitorName || null,
       summary: analysis.summary,
       confidence: analysis.confidence,

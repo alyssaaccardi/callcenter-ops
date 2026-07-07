@@ -494,6 +494,21 @@ function SpinnerRow({ index }) {
   );
 }
 
+function AgreementBadge({ agreement }) {
+  const cfg = {
+    agree:            { text: '✓ Both sources agree',              bg: 'rgba(34,197,94,0.12)',  fg: '#15803d' },
+    disagree:         { text: '⚠ Sources disagree — needs review', bg: 'rgba(245,158,11,0.18)', fg: '#b45309' },
+    'ai-only':        { text: 'ℹ AI-only (ChargeOver blank)',      bg: 'rgba(59,130,246,0.12)', fg: '#1d4ed8' },
+    'chargeover-only':{ text: '📋 ChargeOver-only (no AI signal)',  bg: 'rgba(107,114,128,0.15)', fg: '#4b5563' },
+  }[agreement];
+  if (!cfg) return null;
+  return (
+    <div style={{ display: 'inline-flex', padding: '4px 10px', borderRadius: 12, background: cfg.bg, color: cfg.fg, fontSize: 12, fontWeight: 600 }}>
+      {cfg.text}
+    </div>
+  );
+}
+
 function SingleResult({ r, onClear }) {
   const zdSubdomain = r.zdSubdomain || '';
   const needsCompetitor = r.category === 'Went to Competitor' || r.category === 'Switched to AI Service';
@@ -526,23 +541,82 @@ function SingleResult({ r, onClear }) {
         <div style={{ fontSize: 13, color: '#dc2626' }}>{r.error}</div>
       )}
 
-      {r.status === 'done' && r.category && (
+      {r.status === 'done' && (r.category || r.chargeover) && (
         <>
-          {/* Category + confidence */}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
-            <Badge label={r.category} colors={CATEGORY_COLORS} />
-            {needsCompetitor && (
-              <span style={{ fontSize: 12, fontWeight: 600, color: r.competitorName ? 'var(--text)' : 'var(--muted)' }}>
-                {r.competitorName || 'Unknown'}
-              </span>
-            )}
-            {r.category === 'Quality' && r.qualitySubcategory && r.qualitySubcategory !== 'General Quality' && (
-              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'rgba(239,68,68,0.1)', color: '#dc2626' }}>
-                {r.qualitySubcategory}
-              </span>
-            )}
-            {r.confidence && <Badge label={r.confidence} colors={CONFIDENCE_COLORS} />}
+          {/* "Still active" warning banner — ChargeOver says they're not actually cancelled */}
+          {r.chargeover?.status?.startsWith('active') && (
+            <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.4)', color: '#92400e', fontSize: 13, marginBottom: 12 }}>
+              <strong>⚠ ChargeOver reports this customer as {r.chargeover.status}</strong> — they may not actually be cancelled. Double-check before recording a churn reason.
+            </div>
+          )}
+
+          {/* Dual-source cancellation reason */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 8 }}>
+              Cancellation Reason
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+              {/* ChargeOver panel */}
+              <div style={{
+                padding: '10px 12px', borderRadius: 8,
+                background: r.chargeover?.category ? 'rgba(59,130,246,0.07)' : 'rgba(107,114,128,0.06)',
+                border: `1px solid ${r.chargeover?.category ? 'rgba(59,130,246,0.25)' : 'rgba(107,114,128,0.15)'}`,
+              }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: '#3b82f6', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>
+                  ChargeOver{r.chargeover?.tenant ? ` · ${r.chargeover.tenant}` : ''}
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: r.chargeover?.category ? 'var(--text)' : 'var(--muted)' }}>
+                  {r.chargeover?.categoryRaw || (r.chargeover ? '(no reason recorded)' : 'no ChargeOver record')}
+                </div>
+                {r.chargeover?.qualitySubcategory && (
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
+                    subcat: {r.chargeover.qualitySubcategory}
+                  </div>
+                )}
+                {r.chargeover?.secondaryCategory && (
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
+                    secondary: {r.chargeover.secondaryCategory}
+                  </div>
+                )}
+              </div>
+              {/* AI panel */}
+              <div style={{
+                padding: '10px 12px', borderRadius: 8,
+                background: r.aiCategory ? 'rgba(168,85,247,0.07)' : 'rgba(107,114,128,0.06)',
+                border: `1px solid ${r.aiCategory ? 'rgba(168,85,247,0.25)' : 'rgba(107,114,128,0.15)'}`,
+              }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: '#a855f7', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>
+                  Zendesk AI{r.confidence ? ` · ${r.confidence}` : ''}
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: r.aiCategory ? 'var(--text)' : 'var(--muted)' }}>
+                  {r.aiCategory || '—'}
+                </div>
+                {needsCompetitor && r.competitorName && (
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
+                    → {r.competitorName}
+                  </div>
+                )}
+                {r.aiCategory === 'Quality' && r.qualitySubcategory && r.qualitySubcategory !== 'General Quality' && (
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
+                    subcat: {r.qualitySubcategory}
+                  </div>
+                )}
+              </div>
+            </div>
+            <AgreementBadge agreement={r.agreement} />
           </div>
+
+          {/* ChargeOver context strip */}
+          {r.chargeover && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
+              <strong>ChargeOver:</strong> {r.chargeover.tenant} · ID {r.chargeover.customerId}
+              {r.chargeover.subStatus && ` · ${r.chargeover.subStatus}`}
+              {r.chargeover.mrr != null && Number(r.chargeover.mrr) > 0 && ` · MRR $${Number(r.chargeover.mrr).toFixed(0)}`}
+              {r.chargeover.planTier && ` · Plan ${r.chargeover.planTier}`}
+              {r.chargeover.daysOverdue > 0 && ` · ${r.chargeover.daysOverdue}d overdue`}
+              {r.chargeover.admin && ` · Rep ${r.chargeover.admin}`}
+            </div>
+          )}
 
           {r.summary && (
             <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6, marginBottom: 10 }}>{r.summary}</div>
@@ -570,7 +644,9 @@ function SingleResult({ r, onClear }) {
                     {new Date(r.estimatedCancellationDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                    {r.exitDateSource === 'last_ticket' ? 'last ticket on file' : 'est. exit date'}
+                    {r.exitDateSource === 'chargeover' ? 'ChargeOver (confirmed)'
+                      : r.exitDateSource === 'last_ticket' ? 'last ticket on file'
+                      : 'est. exit date'}
                   </div>
                 </div>
               )}
@@ -627,7 +703,7 @@ export default function ZendeskAuditor() {
   const fileInputRef = useRef(null);
   const readerRef = useRef(null);
   const [lookbackDays, setLookbackDays] = useState('');  // '' = all time
-  const [singleForm, setSingleForm] = useState({ accountName: '', customerEmail: '', emailDomain: '', notes: '' });
+  const [singleForm, setSingleForm] = useState({ accountName: '', customerEmail: '', emailDomain: '', notes: '', chargeoverTenant: '' });
   const [singleResult, setSingleResult] = useState(null);
   const [singleLoading, setSingleLoading] = useState(false);
   const [singleError, setSingleError] = useState('');
@@ -852,7 +928,7 @@ export default function ZendeskAuditor() {
                     />
                   </div>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 140px', gap: 12, marginBottom: 12 }}>
                   <div className="form-row">
                     <label className="field-label">
                       Email Domain <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span>
@@ -872,6 +948,20 @@ export default function ZendeskAuditor() {
                       onChange={e => setSingleForm(f => ({ ...f, notes: e.target.value }))}
                       placeholder="Ticket #314123 or cancellation context"
                     />
+                  </div>
+                  <div className="form-row">
+                    <label className="field-label">
+                      Business
+                    </label>
+                    <select
+                      value={singleForm.chargeoverTenant}
+                      onChange={e => setSingleForm(f => ({ ...f, chargeoverTenant: e.target.value }))}
+                      style={{ width: '100%', padding: '6px 8px' }}
+                    >
+                      <option value="">Auto (both)</option>
+                      <option value="AL">Answering Legal</option>
+                      <option value="RS">Ring Savvy</option>
+                    </select>
                   </div>
                 </div>
                 <button
