@@ -2593,14 +2593,32 @@ async function matchCustomer(row) {
   const zdOrgId = best.org?.id || best.user?.organization_id || null;
   const zdOrgName = best.org?.name || best.user?.name || nameQuery;
   const zdUserId = best.user?.id || null;
-  const zdUserIds = best.users.filter(u => u).map(u => u.id).slice(0, 5);
+  let zdUserIds = best.users.filter(u => u).map(u => u.id).slice(0, 5);
 
+  // Orgless-winner expansion: when the top candidate has no organization
+  // (Zendesk sometimes stores whole firms as several orgless users, e.g. "The
+  // Sawaya Law Firm (Brad)", "The Sawaya Law Firm (Audrey)", etc.), fetching
+  // tickets from only ONE user misses the firm's actual ticket history. Pull
+  // in every orgless user whose name still scores highly against the query.
+  if (!best.org && best.user && nameQuery) {
+    const peers = users
+      .filter(u => !u.organization_id && u.id !== best.user.id)
+      .map(u => ({ user: u, score: nameMatchScore(nameQuery, u.name) }))
+      .filter(x => x.score >= 0.7)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4)
+      .map(x => x.user.id);
+    zdUserIds = [zdUserId, ...peers].slice(0, 5);
+  }
+
+  const zdUserEmail = best.user?.email || null;
   const matchConfidence = best.score >= 0.9 ? 'High' : best.score >= 0.5 ? 'Medium' : 'Low';
 
   return {
     zdOrgId,
     zdOrgName,
     zdUserId,
+    zdUserEmail,
     zdUserIds: zdUserIds.length ? zdUserIds : (zdUserId ? [zdUserId] : []),
     matchType: best.source,
     matchConfidence,
@@ -2800,12 +2818,17 @@ async function lookupChargeoverCustomer(tenant, { email, company }) {
     } catch (e) { /* ignore, fall through */ }
   }
   if (customers.length === 0 && company) {
-    try {
-      customers = await chargeoverGet(tenant, '/customer', {
-        where: `company:CONTAINS:${company}`,
-        limit: 5,
-      }) || [];
-    } catch (e) { /* ignore */ }
+    // Strip parenthetical suffixes ("(Brad)", "(2)") that Zendesk decorates
+    // user names with — ChargeOver's company field is the clean firm name.
+    const cleanCompany = String(company).replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+    if (cleanCompany) {
+      try {
+        customers = await chargeoverGet(tenant, '/customer', {
+          where: `company:CONTAINS:${cleanCompany}`,
+          limit: 5,
+        }) || [];
+      } catch (e) { /* ignore */ }
+    }
   }
   if (customers.length === 0) return null;
   const cust = customers[0];
@@ -3586,19 +3609,21 @@ async function runAuditJob(jobId, rows) {
         if (t) ticketMap.set(t.id, t);
       }
 
+      let bulkMatch = null;
       if (ticketMap.size > 0) {
         baseResult.matchedOrg = row.accountName || row.orgName || 'Unknown';
         baseResult.matchConfidence = 'High';
         baseResult.matchType = 'noteTicketId';
       } else {
-        const match = await matchCustomer(row);
-        console.log(`[auditor] "${row.accountName || row.orgName || '?'}" → ${match ? `org:${match.zdOrgName}` : 'no_match'}`);
+        bulkMatch = await matchCustomer(row);
+        console.log(`[auditor] "${row.accountName || row.orgName || '?'}" → ${bulkMatch ? `org:${bulkMatch.zdOrgName}` : 'no_match'}`);
 
-        if (!match) {
+        if (!bulkMatch) {
           job.results.push({ ...baseResult, status: 'no_match' });
           job.done++;
           return;
         }
+        const match = bulkMatch;
 
         baseResult.matchedOrg = match.zdOrgName;
         baseResult.matchConfidence = match.matchConfidence;
@@ -3662,7 +3687,7 @@ async function runAuditJob(jobId, rows) {
       const [analysis, chargeover] = await Promise.all([
         runAnalysis(row, tickets, cutoff),
         enrichWithChargeover({
-          email: row.customerEmail || null,
+          email: row.customerEmail || bulkMatch?.zdUserEmail || null,
           company: baseResult.matchedOrg || row.accountName || null,
           tenant: row.chargeoverTenant,
         }).catch(() => null),
@@ -3776,12 +3801,13 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
       if (t) ticketMap.set(t.id, t);
     }
 
+    let match = null;
     if (ticketMap.size > 0) {
       baseResult.matchedOrg = row.accountName || row.orgName || 'Unknown';
       baseResult.matchConfidence = 'High';
       baseResult.matchType = 'noteTicketId';
     } else {
-      const match = await matchCustomer(row);
+      match = await matchCustomer(row);
       console.log(`[auditor:lookup] match → ${match ? `org:${match.zdOrgName} source:${match.matchType} score:${match.matchScore} conf:${match.matchConfidence} userIds:[${match.zdUserIds?.join(',')}]` : 'null'}`);
       if (!match) return res.json({ ...baseResult, status: 'no_match' });
 
@@ -3842,10 +3868,14 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
 
     // Run Gemini analysis + ChargeOver enrichment in parallel — Gemini is
     // ~5-10s, ChargeOver is ~1s, no reason to sequence.
+    // Fall through the email chain: user-provided → matched Zendesk user's
+    // email. Sawaya-style firm-name lookups only give an accountName, so
+    // this recovers the domain via the Zendesk user we matched.
+    const enrichEmail = row.customerEmail || match?.zdUserEmail || null;
     const [analysis, chargeover] = await Promise.all([
       runAnalysis(row, tickets, lookbackCutoff),
       enrichWithChargeover({
-        email: row.customerEmail || null,
+        email: enrichEmail,
         company: baseResult.matchedOrg || row.accountName || null,
         tenant: row.chargeoverTenant,
       }).catch(() => null),
