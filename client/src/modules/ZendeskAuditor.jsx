@@ -534,7 +534,7 @@ function SingleResult({ r, onClear }) {
 
       {r.status === 'no_match' && (
         <div style={{ fontSize: 13, color: '#b45309' }}>
-          No confident Zendesk match for that name. Add the email domain (e.g. <code>ezdivorce.com</code>) or a specific ticket ID in Notes to narrow it down.
+          No confident Zendesk match for that name. Add the email or domain (e.g. <code>bettercallsaul.com</code>) or a specific ticket ID in Notes to narrow it down.
         </div>
       )}
       {r.status === 'error' && (
@@ -703,7 +703,7 @@ export default function ZendeskAuditor() {
   const fileInputRef = useRef(null);
   const readerRef = useRef(null);
   const [lookbackDays, setLookbackDays] = useState('');  // '' = all time
-  const [singleForm, setSingleForm] = useState({ accountName: '', customerEmail: '', emailDomain: '', notes: '', chargeoverTenant: '' });
+  const [singleForm, setSingleForm] = useState({ accountName: '', customerEmail: '', notes: '', chargeoverTenant: '' });
   const [singleResult, setSingleResult] = useState(null);
   const [singleLoading, setSingleLoading] = useState(false);
   const [singleError, setSingleError] = useState('');
@@ -844,13 +844,23 @@ export default function ZendeskAuditor() {
     e.preventDefault();
     setSingleError('');
     setSingleResult(null);
-    if (!singleForm.accountName.trim() && !singleForm.customerEmail.trim()) {
-      setSingleError('Enter an account name or email address');
+    const contact = singleForm.customerEmail.trim();
+    if (!singleForm.accountName.trim() && !contact) {
+      setSingleError('Enter an account name, email, or domain');
       return;
     }
+    // Route the merged Email-or-Domain field: contains @ → email, else → domain.
+    const looksLikeEmail = contact.includes('@') && !contact.startsWith('@');
+    const body = {
+      accountName: singleForm.accountName,
+      customerEmail: looksLikeEmail ? contact : '',
+      emailDomain: looksLikeEmail ? '' : contact,
+      notes: singleForm.notes,
+      chargeoverTenant: singleForm.chargeoverTenant,
+    };
     setSingleLoading(true);
     try {
-      const resp = await api.post('/api/zendesk-auditor/lookup', { ...singleForm });
+      const resp = await api.post('/api/zendesk-auditor/lookup', body);
       setSingleResult(resp.data);
     } catch (err) {
       setSingleError(err.response?.data?.error || err.message);
@@ -919,27 +929,16 @@ export default function ZendeskAuditor() {
                     />
                   </div>
                   <div className="form-row">
-                    <label className="field-label">Customer Email</label>
+                    <label className="field-label">Email or Domain</label>
                     <input
-                      type="email"
+                      type="text"
                       value={singleForm.customerEmail}
                       onChange={e => setSingleForm(f => ({ ...f, customerEmail: e.target.value }))}
-                      placeholder="john@smithlaw.com"
+                      placeholder="saul@bettercallsaul.com or bettercallsaul.com"
                     />
                   </div>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 140px', gap: 12, marginBottom: 12 }}>
-                  <div className="form-row">
-                    <label className="field-label">
-                      Email Domain <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={singleForm.emailDomain}
-                      onChange={e => setSingleForm(f => ({ ...f, emailDomain: e.target.value }))}
-                      placeholder="ezdivorce.com"
-                    />
-                  </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: 12, marginBottom: 12 }}>
                   <div className="form-row">
                     <label className="field-label">Notes / Ticket IDs <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
                     <input
@@ -950,9 +949,7 @@ export default function ZendeskAuditor() {
                     />
                   </div>
                   <div className="form-row">
-                    <label className="field-label">
-                      Business
-                    </label>
+                    <label className="field-label">Business</label>
                     <select
                       value={singleForm.chargeoverTenant}
                       onChange={e => setSingleForm(f => ({ ...f, chargeoverTenant: e.target.value }))}
