@@ -2380,10 +2380,28 @@ function parseTicketIdsFromRow(raw) {
   return [...ids];
 }
 
-async function zdAuditorGet(url, params = {}) {
-  const headers = zdHeaders();
-  const resp = await axios.get(url, { headers, params, timeout: 8000 });
-  return resp.data;
+// Retry-aware Zendesk fetch: 429/5xx/network errors get up to 3 backoff
+// retries, respecting Retry-After when Zendesk sends it. Without this the
+// batch script's silent-swallow catch handlers turn a rate-limit into a
+// no_match, which killed 100% of RS lookups in the Jan-2025→today batch.
+async function zdAuditorGet(url, params = {}, attempt = 0) {
+  try {
+    const resp = await axios.get(url, { headers: zdHeaders(), params, timeout: 10000 });
+    return resp.data;
+  } catch (e) {
+    const status = e.response?.status;
+    const netErr = ['ECONNRESET','ETIMEDOUT','ECONNABORTED','EAI_AGAIN'].includes(e.code);
+    const retryable = status === 429 || (status >= 500 && status < 600) || netErr;
+    if (retryable && attempt < 3) {
+      const retryAfter = parseInt(e.response?.headers?.['retry-after'], 10);
+      const delay = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(retryAfter * 1000, 15000)
+        : 500 * Math.pow(2, attempt);  // 500ms, 1s, 2s
+      await new Promise(r => setTimeout(r, delay));
+      return zdAuditorGet(url, params, attempt + 1);
+    }
+    throw e;
+  }
 }
 
 function normalizeMatchText(s) {
