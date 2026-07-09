@@ -2487,7 +2487,10 @@ async function matchCustomer(row) {
 
   // Signal 3 — name search (broader, per_page bumped; short tokens now preserved)
   if (nameQuery) {
-    const clean = nameQuery.replace(/[&,.()"'\/\\]/g, ' ').replace(/\s+/g, ' ').trim();
+    // Split camelCase before other tokenization so "EZDivorce" becomes
+    // "EZ Divorce" (matching how Zendesk indexes the name with a space).
+    const camelSplit = nameQuery.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+    const clean = camelSplit.replace(/[&,.()"'\/\\]/g, ' ').replace(/\s+/g, ' ').trim();
     // Bug fix: previously filtered w.length > 2 which dropped "EZ" from "EZ Divorce"
     // (leaving the search as just "Divorce" and matching any random Divorce customer).
     // Keep any token of length >= 2 so short-but-critical name components survive.
@@ -2509,7 +2512,7 @@ async function matchCustomer(row) {
   // Signal 4 — direct organization search by name (highest-signal for firm/account names)
   const orgCandidates = new Map(); // orgId -> org
   if (nameQuery) {
-    const cleanForOrg = nameQuery.replace(/["]/g, '').trim();
+    const cleanForOrg = nameQuery.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/["]/g, '').trim();
     if (cleanForOrg.length >= 2) {
       searches.push(
         zdAuditorGet(`${base}/search`, { query: `type:organization ${cleanForOrg}`, per_page: 10 })
@@ -2822,10 +2825,12 @@ function normalizeChargeoverQualitySubcat(raw) {
   return CHARGEOVER_QUALITY_SUBCAT_MAP[k] ?? null;
 }
 
-// Look up a single tenant by email (superuser_email — where email actually
-// lives on customer records) with a company-name fallback. Returns the first
-// customer + their most recent subscription (canceled preferred).
-async function lookupChargeoverCustomer(tenant, { email, company }) {
+// Look up a single tenant. Try in signal-quality order:
+//   1. exact email (highest signal)
+//   2. email-ends-with-domain (any user at that firm's domain)
+//   3. company-name CONTAINS (Zendesk-user-name-like suffixes stripped)
+// Returns the customer + their most recent subscription (canceled preferred).
+async function lookupChargeoverCustomer(tenant, { email, domain, company }) {
   let customers = [];
   if (email) {
     try {
@@ -2835,10 +2840,26 @@ async function lookupChargeoverCustomer(tenant, { email, company }) {
       }) || [];
     } catch (e) { /* ignore, fall through */ }
   }
+  if (customers.length === 0 && domain) {
+    // Any user whose email ends in @domain — catches cases where the ops
+    // person typed the firm's domain but not a specific contact email.
+    try {
+      customers = await chargeoverGet(tenant, '/customer', {
+        where: `superuser_email:CONTAINS:@${domain}`,
+        limit: 5,
+      }) || [];
+    } catch (e) { /* ignore */ }
+  }
   if (customers.length === 0 && company) {
-    // Strip parenthetical suffixes ("(Brad)", "(2)") that Zendesk decorates
-    // user names with — ChargeOver's company field is the clean firm name.
-    const cleanCompany = String(company).replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+    // Normalize the company for CO's CONTAINS search:
+    //  - split camelCase (EZDivorce -> EZ Divorce)
+    //  - strip parenthetical suffixes ("(Brad)", "(2)") that Zendesk adds
+    //  - collapse whitespace
+    const cleanCompany = String(company)
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/\s*\([^)]*\)\s*/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (cleanCompany) {
       try {
         customers = await chargeoverGet(tenant, '/customer', {
@@ -2890,14 +2911,14 @@ async function lookupChargeoverCustomer(tenant, { email, company }) {
 
 // Query one or both tenants. When 'both', prefer canceled over active, else
 // prefer first tenant that returned a hit.
-async function enrichWithChargeover({ email, company, tenant }) {
+async function enrichWithChargeover({ email, domain, company, tenant }) {
   if (!CHARGEOVER_TENANTS.AL.url && !CHARGEOVER_TENANTS.RS.url) return null;
   const tenants = tenant && ['AL', 'RS'].includes(tenant) ? [tenant] : ['AL', 'RS'];
   const results = [];
   for (const t of tenants) {
     if (!CHARGEOVER_TENANTS[t]?.auth) continue;
     try {
-      const r = await lookupChargeoverCustomer(t, { email, company });
+      const r = await lookupChargeoverCustomer(t, { email, domain, company });
       if (r) results.push(r);
     } catch (e) {
       console.warn(`[chargeover:${t}] lookup failed: ${e.message}`);
@@ -3621,6 +3642,22 @@ async function runAuditJob(jobId, rows) {
     };
 
     try {
+      // ChargeOver first — same rationale as /lookup handler.
+      const bulkChargeover = await enrichWithChargeover({
+        email: row.customerEmail || null,
+        domain: row.emailDomain || null,
+        company: row.accountName || row.orgName || null,
+        tenant: row.chargeoverTenant,
+      }).catch(() => null);
+      baseResult.chargeover = bulkChargeover;
+
+      const bulkMatchInput = {
+        ...row,
+        customerEmail: row.customerEmail || bulkChargeover?.email || '',
+        emailDomain:   row.emailDomain   || (bulkChargeover?.email ? bulkChargeover.email.split('@')[1]?.toLowerCase() : '') || '',
+        accountName:   row.accountName   || bulkChargeover?.company || '',
+      };
+
       const ticketMap = new Map();
       for (const tid of explicitTicketIds) {
         const t = await fetchTicketById(tid);
@@ -3629,14 +3666,36 @@ async function runAuditJob(jobId, rows) {
 
       let bulkMatch = null;
       if (ticketMap.size > 0) {
-        baseResult.matchedOrg = row.accountName || row.orgName || 'Unknown';
+        baseResult.matchedOrg = bulkChargeover?.company || row.accountName || row.orgName || 'Unknown';
         baseResult.matchConfidence = 'High';
         baseResult.matchType = 'noteTicketId';
       } else {
-        bulkMatch = await matchCustomer(row);
-        console.log(`[auditor] "${row.accountName || row.orgName || '?'}" → ${bulkMatch ? `org:${bulkMatch.zdOrgName}` : 'no_match'}`);
+        bulkMatch = await matchCustomer(bulkMatchInput);
+        console.log(`[auditor] "${row.accountName || row.orgName || '?'}" → ${bulkMatch ? `org:${bulkMatch.zdOrgName}` : 'no_match'}${bulkChargeover ? ` (co:${bulkChargeover.tenant} id=${bulkChargeover.customerId})` : ''}`);
 
         if (!bulkMatch) {
+          // ChargeOver-only fallback (matches /lookup behavior)
+          if (bulkChargeover) {
+            const co = bulkChargeover;
+            job.results.push({
+              ...baseResult,
+              matchedOrg: co.company,
+              matchConfidence: 'chargeover',
+              matchType: 'chargeover',
+              category: co.category || 'Unknown / Unspecified',
+              aiCategory: null,
+              primarySource: co.category ? 'chargeover' : null,
+              agreement: co.category ? 'chargeover-only' : 'none',
+              estimatedCancellationDate: co.canceledAt || null,
+              exitDateSource: co.canceledAt ? 'chargeover' : null,
+              summary: 'Confirmed cancelled per ChargeOver; no Zendesk match for ticket analysis.',
+              confidence: 'Medium',
+              reasoning: 'ChargeOver identity resolved but Zendesk lookup returned no confident match.',
+              status: 'done',
+            });
+            job.done++;
+            return;
+          }
           job.results.push({ ...baseResult, status: 'no_match' });
           job.done++;
           return;
@@ -3702,14 +3761,22 @@ async function runAuditJob(jobId, rows) {
         lastDate: lastRatedTicket?.created_at?.slice(0, 10) || null,
       };
 
-      const [analysis, chargeover] = await Promise.all([
-        runAnalysis(row, tickets, cutoff),
-        enrichWithChargeover({
-          email: row.customerEmail || bulkMatch?.zdUserEmail || null,
-          company: baseResult.matchedOrg || row.accountName || null,
-          tenant: row.chargeoverTenant,
-        }).catch(() => null),
-      ]);
+      // ChargeOver ±60 day ticket window (same as single lookup)
+      if (bulkChargeover?.canceledAt && explicitTicketIds.length === 0) {
+        const co_date = new Date(bulkChargeover.canceledAt + 'T00:00:00');
+        const before = new Date(co_date); before.setDate(before.getDate() - 60);
+        const after  = new Date(co_date); after.setDate(after.getDate() + 60);
+        const narrowed = tickets.filter(t => {
+          if (!t.created_at) return false;
+          const d = new Date(t.created_at);
+          return d >= before && d <= after;
+        });
+        if (narrowed.length > 0) tickets = narrowed;
+      }
+
+      // Gemini analysis only (ChargeOver already ran up front).
+      const analysis = await runAnalysis(row, tickets, cutoff);
+      const chargeover = bulkChargeover;
 
       // Dual-source reconciliation: ChargeOver custom_3 (ops-recorded) wins
       // when populated; AI fills the gap when ChargeOver is blank/Unknown.
@@ -3812,22 +3879,77 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
   try {
     const explicitTicketIds = parseTicketIdsFromRow(req.body);
     const ticketMap = new Map();
-    console.log(`[auditor:lookup] "${row.accountName || row.customerEmail}" — explicitIds: [${explicitTicketIds.join(', ')}]`);
+    console.log(`[auditor:lookup] "${row.accountName || row.customerEmail || row.emailDomain}" — explicitIds: [${explicitTicketIds.join(', ')}]`);
+
+    // ── Step 1: ChargeOver first (identity source of truth) ────────────────
+    // Run this BEFORE matching Zendesk so the canonical email + company
+    // seed the Zendesk lookup. Zendesk has data-entry noise (users pointing
+    // at the wrong org, names like "Sawaya Law Firm (Brad)" that don't match
+    // clean firm names, etc.) — ChargeOver's billing record is authoritative.
+    const chargeover = await enrichWithChargeover({
+      email: row.customerEmail || null,
+      domain: row.emailDomain || null,
+      company: row.accountName || row.orgName || null,
+      tenant: row.chargeoverTenant,
+    }).catch(() => null);
+    baseResult.chargeover = chargeover;
+    if (chargeover) {
+      console.log(`[auditor:lookup] chargeover hit → ${chargeover.tenant} id=${chargeover.customerId} co=${chargeover.company} email=${chargeover.email} canceledAt=${chargeover.canceledAt} custom_3=${chargeover.categoryRaw || '(blank)'}`);
+    }
+
+    // Build the row we hand to matchCustomer, augmented with ChargeOver's
+    // canonical identity when ChargeOver found the customer. Original inputs
+    // still win when both are set — ops's typed input is intent.
+    const matchInput = {
+      ...row,
+      customerEmail: row.customerEmail || chargeover?.email || '',
+      emailDomain:   row.emailDomain   || (chargeover?.email ? chargeover.email.split('@')[1]?.toLowerCase() : '') || '',
+      accountName:   row.accountName   || chargeover?.company || '',
+    };
+
+    let match = null;
+    if (ticketMap.size > 0) {
+      // Placeholder — the explicit-ticket-ID branch is set later when tickets are actually fetched
+    }
 
     for (const tid of explicitTicketIds) {
       const t = await fetchTicketById(tid);
       if (t) ticketMap.set(t.id, t);
     }
 
-    let match = null;
     if (ticketMap.size > 0) {
-      baseResult.matchedOrg = row.accountName || row.orgName || 'Unknown';
+      baseResult.matchedOrg = chargeover?.company || row.accountName || row.orgName || 'Unknown';
       baseResult.matchConfidence = 'High';
       baseResult.matchType = 'noteTicketId';
     } else {
-      match = await matchCustomer(row);
+      match = await matchCustomer(matchInput);
       console.log(`[auditor:lookup] match → ${match ? `org:${match.zdOrgName} source:${match.matchType} score:${match.matchScore} conf:${match.matchConfidence} userIds:[${match.zdUserIds?.join(',')}]` : 'null'}`);
-      if (!match) return res.json({ ...baseResult, status: 'no_match' });
+      if (!match) {
+        // If ChargeOver knew the customer but Zendesk couldn't match, we still
+        // return the ChargeOver record — ops sees "confirmed cancelled per
+        // ChargeOver, no Zendesk tickets to analyze" rather than a bald no_match.
+        if (chargeover) {
+          const aiFallback = chargeover.category || null;
+          const primaryCategory = chargeover.category || 'Unknown / Unspecified';
+          return res.json({
+            ...baseResult,
+            matchedOrg: chargeover.company,
+            matchConfidence: 'chargeover',
+            matchType: 'chargeover',
+            category: primaryCategory,
+            aiCategory: null,
+            primarySource: chargeover.category ? 'chargeover' : null,
+            agreement: chargeover.category ? 'chargeover-only' : 'none',
+            estimatedCancellationDate: chargeover.canceledAt || null,
+            exitDateSource: chargeover.canceledAt ? 'chargeover' : null,
+            summary: 'Confirmed cancelled per ChargeOver, but no Zendesk match found for ticket analysis.',
+            confidence: 'Medium',
+            reasoning: 'ChargeOver identity resolved but Zendesk lookup returned no confident match.',
+            status: 'done',
+          });
+        }
+        return res.json({ ...baseResult, status: 'no_match' });
+      }
 
       baseResult.matchedOrg = match.zdOrgName;
       baseResult.matchConfidence = match.matchConfidence;
@@ -3864,6 +3986,23 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
       }
     }
 
+    // ChargeOver window: when we know the authoritative cancellation date,
+    // narrow the ticket set to ±60 days around it so Gemini isn't reading
+    // year-old support tickets as evidence of a recent cancellation.
+    if (chargeover?.canceledAt && explicitTicketIds.length === 0) {
+      const co_date = new Date(chargeover.canceledAt + 'T00:00:00');
+      const before = new Date(co_date); before.setDate(before.getDate() - 60);
+      const after  = new Date(co_date); after.setDate(after.getDate() + 60);
+      const narrowed = tickets.filter(t => {
+        if (!t.created_at) return false;
+        const d = new Date(t.created_at);
+        return d >= before && d <= after;
+      });
+      // Only apply if it leaves us with at least one ticket — otherwise trust
+      // the broader set (customer may have cancelled long after last ticket).
+      if (narrowed.length > 0) tickets = narrowed;
+    }
+
     baseResult.ticketSubjects = tickets.map(t => t.subject || '');
     baseResult.ticketDates = tickets.map(t => t.created_at?.slice(0, 10) || '');
     baseResult.ticketCount = tickets.length;
@@ -3884,20 +4023,8 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
       lastDate: last?.created_at?.slice(0, 10) || null,
     };
 
-    // Run Gemini analysis + ChargeOver enrichment in parallel — Gemini is
-    // ~5-10s, ChargeOver is ~1s, no reason to sequence.
-    // Fall through the email chain: user-provided → matched Zendesk user's
-    // email. Sawaya-style firm-name lookups only give an accountName, so
-    // this recovers the domain via the Zendesk user we matched.
-    const enrichEmail = row.customerEmail || match?.zdUserEmail || null;
-    const [analysis, chargeover] = await Promise.all([
-      runAnalysis(row, tickets, lookbackCutoff),
-      enrichWithChargeover({
-        email: enrichEmail,
-        company: baseResult.matchedOrg || row.accountName || null,
-        tenant: row.chargeoverTenant,
-      }).catch(() => null),
-    ]);
+    // Gemini analysis (ChargeOver already ran up front as the identity source).
+    const analysis = await runAnalysis(row, tickets, lookbackCutoff);
 
     const sortedLookup = tickets.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     const latestLookup = sortedLookup[0];
