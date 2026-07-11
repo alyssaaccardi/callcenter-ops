@@ -2851,7 +2851,7 @@ async function lookupChargeoverCustomer(tenant, { email, domain, company }) {
     } catch (e) { /* ignore */ }
   }
   if (customers.length === 0 && company) {
-    // Normalize the company for CO's CONTAINS search:
+    // Normalize the company for CO's search:
     //  - split camelCase (EZDivorce -> EZ Divorce)
     //  - strip parenthetical suffixes ("(Brad)", "(2)") that Zendesk adds
     //  - collapse whitespace
@@ -2861,11 +2861,32 @@ async function lookupChargeoverCustomer(tenant, { email, domain, company }) {
       .replace(/\s+/g, ' ')
       .trim();
     if (cleanCompany) {
+      // ChargeOver's CONTAINS is a substring match, not token-based. Ops can
+      // type "milian air" and expect to find "Milian Quality Air" — but the
+      // literal substring "milian air" doesn't appear in that name. So: pick
+      // the longest non-stopword token from the query, use that to fetch
+      // candidates from CO, then score client-side against the full query to
+      // pick the best match.
+      const rawTokens = cleanCompany.split(' ').filter(t => t.length >= 2);
+      const contentTokens = rawTokens.filter(t => !NAME_STOPWORDS.has(t.toLowerCase()));
+      const anchorTokens = contentTokens.length > 0 ? contentTokens : rawTokens;
+      // Longest token = most distinctive (rare) — best filter for CO
+      const anchor = [...anchorTokens].sort((a, b) => b.length - a.length)[0] || cleanCompany;
       try {
-        customers = await chargeoverGet(tenant, '/customer', {
-          where: `company:CONTAINS:${cleanCompany}`,
-          limit: 5,
+        const raw = await chargeoverGet(tenant, '/customer', {
+          where: `company:CONTAINS:${anchor}`,
+          limit: 25,
         }) || [];
+        if (rawTokens.length <= 1) {
+          customers = raw.slice(0, 5);
+        } else {
+          customers = raw
+            .map(c => ({ c, s: nameMatchScore(cleanCompany, c.company || '') }))
+            .filter(x => x.s >= 0.5)
+            .sort((a, b) => b.s - a.s)
+            .slice(0, 5)
+            .map(x => x.c);
+        }
       } catch (e) { /* ignore */ }
     }
   }
