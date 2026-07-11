@@ -4097,6 +4097,272 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_audi
   }
 });
 
+// ── Farewell Insights ────────────────────────────────────────────────────────
+// Aggregate widget: cancellation reasons this-period vs last-period, plus a
+// short Gemini narrative. Primary "ChargeOver" source queries CO directly
+// (cheap; custom_3 IS the categorization). AI/Agree sources read the cache
+// written by scripts/farewell-chargeover-batch.js.
+
+const FAREWELL_CACHE_FILE = path.join(__dirname, 'farewell-cache.json');
+
+function loadFarewellCache() {
+  try {
+    return JSON.parse(fs.readFileSync(FAREWELL_CACHE_FILE, 'utf8'));
+  } catch { return null; }
+}
+
+// Group cancellation rows by category. `key` picks which category to count on
+// each row (coCategoryRaw / aiCategory / primary). Rows where both sources
+// were blank land in "Not yet reviewed" (a separate bucket from
+// "Unknown / Unspecified" so ops can see the un-reviewed queue growing).
+function bucketByCategory(rows, keyFn) {
+  const buckets = new Map();
+  let notYetReviewed = 0;
+  for (const r of rows) {
+    const cat = keyFn(r);
+    if (cat === null) { notYetReviewed++; continue; }
+    const key = cat || 'Unknown / Unspecified';
+    buckets.set(key, (buckets.get(key) || 0) + 1);
+  }
+  return { buckets, notYetReviewed };
+}
+
+function categoryArray(buckets, notYetReviewed, total) {
+  const out = [...buckets.entries()]
+    .map(([category, count]) => ({ category, count, pct: total > 0 ? Math.round((count / total) * 1000) / 10 : 0 }))
+    .sort((a, b) => b.count - a.count);
+  if (notYetReviewed > 0) {
+    out.push({ category: 'Not yet reviewed', count: notYetReviewed, pct: total > 0 ? Math.round((notYetReviewed / total) * 1000) / 10 : 0 });
+  }
+  return out;
+}
+
+// Pull cancellations directly from ChargeOver for a date range (both tenants
+// by default). Used for the primary "ChargeOver" source view where no cache
+// is needed. Returns cache-shaped rows.
+async function fetchChargeoverCancellationsInRange({ from, to, tenants }) {
+  const wanted = tenants && tenants.length ? tenants : ['AL', 'RS'];
+  const results = [];
+  for (const t of wanted) {
+    const cfg = CHARGEOVER_TENANTS[t];
+    if (!cfg?.auth) continue;
+    let offset = 0;
+    const pageSize = 100;
+    while (true) {
+      let batch;
+      try {
+        batch = await chargeoverGet(t, '/package', {
+          where: 'package_status_str:EQUALS:canceled-manual',
+          order: 'cancel_datetime:desc',
+          limit: pageSize,
+          offset,
+        }) || [];
+      } catch (e) { break; }
+      if (!batch.length) break;
+      let hitBelow = false;
+      for (const s of batch) {
+        if (!s.cancel_datetime) continue;
+        const canceledAt = s.cancel_datetime.slice(0, 10);
+        if (canceledAt < from) { hitBelow = true; continue; }
+        if (canceledAt > to)   continue;
+        results.push({
+          tenant: t,
+          customerId: s.customer_id,
+          canceledAt,
+          coCategoryRaw: s.custom_3 || null,
+          coCategory: normalizeChargeoverCategory(s.custom_3),
+          coSecondary: normalizeChargeoverCategory(s.custom_4),
+          coQualitySubcat: normalizeChargeoverQualitySubcat(s.custom_6),
+        });
+      }
+      offset += pageSize;
+      if (hitBelow || batch.length < pageSize) break;
+      if (offset > 3000) break; // safety
+    }
+  }
+  return results;
+}
+
+// Rehydrate customer companies for a set of cache-shaped rows (best-effort;
+// used for drilldown). Small batches per tenant to keep it snappy.
+async function hydrateCancellationCompanies(rows) {
+  const byTenant = new Map();
+  for (const r of rows) {
+    if (!byTenant.has(r.tenant)) byTenant.set(r.tenant, new Set());
+    byTenant.get(r.tenant).add(r.customerId);
+  }
+  const companyByKey = new Map();
+  for (const [tenant, ids] of byTenant) {
+    const cfg = CHARGEOVER_TENANTS[tenant];
+    if (!cfg?.auth) continue;
+    const arr = [...ids];
+    for (let i = 0; i < arr.length; i += 10) {
+      await Promise.all(arr.slice(i, i + 10).map(async id => {
+        try {
+          const r = await chargeoverGet(tenant, `/customer/${id}`);
+          const c = Array.isArray(r) ? r[0] : r;
+          if (c) companyByKey.set(`${tenant}:${id}`, c.company || null);
+        } catch (e) { /* skip */ }
+      }));
+    }
+  }
+  for (const r of rows) r.company = companyByKey.get(`${r.tenant}:${r.customerId}`) || null;
+  return rows;
+}
+
+// GET /api/farewell-insights
+//   ?from=YYYY-MM-DD&to=YYYY-MM-DD
+//   &compareFrom=YYYY-MM-DD&compareTo=YYYY-MM-DD
+//   &tenant=AL|RS|BOTH   (default BOTH)
+//   &source=chargeover|ai|agree   (default chargeover)
+//   &drilldown=<category>   (optional — return customer list for that bucket)
+app.get('/api/farewell-insights', requireRole('super_admin', 'zendesk_auditor'), async (req, res) => {
+  try {
+    const from        = String(req.query.from || '').slice(0, 10);
+    const to          = String(req.query.to || '').slice(0, 10);
+    const compareFrom = String(req.query.compareFrom || '').slice(0, 10);
+    const compareTo   = String(req.query.compareTo   || '').slice(0, 10);
+    const tenantRaw   = String(req.query.tenant || 'BOTH').toUpperCase();
+    const tenants     = tenantRaw === 'BOTH' ? ['AL', 'RS'] : (['AL', 'RS'].includes(tenantRaw) ? [tenantRaw] : ['AL', 'RS']);
+    const source      = ['chargeover', 'ai', 'agree'].includes(req.query.source) ? req.query.source : 'chargeover';
+    const drilldown   = String(req.query.drilldown || '');
+
+    if (!from || !to) return res.status(400).json({ error: 'from and to required (YYYY-MM-DD)' });
+
+    let currentRows = [];
+    let compareRows = [];
+    let cacheAgeMs  = null;
+
+    if (source === 'chargeover') {
+      // Live from ChargeOver — always fresh, no cache required.
+      currentRows = await fetchChargeoverCancellationsInRange({ from, to, tenants });
+      if (compareFrom && compareTo) {
+        compareRows = await fetchChargeoverCancellationsInRange({ from: compareFrom, to: compareTo, tenants });
+      }
+    } else {
+      // AI or Agree — needs the cache.
+      const cache = loadFarewellCache();
+      if (!cache) return res.status(503).json({ error: 'AI cache not populated yet. Run the batch script to build it.' });
+      cacheAgeMs = Date.now() - new Date(cache.generatedAt).getTime();
+      const filter = (r) => tenants.includes(r.tenant);
+      const inRange = (r, a, b) => r.canceledAt >= a && r.canceledAt <= b;
+      currentRows = (cache.rows || []).filter(r => filter(r) && inRange(r, from, to));
+      if (compareFrom && compareTo) {
+        compareRows = (cache.rows || []).filter(r => filter(r) && inRange(r, compareFrom, compareTo));
+      }
+    }
+
+    // Row → category picker per source
+    const keyFn = source === 'chargeover'
+      ? (r) => r.coCategory ?? null                                            // null = not-yet-reviewed
+      : source === 'ai'
+        ? (r) => r.aiCategory && r.aiCategory !== 'Unknown / Unspecified' ? r.aiCategory : (r.coCategory ? null : null)
+        : (r) => (r.agreement === 'agree' && r.coCategory) ? r.coCategory : null;  // agree: only rows where sources match
+
+    const cur = bucketByCategory(currentRows, keyFn);
+    const cmp = bucketByCategory(compareRows, keyFn);
+
+    const current = {
+      range: { from, to },
+      total: currentRows.length,
+      byCategory: categoryArray(cur.buckets, cur.notYetReviewed, currentRows.length),
+    };
+    const compare = compareFrom && compareTo ? {
+      range: { from: compareFrom, to: compareTo },
+      total: compareRows.length,
+      byCategory: categoryArray(cmp.buckets, cmp.notYetReviewed, compareRows.length),
+    } : null;
+
+    // Deltas — one row per category present in either period
+    let deltas = null;
+    if (compare) {
+      const all = new Set([...current.byCategory.map(x => x.category), ...compare.byCategory.map(x => x.category)]);
+      deltas = [...all].map(cat => {
+        const c = current.byCategory.find(x => x.category === cat)?.count || 0;
+        const p = compare.byCategory.find(x => x.category === cat)?.count || 0;
+        return { category: cat, current: c, compare: p, delta: c - p };
+      }).sort((a, b) => Math.max(b.current, b.compare) - Math.max(a.current, a.compare));
+    }
+
+    // Optional drilldown: rehydrate company names for the drilldown category
+    let drilldownRows = null;
+    if (drilldown) {
+      const matches = currentRows.filter(r => (keyFn(r) === drilldown) || (drilldown === 'Not yet reviewed' && keyFn(r) === null));
+      await hydrateCancellationCompanies(matches);
+      drilldownRows = matches.map(r => ({
+        tenant: r.tenant,
+        customerId: r.customerId,
+        company: r.company || `(id ${r.customerId})`,
+        canceledAt: r.canceledAt,
+        coCategoryRaw: r.coCategoryRaw,
+        aiCategory: r.aiCategory,
+        agreement: r.agreement,
+      }));
+    }
+
+    // Disagreement count (only meaningful when we have the AI cache)
+    let disagreements = null;
+    if (source !== 'chargeover' || loadFarewellCache()) {
+      const cache = loadFarewellCache();
+      if (cache) {
+        disagreements = (cache.rows || []).filter(r =>
+          tenants.includes(r.tenant) && r.canceledAt >= from && r.canceledAt <= to && r.agreement === 'disagree'
+        ).length;
+      }
+    }
+
+    res.json({
+      source,
+      tenants,
+      current,
+      compare,
+      deltas,
+      disagreements,
+      drilldown: drilldownRows,
+      cacheAgeMs,
+    });
+  } catch (e) {
+    console.error('[farewell-insights] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/farewell-insights/narrative — Gemini 2-sentence summary
+app.post('/api/farewell-insights/narrative', requireRole('super_admin', 'zendesk_auditor'), async (req, res) => {
+  try {
+    if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'Gemini not configured' });
+    const { current, compare, deltas, disagreements, source } = req.body || {};
+    if (!current) return res.status(400).json({ error: 'current payload required' });
+
+    const bullets = (deltas || []).slice(0, 8).map(d => `- ${d.category}: ${d.current} (vs ${d.compare}, ${d.delta >= 0 ? '+' : ''}${d.delta})`).join('\n');
+    const prompt = `You are a retention analyst. Write TWO concise sentences summarizing the cancellation trend below. Highlight the biggest movement, notable increases, and — if the delta is small — say so plainly. Do not restate raw numbers unless they add signal.
+
+Source: ${source} (${source === 'chargeover' ? 'ops-recorded categories' : source === 'ai' ? 'AI-inferred from Zendesk tickets' : 'only cancellations where CO and AI agree'})
+Current period: ${current.range.from} to ${current.range.to}, ${current.total} cancellations
+${compare ? `Prior period: ${compare.range.from} to ${compare.range.to}, ${compare.total} cancellations` : ''}
+${disagreements != null ? `Disagreements between CO and AI this period: ${disagreements}` : ''}
+
+Category breakdown:
+${bullets}
+
+Write just the two sentences, no preamble.`;
+
+    const r = await axios.post(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+      {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 200, temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } },
+      },
+      { headers: { 'X-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, timeout: 15000 }
+    );
+    const text = (r.data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+    res.json({ narrative: text });
+  } catch (e) {
+    console.error('[farewell-insights:narrative] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/zendesk-auditor/run', requireRole('super_admin', 'zendesk_auditor'), auditorUpload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 

@@ -227,6 +227,41 @@ async function runWithConcurrency(items, worker, concurrency) {
   fs.writeFileSync(OUT, lines.join('\n'));
   console.log(`\nWrote ${results.length} rows → ${OUT}`);
 
+  // Also emit a compact JSON cache the Farewell Insights widget can query
+  // for AI-source and Agree-source aggregations. Server default (ChargeOver
+  // source) hits CO live and doesn't need this — but the toggles do.
+  const CACHE_OUT = args.cache || OUT.replace(/\.csv$/, '-cache.json');
+  const cachePayload = {
+    generatedAt: new Date().toISOString(),
+    range: { from: FROM.toISOString().slice(0, 10), to: TO.toISOString().slice(0, 10) },
+    tenants: TENANT === 'BOTH' ? ['AL', 'RS'] : [TENANT],
+    rows: results.map(row => {
+      const r = row.result || {};
+      const co = r.chargeover || {};
+      const c = row.customer || {};
+      return {
+        tenant: row.tenant,
+        customerId: c.customer_id,
+        company: co.company || c.company || null,
+        canceledAt: row.sub?.cancel_datetime?.slice(0, 10) || null,
+        coCategoryRaw: row.sub?.custom_3 || null,
+        coCategory: co.category || null,
+        coSecondary: co.secondaryCategory || null,
+        coQualitySubcat: co.qualitySubcategory || null,
+        aiCategory: r.aiCategory || null,
+        primaryCategory: r.category || null,
+        agreement: r.agreement || 'none',
+        flag: row.flag || '',
+        matchType: r.matchType || null,
+        mrr: co.mrr ?? null,
+        planTier: co.planTier || null,
+        status: r.status || 'error',
+      };
+    }),
+  };
+  fs.writeFileSync(CACHE_OUT, JSON.stringify(cachePayload));
+  console.log(`Wrote cache → ${CACHE_OUT}`);
+
   // Summary block
   const buckets = { total: results.length, agree: 0, disagree: 0, unknown: 0, 'ai-only': 0, 'chargeover-only': 0, no_match: 0, error: 0 };
   for (const row of results) {

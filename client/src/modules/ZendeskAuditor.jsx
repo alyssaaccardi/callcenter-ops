@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import api from '../api';
 
 // ─── Category color mapping ────────────────────────────────────────────────
@@ -691,6 +691,270 @@ function SingleResult({ r, onClear }) {
   );
 }
 
+function firstOfMonth(d) {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+function lastOfMonth(d) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
+function isoDate(d) {
+  return d.toISOString().slice(0, 10);
+}
+function monthLabel(d) {
+  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+function FarewellInsightsWidget() {
+  const [collapsed, setCollapsed] = useState(false);
+  const [source, setSource] = useState('chargeover');    // 'chargeover' | 'ai' | 'agree'
+  const [tenant, setTenant] = useState('BOTH');           // 'AL' | 'RS' | 'BOTH'
+  const [data, setData] = useState(null);
+  const [narrative, setNarrative] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [drilldown, setDrilldown] = useState(null);       // { category, rows }
+
+  const now = new Date();
+  const cur0 = firstOfMonth(now);
+  const cur1 = lastOfMonth(now);
+  const prev0 = firstOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+  const prev1 = lastOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+
+  async function load() {
+    setLoading(true); setError(''); setDrilldown(null);
+    try {
+      const params = {
+        from: isoDate(cur0), to: isoDate(cur1),
+        compareFrom: isoDate(prev0), compareTo: isoDate(prev1),
+        tenant, source,
+      };
+      const { data } = await api.get('/api/farewell-insights', { params });
+      setData(data);
+      // Kick off narrative in parallel — cheap
+      api.post('/api/farewell-insights/narrative', {
+        current: data.current, compare: data.compare, deltas: data.deltas,
+        disagreements: data.disagreements, source: data.source,
+      }).then(r => setNarrative(r.data.narrative || ''))
+        .catch(() => setNarrative(''));
+    } catch (e) {
+      setError(e.response?.data?.error || e.message);
+      setData(null);
+    } finally { setLoading(false); }
+  }
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [source, tenant]);
+
+  async function openDrilldown(category) {
+    setDrilldown({ category, rows: null, loading: true });
+    try {
+      const params = {
+        from: isoDate(cur0), to: isoDate(cur1),
+        tenant, source, drilldown: category,
+      };
+      const { data } = await api.get('/api/farewell-insights', { params });
+      setDrilldown({ category, rows: data.drilldown || [], loading: false });
+    } catch (e) {
+      setDrilldown({ category, rows: [], loading: false, error: e.message });
+    }
+  }
+
+  const currentTotal = data?.current?.total || 0;
+  const compareTotal = data?.compare?.total || 0;
+  const totalDelta = currentTotal - compareTotal;
+  const totalDeltaPct = compareTotal > 0 ? Math.round((totalDelta / compareTotal) * 100) : null;
+
+  if (collapsed) {
+    return (
+      <div
+        onClick={() => setCollapsed(false)}
+        style={{
+          position: 'fixed', bottom: 20, right: 20, zIndex: 99,
+          background: 'rgba(30,41,59,0.95)', color: '#fff',
+          padding: '10px 16px', borderRadius: 999, cursor: 'pointer',
+          fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.25)', display: 'inline-flex', gap: 8, alignItems: 'center',
+        }}
+        title="Open Cancellation Insights"
+      >
+        📊 Insights · {currentTotal}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', bottom: 20, right: 20, zIndex: 99,
+      width: 420, maxHeight: '80vh',
+      background: '#fff', color: '#0f172a',
+      border: '1px solid rgba(15,23,42,0.12)', borderRadius: 12,
+      boxShadow: '0 20px 40px rgba(15,23,42,0.15)',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      fontSize: 13,
+    }}>
+      {/* Header */}
+      <div style={{ padding: '12px 14px', borderBottom: '1px solid rgba(15,23,42,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 13 }}>Cancellation Insights</div>
+          <div style={{ fontSize: 11, color: '#64748b' }}>{monthLabel(cur0)} vs {monthLabel(prev0)}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <select value={tenant} onChange={e => setTenant(e.target.value)} style={{ fontSize: 11, padding: '3px 6px' }}>
+            <option value="BOTH">Both</option>
+            <option value="AL">AL</option>
+            <option value="RS">RS</option>
+          </select>
+          <button onClick={load} disabled={loading} title="Refresh" style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14, opacity: loading ? 0.4 : 1 }}>↻</button>
+          <button onClick={() => setCollapsed(true)} title="Collapse" style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>–</button>
+        </div>
+      </div>
+
+      {/* Source toggle */}
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(15,23,42,0.06)', display: 'flex', gap: 4 }}>
+        {[
+          { k: 'chargeover', label: 'ChargeOver', tip: 'Ops-recorded custom_3' },
+          { k: 'ai',         label: 'AI',         tip: 'Gemini read of Zendesk tickets' },
+          { k: 'agree',      label: 'Agree',      tip: 'Only rows where both sources match' },
+        ].map(s => (
+          <button
+            key={s.k}
+            title={s.tip}
+            onClick={() => setSource(s.k)}
+            style={{
+              flex: 1, padding: '5px 8px', fontSize: 11, fontWeight: 700,
+              background: source === s.k ? '#0f172a' : 'transparent',
+              color:      source === s.k ? '#fff'    : '#334155',
+              border: source === s.k ? 'none' : '1px solid rgba(15,23,42,0.15)',
+              borderRadius: 6, cursor: 'pointer',
+            }}
+          >{s.label}</button>
+        ))}
+      </div>
+
+      {/* Body */}
+      <div style={{ overflowY: 'auto', flex: 1 }}>
+        {error && (
+          <div style={{ padding: '12px 14px', color: '#b91c1c', fontSize: 12 }}>
+            {error}
+            {(source === 'ai' || source === 'agree') && (
+              <div style={{ marginTop: 6, color: '#64748b' }}>
+                Tip: the AI/Agree toggles need the batch cache. Run <code>node scripts/farewell-chargeover-batch.js</code> to populate it.
+              </div>
+            )}
+          </div>
+        )}
+
+        {loading && !data && <div style={{ padding: '20px 14px', color: '#64748b' }}>Loading…</div>}
+
+        {data && (
+          <>
+            {/* Summary row */}
+            <div style={{ padding: '12px 14px', display: 'flex', gap: 16, borderBottom: '1px solid rgba(15,23,42,0.06)' }}>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>{currentTotal}</div>
+                <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em' }}>this month</div>
+              </div>
+              {data.compare && (
+                <div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: '#64748b' }}>{compareTotal}</div>
+                  <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em' }}>last month</div>
+                </div>
+              )}
+              {data.compare && (
+                <div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: totalDelta > 0 ? '#dc2626' : totalDelta < 0 ? '#15803d' : '#64748b' }}>
+                    {totalDelta > 0 ? '+' : ''}{totalDelta}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Δ {totalDeltaPct != null && `(${totalDeltaPct > 0 ? '+' : ''}${totalDeltaPct}%)`}
+                  </div>
+                </div>
+              )}
+              {data.disagreements != null && data.disagreements > 0 && (
+                <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: '#b45309' }}>⚠ {data.disagreements}</div>
+                  <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em' }}>disagreements</div>
+                </div>
+              )}
+            </div>
+
+            {/* Narrative */}
+            {narrative && (
+              <div style={{ padding: '10px 14px', background: 'rgba(59,130,246,0.05)', borderBottom: '1px solid rgba(15,23,42,0.06)', fontSize: 12, lineHeight: 1.5, color: '#1e293b' }}>
+                {narrative}
+              </div>
+            )}
+
+            {/* Category breakdown */}
+            <div style={{ padding: '8px 4px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 46px 46px 44px', padding: '4px 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#64748b', letterSpacing: '0.06em' }}>
+                <div>Category</div>
+                <div style={{ textAlign: 'right' }}>Now</div>
+                <div style={{ textAlign: 'right' }}>Prev</div>
+                <div style={{ textAlign: 'right' }}>Δ</div>
+              </div>
+              {(data.deltas || data.current.byCategory.map(x => ({ category: x.category, current: x.count, compare: 0, delta: x.count }))).map(d => (
+                <div
+                  key={d.category}
+                  onClick={() => openDrilldown(d.category)}
+                  style={{
+                    display: 'grid', gridTemplateColumns: '1fr 46px 46px 44px',
+                    padding: '6px 10px', fontSize: 12, alignItems: 'center', cursor: 'pointer',
+                    borderRadius: 6,
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(15,23,42,0.04)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <div style={{
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    color: d.category === 'Not yet reviewed' ? '#64748b' : '#0f172a',
+                    fontStyle: d.category === 'Not yet reviewed' ? 'italic' : 'normal',
+                  }}>{d.category}</div>
+                  <div style={{ textAlign: 'right', fontWeight: 700 }}>{d.current || 0}</div>
+                  <div style={{ textAlign: 'right', color: '#64748b' }}>{d.compare || 0}</div>
+                  <div style={{ textAlign: 'right', color: d.delta > 0 ? '#dc2626' : d.delta < 0 ? '#15803d' : '#64748b', fontWeight: 600 }}>
+                    {d.delta > 0 ? '↑' : d.delta < 0 ? '↓' : '·'}{Math.abs(d.delta) || ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Drilldown modal-ish */}
+      {drilldown && (
+        <div style={{
+          position: 'absolute', inset: 0, background: '#fff',
+          display: 'flex', flexDirection: 'column',
+        }}>
+          <div style={{ padding: '12px 14px', borderBottom: '1px solid rgba(15,23,42,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 13 }}>{drilldown.category}</div>
+              <div style={{ fontSize: 11, color: '#64748b' }}>Customers this month</div>
+            </div>
+            <button onClick={() => setDrilldown(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 16 }}>×</button>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
+            {drilldown.loading && <div style={{ color: '#64748b', padding: 12 }}>Loading…</div>}
+            {!drilldown.loading && drilldown.rows?.length === 0 && (
+              <div style={{ color: '#64748b', padding: 12 }}>No customers in this bucket.</div>
+            )}
+            {!drilldown.loading && (drilldown.rows || []).map(r => (
+              <div key={`${r.tenant}:${r.customerId}`} style={{ padding: '6px 8px', borderBottom: '1px solid rgba(15,23,42,0.05)', fontSize: 12 }}>
+                <div style={{ fontWeight: 700 }}>{r.company}</div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                  {r.tenant} · id {r.customerId} · cancelled {r.canceledAt}
+                  {r.agreement === 'disagree' && <span style={{ color: '#b45309', fontWeight: 700 }}> · ⚠ disagree</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ZendeskAuditor() {
   const [view, setView] = useState('upload');      // 'upload' | 'running' | 'results'
   const [lookupMode, setLookupMode] = useState('single'); // 'upload' | 'single'
@@ -845,23 +1109,48 @@ export default function ZendeskAuditor() {
     setSingleError('');
     setSingleResult(null);
     const contact = singleForm.customerEmail.trim();
-    if (!singleForm.accountName.trim() && !contact) {
+    const rawName = singleForm.accountName.trim();
+    if (!rawName && !contact) {
       setSingleError('Enter an account name, email, or domain');
       return;
     }
-    // Route the merged Email-or-Domain field: contains @ → email, else → domain.
     const looksLikeEmail = contact.includes('@') && !contact.startsWith('@');
-    const body = {
-      accountName: singleForm.accountName,
-      customerEmail: looksLikeEmail ? contact : '',
-      emailDomain: looksLikeEmail ? '' : contact,
-      notes: singleForm.notes,
-      chargeoverTenant: singleForm.chargeoverTenant,
-    };
+
+    // Multi-account: only when NO email/domain is given AND accountName has commas.
+    // Split, trim, dedupe, filter empties. Each name gets its own lookup in parallel.
+    const isMulti = !contact && rawName.includes(',');
+    const accountNames = isMulti
+      ? [...new Set(rawName.split(',').map(s => s.trim()).filter(Boolean))]
+      : [rawName];
+
     setSingleLoading(true);
     try {
-      const resp = await api.post('/api/zendesk-auditor/lookup', body);
-      setSingleResult(resp.data);
+      if (isMulti) {
+        const results = await Promise.all(accountNames.map(async name => {
+          try {
+            const r = await api.post('/api/zendesk-auditor/lookup', {
+              accountName: name,
+              customerEmail: '', emailDomain: '',
+              notes: singleForm.notes,
+              chargeoverTenant: singleForm.chargeoverTenant,
+            });
+            return { name, data: r.data };
+          } catch (err) {
+            return { name, error: err.response?.data?.error || err.message };
+          }
+        }));
+        // Store as an array so the renderer can list each one
+        setSingleResult({ __multi: true, results });
+      } else {
+        const resp = await api.post('/api/zendesk-auditor/lookup', {
+          accountName: rawName,
+          customerEmail: looksLikeEmail ? contact : '',
+          emailDomain: looksLikeEmail ? '' : contact,
+          notes: singleForm.notes,
+          chargeoverTenant: singleForm.chargeoverTenant,
+        });
+        setSingleResult(resp.data);
+      }
     } catch (err) {
       setSingleError(err.response?.data?.error || err.message);
     } finally {
@@ -919,13 +1208,18 @@ export default function ZendeskAuditor() {
               <form onSubmit={handleSingleLookup}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
                   <div className="form-row">
-                    <label className="field-label">Account / Firm Name</label>
+                    <label className="field-label">
+                      Account / Firm Name
+                      <span style={{ color: 'var(--muted)', fontWeight: 400, marginLeft: 6 }}>
+                        (comma-separate for multiple)
+                      </span>
+                    </label>
                     <input
                       type="text"
                       autoFocus
                       value={singleForm.accountName}
                       onChange={e => setSingleForm(f => ({ ...f, accountName: e.target.value }))}
-                      placeholder="Smith & Associates Law"
+                      placeholder="Smith & Associates, EZ Divorce, Sawaya"
                     />
                   </div>
                   <div className="form-row">
@@ -977,7 +1271,22 @@ export default function ZendeskAuditor() {
                 </button>
               </form>
             </div>
-            {singleResult && <SingleResult r={singleResult} onClear={() => setSingleResult(null)} />}
+            {singleResult && singleResult.__multi && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 8 }}>
+                  {singleResult.results.length} accounts
+                </div>
+                {singleResult.results.map((r, i) => (
+                  <div key={i} style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Searched: <strong>{r.name}</strong></div>
+                    {r.error
+                      ? <div style={{ fontSize: 13, color: '#dc2626' }}>{r.error}</div>
+                      : <SingleResult r={r.data} onClear={() => setSingleResult(prev => ({ ...prev, results: prev.results.filter((_, j) => j !== i) }))} />}
+                  </div>
+                ))}
+              </div>
+            )}
+            {singleResult && !singleResult.__multi && <SingleResult r={singleResult} onClear={() => setSingleResult(null)} />}
             <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
           </div>
         )}
@@ -1046,6 +1355,7 @@ export default function ZendeskAuditor() {
           </div>
         </div>
         )}
+        <FarewellInsightsWidget />
       </div>
     );
   }
@@ -1307,6 +1617,7 @@ export default function ZendeskAuditor() {
       })()}
 
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <FarewellInsightsWidget />
     </div>
   );
 }
