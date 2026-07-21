@@ -2,31 +2,34 @@ import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
 
 const ROLES = [
-  { value: 'super_admin',     label: 'Super Admin' },
-  { value: 'call_center_ops', label: 'Call Center Ops' },
-  { value: 'support',         label: 'Support' },
-  { value: 'tech',            label: 'Tech Team' },
-  { value: 'tv_display',      label: 'TV Display' },
-  { value: 'zendesk_auditor', label: 'Farewell Report' },
+  { value: 'super_admin',            label: 'Super Admin' },
+  { value: 'call_center_ops',        label: 'Call Center Ops' },
+  { value: 'support',                label: 'Support' },
+  { value: 'tech',                   label: 'Tech Team' },
+  { value: 'tv_display',             label: 'TV Display' },
+  { value: 'zendesk_auditor',        label: 'Farewell Report' },
+  { value: 'newsletter_contributor', label: 'Newsletter Contributor' },
 ];
 
 const ROLE_STYLE = {
-  super_admin:     { background: 'rgba(99,102,241,0.2)',  color: '#a5b4fc' },
-  call_center_ops: { background: 'rgba(0,201,177,0.15)',  color: '#00c9b1' },
-  support:         { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
-  tech:            { background: 'rgba(16,185,129,0.15)', color: '#34d399' },
-  tv_display:      { background: 'rgba(251,146,60,0.15)', color: '#fb923c' },
-  zendesk_auditor: { background: 'rgba(239,68,68,0.15)',  color: '#f87171' },
+  super_admin:            { background: 'rgba(99,102,241,0.2)',  color: '#a5b4fc' },
+  call_center_ops:        { background: 'rgba(0,201,177,0.15)',  color: '#00c9b1' },
+  support:                { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
+  tech:                   { background: 'rgba(16,185,129,0.15)', color: '#34d399' },
+  tv_display:             { background: 'rgba(251,146,60,0.15)', color: '#fb923c' },
+  zendesk_auditor:        { background: 'rgba(239,68,68,0.15)',  color: '#f87171' },
+  newsletter_contributor: { background: 'rgba(236,72,153,0.15)', color: '#f472b6' },
 };
 
 const ROLE_LABEL = {
-  all:             'All Users',
-  super_admin:     'Super Admin',
-  call_center_ops: 'Call Center Ops',
-  support:         'Support',
-  tech:            'Tech Team',
-  tv_display:      'TV Display',
-  zendesk_auditor: 'Farewell Report',
+  all:                    'All Users',
+  super_admin:            'Super Admin',
+  call_center_ops:        'Call Center Ops',
+  support:                'Support',
+  tech:                   'Tech Team',
+  tv_display:             'TV Display',
+  zendesk_auditor:        'Farewell Report',
+  newsletter_contributor: 'Newsletter Contributor',
 };
 
 function TutorialRow({ t, onToggle, onReset }) {

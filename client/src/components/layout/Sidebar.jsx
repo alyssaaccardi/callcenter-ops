@@ -19,15 +19,17 @@ const ALL_NAV_ITEMS = [
   { id: 'app-portal',       icon: '🌐', label: 'App Portal',       roles: ['super_admin', 'tech'], section: 'Tech'           },
   { id: 'user-management',  icon: '👥', label: 'User Management',  roles: ['super_admin'],                          section: 'Administration' },
   { id: 'zendesk-auditor', icon: '🔎', label: 'The Farewell Reporter', roles: ['super_admin', 'zendesk_auditor'], section: 'Analytics'      },
+  { id: 'ring-leader',      icon: '🛎️', label: 'The Ring Leader',  roles: ['super_admin', 'newsletter_contributor'], section: 'Newsletter'    },
 ];
 
 const ROLE_LABELS = {
-  super_admin:      'Super Admin',
-  call_center_ops:  'Call Center Ops',
-  support:          'Support',
-  tech:             'Tech Team',
-  tv_display:       'TV Display',
-  zendesk_auditor:  'Zendesk Auditor',
+  super_admin:            'Super Admin',
+  call_center_ops:        'Call Center Ops',
+  support:                'Support',
+  tech:                   'Tech Team',
+  tv_display:             'TV Display',
+  zendesk_auditor:        'Zendesk Auditor',
+  newsletter_contributor: 'Newsletter Contributor',
 };
 
 const NAV_SECTION_LABEL = {

@@ -26,13 +26,15 @@ import SupportTVPage from './pages/SupportTVPage';
 import WhatsNew from './components/WhatsNew';
 import ZendeskAuditor from './modules/ZendeskAuditor';
 import MitelLeaderboard from './modules/MitelLeaderboard';
+import RingLeader from './modules/RingLeader';
 
 function Dashboard() {
   const { user } = useAuth();
   const defaultModule =
-    user?.role === 'support'         ? 'support-center'   :
-    user?.role === 'tech'            ? 'tech-center'      :
-    user?.role === 'zendesk_auditor' ? 'zendesk-auditor'  :
+    user?.role === 'support'                ? 'support-center'   :
+    user?.role === 'tech'                   ? 'tech-center'      :
+    user?.role === 'zendesk_auditor'        ? 'zendesk-auditor'  :
+    user?.role === 'newsletter_contributor' ? 'ring-leader'      :
     'status';
   return <DashboardInner user={user} defaultModule={defaultModule} />;
 }
@@ -46,6 +48,7 @@ function DashboardInner({ user, defaultModule }) {
   const isSupport  = hasRole('super_admin', 'support');
   const isTech     = hasRole('super_admin', 'tech');
   const isAuditor  = hasRole('super_admin', 'zendesk_auditor');
+  const isNewsletter = hasRole('super_admin', 'newsletter_contributor');
 
   const moduleMap = {
     status:             isOps     ? <StatusBoard />             : null,
@@ -63,9 +66,10 @@ function DashboardInner({ user, defaultModule }) {
     settings:           (user?.role === 'super_admin' || user?.role === 'call_center_ops') ? <Settings /> : null,
     'user-management':  user?.role === 'super_admin' ? <UserManagementModule /> : null,
     'zendesk-auditor':  isAuditor ? <ZendeskAuditor /> : null,
+    'ring-leader':      isNewsletter ? <RingLeader /> : null,
   };
 
-  const fallback = isSupport ? <SupportCenter /> : isTech ? <TechCenter /> : <StatusBoard />;
+  const fallback = isOps ? <StatusBoard /> : isSupport ? <SupportCenter /> : isTech ? <TechCenter /> : isNewsletter ? <RingLeader /> : <StatusBoard />;
 
   const isPortal = activeModule === 'app-portal';
 
