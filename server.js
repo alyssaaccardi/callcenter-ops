@@ -4515,6 +4515,123 @@ app.delete('/api/mitel-leaderboard/:id', requireRole('super_admin', 'call_center
   res.json({ ok: true });
 });
 
+// ─── The Ring Leader — Monthly Newsletter ────────────────────────────────────
+const NEWSLETTER_FILE = path.join(__dirname, 'newsletter-store.json');
+
+function loadNewsletters() {
+  try { return JSON.parse(fs.readFileSync(NEWSLETTER_FILE, 'utf8')); } catch { return {}; }
+}
+function saveNewsletters(store) {
+  fs.writeFileSync(NEWSLETTER_FILE, JSON.stringify(store, null, 2));
+}
+
+function buildNewsletterPrompt(month, data) {
+  return `You are the communications lead for a company called Answering Legal. Your job is to transform raw monthly submissions from department leaders into ONE polished internal newsletter called "The Ring Leader — Your Monthly Pulse on Everything Ring Savvy."
+
+Voice: warm, energetic, professional. Celebrate wins, keep momentum, keep it human. No corporate jargon.
+
+Rules:
+- Preserve the JSON shape of the input exactly (same keys, same array element shapes).
+- Polish every string: better writing, tighter phrasing, consistent voice.
+- Merge obvious duplicates or near-duplicates within arrays; keep distinct entries separate.
+- Do NOT fabricate facts, names, numbers, or dates. Only rewrite what's given.
+- If a field is empty in the input, leave it empty in the output.
+- Add ONE new field at the top level: "coverIntro" — a 2 to 3 sentence opening paragraph that sets up the month.
+
+Return ONLY valid JSON. No markdown fences, no prose commentary.
+
+Month: ${month}
+
+Raw submissions:
+${JSON.stringify(data, null, 2)}`;
+}
+
+async function callGeminiForNewsletter(prompt) {
+  const resp = await axios.post(
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+    {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        maxOutputTokens: 8192,
+        temperature: 0.4,
+        responseMimeType: 'application/json',
+        thinkingConfig: { thinkingBudget: 0 },
+      },
+    },
+    { headers: { 'X-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, timeout: 60000 }
+  );
+  const raw = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+  return JSON.parse(raw);
+}
+
+app.post('/api/newsletter/generate', requireRole('super_admin', 'newsletter_contributor'), async (req, res) => {
+  const { month, data } = req.body || {};
+  if (!month || !data) return res.status(400).json({ error: 'month and data required' });
+  if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'AI temporarily unavailable — GEMINI_API_KEY not configured' });
+
+  try {
+    const prompt = buildNewsletterPrompt(month, data);
+    const delays = [1000, 3000, 8000];
+    let generated, lastErr;
+    for (let attempt = 0; attempt <= delays.length; attempt++) {
+      try { generated = await callGeminiForNewsletter(prompt); break; }
+      catch (e) {
+        lastErr = e;
+        const status = e?.response?.status;
+        const transient = status === 429 || (status >= 500 && status < 600) || !status;
+        if (!transient || attempt === delays.length) throw e;
+        console.warn(`[ring-leader] gemini ${status || e.message}, retry ${attempt + 1}/${delays.length}`);
+        await new Promise(r => setTimeout(r, delays[attempt]));
+      }
+    }
+    if (!generated) throw lastErr;
+
+    const store = loadNewsletters();
+    const record = {
+      month,
+      generatedAt: new Date().toISOString(),
+      generatedBy: req.user?.email,
+      generatedByName: req.user?.name,
+      raw: data,
+      newsletter: generated,
+    };
+    store[month] = record;
+    saveNewsletters(store);
+    res.json(record);
+  } catch (err) {
+    console.error('[ring-leader] generation failed:', err.message);
+    const status = err?.response?.status;
+    res.status(500).json({
+      error: status === 429
+        ? 'Gemini rate limit — retries exhausted. Try again in a minute.'
+        : `Newsletter generation failed: ${err.message}`,
+    });
+  }
+});
+
+app.get('/api/newsletter', requireRole('super_admin', 'newsletter_contributor'), (req, res) => {
+  const store = loadNewsletters();
+  const list = Object.values(store)
+    .map(({ month, generatedAt, generatedBy, generatedByName }) => ({ month, generatedAt, generatedBy, generatedByName }))
+    .sort((a, b) => b.month.localeCompare(a.month));
+  res.json(list);
+});
+
+app.get('/api/newsletter/:month', requireRole('super_admin', 'newsletter_contributor'), (req, res) => {
+  const store = loadNewsletters();
+  const record = store[req.params.month];
+  if (!record) return res.status(404).json({ error: 'Not found' });
+  res.json(record);
+});
+
+app.delete('/api/newsletter/:month', requireRole('super_admin'), (req, res) => {
+  const store = loadNewsletters();
+  if (!store[req.params.month]) return res.status(404).json({ error: 'Not found' });
+  delete store[req.params.month];
+  saveNewsletters(store);
+  res.json({ ok: true });
+});
+
 // ─── React SPA Catch-All ─────────────────────────────────────────────────────
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'app', 'index.html'));
