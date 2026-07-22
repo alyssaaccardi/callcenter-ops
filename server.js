@@ -2302,6 +2302,7 @@ const AUDITOR_CATEGORIES = [
   'Non-Payment',
   'Switched to AI Service', 'Went to Competitor', 'Price Too High',
   'Did Not Want to Pay Rate Increase / Overages',
+  'Billing Issue',
   'Downsizing Practice', 'Hired Staff',
   'IVR / Auto Attendant',
   'Quality', 'Call Forwarding Issue',
@@ -3094,6 +3095,19 @@ const CATEGORY_RULES = [
     [/front\s*desk (person|staff|coverage)/i, 3],
     [/have (someone|staff) (now|to answer)/i, 3],
   ]},
+  { category: 'Billing Issue', patterns: [
+    [/billing (error|dispute|issue|problem|discrepanc(y|ies)|mistake)/i, 6],
+    [/billed (incorrectly|wrong|twice)/i, 6],
+    [/(wrongly|improperly|incorrectly)\s+(charged|billed)/i, 6],
+    [/double[-\s]?charged/i, 6], [/duplicate\s+charge/i, 5],
+    [/(disputed|dispute)\s+(the\s+)?(charge|bill|invoice)/i, 5],
+    [/charged (the )?wrong (plan|amount|rate|price)/i, 6],
+    [/charged (despite|after)\s+(downgrade|cancel|cancellation)/i, 6],
+    [/wrong (amount|charge)\s+on\s+(my|our|the)\s+(bill|invoice)/i, 5],
+    [/invoice\s+(is|was)\s+(wrong|incorrect|not right)/i, 5],
+    [/refund (request|required|owed)/i, 4], [/owe(d|s)?\s+(me|us)\s+a\s+refund/i, 5],
+    [/should not have (been\s+)?charged/i, 5],
+  ]},
   { category: 'Quality', patterns: [
     [/miss(ing|ed) calls?/i, 5], [/calls? (went|going) to voicemail/i, 5],
     [/calls? (not\s+)?(being\s+)?answered/i, 5], [/calls? (being\s+)?dropped/i, 4],
@@ -3117,9 +3131,13 @@ const CATEGORY_RULES = [
     [/patch(ing|ed)? (calls?|through)/i, 5], [/can'?t (patch|reach|transfer) calls?/i, 5],
     [/(busy|silent) (signal|line)/i, 4], [/ring(ing)? (busy|silent|no answer)/i, 4],
     [/calls? (not\s+)?going through/i, 4], [/calls? (not\s+)?connecting/i, 4],
-    [/call (transfer|forwarding|routing) (issue|problem|fail)/i, 5],
+    [/call (transfer|forwarding|routing) (issue|problem|fail)/i, 6],
+    [/(call\s+)?forwarding\s+(is|was|isn'?t|wasn'?t|not|stopped)?\s*(working|functioning)/i, 6],
+    [/(call\s+)?forwarding\s+(broken|down|failed|stopped)/i, 6],
+    [/\bcf\s+(not\s+)?(working|broken|down|failed)/i, 6],
     [/forward(ing)?\s+(issue|problem|not working|fail)/i, 5],
-    [/calls? (not\s+)?(being\s+)?forward(ed)?/i, 4],
+    [/calls? (not\s+)?(being\s+)?forward(ed)?/i, 5],
+    [/calls? (were\s+)?(not\s+)?(reaching|getting to)\s+(you|us|answering)/i, 5],
     [/(lines?|phones?) (ringing|are) busy/i, 4],
   ]},
   { category: 'Closed Practice', patterns: [
@@ -3297,7 +3315,9 @@ Map CSV note phrases to categories like this (case-insensitive):
 - "downsizing", "restructuring", "business restructuring", "scaling back" → "Downsizing Practice"
 - "low call volume", "not enough calls", "cost vs. call volume", "slow season", "tax season over" → "Not Enough Call Volume"
 - "new phone system", "got a new phone", "changed phone service", "switched telephone service", "zoom phone service", "automated phone system", "IVR", "auto attendant", "phone tree", "set up call routing", "answering machine", "using an answering machine", "will use voicemail", "using our own voicemail" → "IVR / Auto Attendant"
-- "quality", "messages never sent", "lost lead", "ruining business", "agents didn't know", "unhappy with service", "service no longer the quality", "bad service", "billing error", "billing dispute", "billed incorrectly", "improperly charged", "wrongly charged", "double-charged", "charged despite downgrade", "charged the wrong plan" → "Quality"
+- "quality", "messages never sent", "lost lead", "ruining business", "agents didn't know", "unhappy with service", "service no longer the quality", "bad service" → "Quality"
+- "billing error", "billing dispute", "billing issue", "billing discrepancy", "billing problem", "billed incorrectly", "billed wrong", "billed twice", "double-charged", "duplicate charge", "improperly charged", "wrongly charged", "incorrectly charged", "charged despite downgrade", "charged the wrong plan", "charged the wrong amount", "disputed charge", "disputed invoice", "wrong amount on bill/invoice", "invoice is wrong", "refund owed", "should not have been charged" → "Billing Issue"
+- "call forwarding not working", "CF not working", "forwarding broken", "forwarding stopped working", "calls not forwarding", "calls not being forwarded", "calls weren't reaching us", "couldn't patch calls", "can't patch calls", "calls not going through", "calls not connecting", "busy signal", "silent line", "phones ringing busy", "call routing issue", "call transfer issue" → "Call Forwarding Issue" (when the complaint is that CF was BROKEN or NOT WORKING as a service failure — NOT when CF was simply turned off during post-cancellation cleanup)
 - "moved to shared office", "wework", "regus", "shared office space", "coworking" → "Moved to Shared Office Space"
 - "answering service included in suite", "bundled with software" → "Answering Service Included In Suite"
 - "wanted real time reporting", "wanted portal", "wanted dashboard" → "Wanted Real Time Reporting / Portal"
@@ -3310,7 +3330,7 @@ Map CSV note phrases to categories like this (case-insensitive):
 
 DISAMBIGUATION RULES (apply BEFORE choosing the category):
 - Overages vs. Price Too High: If "overages", "minutes", "went over", or "unpredictable bill/price" appears, use "Did Not Want to Pay Rate Increase / Overages" even when the customer ALSO says the service is expensive or over budget. Overages/rate-increase is the specific driver — reserve "Price Too High" for customers whose only complaint is the base rate with no reference to overages, minutes, or a rate-change event.
-- Billing error vs. Overages: If the customer complains about being CHARGED INCORRECTLY (charged after downgrade, wrong plan applied, disputed line item, billing mistake) — that is a SERVICE quality issue, not a pricing decision. Category = "Quality" (qualitySubcategory: "General Quality"). The customer isn't unhappy with the price, they're unhappy that we billed them wrong.
+- Billing error vs. Overages vs. Quality: If the customer complains about being CHARGED INCORRECTLY (charged after downgrade, wrong plan applied, disputed line item, duplicate charge, billing mistake, invoice error, refund owed) — that is a "Billing Issue", NOT "Quality" and NOT "Price Too High". The customer isn't unhappy with the price, and it isn't a service-delivery quality problem — it's a billing/invoicing mistake. Use "Billing Issue" whenever the complaint is about the accuracy of a charge or invoice. If the customer is upset about overages/going over minutes/a rate increase specifically, that stays "Did Not Want to Pay Rate Increase / Overages".
 - Answering machine / voicemail replacement: If the customer says they'll use an "answering machine" or "voicemail" going forward, that is IVR / Auto Attendant — an automated replacement for our human receptionists.
 
 INVOLUNTARY CANCELLATION OVERRIDE:
@@ -3328,6 +3348,7 @@ CATEGORY DEFINITIONS:
 - "IVR / Auto Attendant" = customer replaced us with an automated phone system, auto-attendant, phone tree, new phone routing setup, or a phone-service product like Zoom Phone / RingCentral / a virtual PBX. The defining feature is that an automated system or phone-service product now handles calls instead of a human service.
 - "Price Too High" = the price of our service was too high for the customer in general (not a specific rate increase event).
 - "Did Not Want to Pay Rate Increase / Overages" = customer specifically objects to a rate increase we issued, OR is leaving because of overage charges / going over their plan minutes. Distinct from general "Price Too High" — this is reactive to a specific bill event.
+- "Billing Issue" = the customer's complaint is that we billed them incorrectly: charged the wrong amount, wrong plan, double-charged, duplicate charge, charged after they downgraded/cancelled, disputed invoice line item, refund owed, invoice mistake. This is a billing/invoicing accuracy problem, NOT a service quality issue and NOT a price complaint. Distinct from "Price Too High" (they didn't like the price) and from "Did Not Want to Pay Rate Increase / Overages" (they didn't like a specific rate change or overage) — Billing Issue means the charge itself was wrong.
 - "Call Forwarding Issue" = the customer's calls were not being forwarded/transferred/patched correctly — a technical problem with call routing or connectivity, NOT the customer choosing a different solution.
 - "Wanted Features/Services We Don't Offer" = wanted a specific capability, integration, or service we don't provide.
 - "Wanted Real Time Reporting / Portal" = specifically wanted live dashboards, a client portal, or real-time reporting access we don't provide.
@@ -3343,7 +3364,8 @@ CATEGORY DEFINITIONS:
 
 OTHER RULES:
 - Agent asking to turn off call forwarding = post-cancellation cleanup. NOT a reason.
-- "CF already turned off" / "they turned off CF" / "turned service off" / "removed DID" / "made inactive in CTI" = post-cancellation cleanup tasks. These are NOT "Call Forwarding Issue". Call Forwarding Issue means the customer's calls were not reaching us when they were supposed to (technical fault on our side or routing problem). It is rare. Default to other categories when CF is only mentioned in the context of disabling it after cancellation.
+- "CF already turned off" / "they turned off CF" / "turned service off" / "removed DID" / "made inactive in CTI" = post-cancellation cleanup tasks. These are NOT "Call Forwarding Issue".
+- CALL FORWARDING WORKING vs. CLEANUP: "Call Forwarding Issue" means the customer's calls were not reaching us when they were supposed to — a service failure on our side. If the customer complains that "call forwarding is not working", "CF is broken", "forwarding stopped working", "calls aren't being forwarded", "we're not getting their calls", "couldn't patch calls", or similar — that IS "Call Forwarding Issue" as a cancellation reason, even if the customer sounds calm about it. Only route to a different category when CF language shows up purely in the context of shutting down after cancel.
 - "Went to Competitor" — name when you can: When the customer says they switched / left for someone else but doesn't name a competitor (e.g. "going in a different direction", "another route", "trying something new", "using another service", "started with another service"), still classify as "Went to Competitor" with competitorName=null and Low confidence. When a competitor IS named (Ruby, PATLive, AnswerConnect, MAP, Gabbyville, VoiceNation, Moneypenny, Abby Connect, Alert, Answering365, Nexa, Davinci, or similar), set competitorName and use Medium/High confidence.
 - "Switched to AI Service" requires AI mention. Only use this category when the notes/ticket explicitly mention "AI", "AI receptionist", or a named AI tool (Smith.ai, Lex, Goodcall, Rosie, Numa, Answering.AI, Dialpad AI, Convoso, RingCentral AI, etc.). Do NOT pick this just because the customer left — if they just said "another service" with no AI language, use "Went to Competitor" instead.
 - PHONE-SYSTEM ≠ CALL FORWARDING ISSUE: "got a new phone system", "switched telephone service", "changed phone service", "bought new phone system", "Zoom Phone", "RingCentral", "set up new phone routing" → "IVR / Auto Attendant" (customer replaced us with their own phone infrastructure). NOT "Call Forwarding Issue".

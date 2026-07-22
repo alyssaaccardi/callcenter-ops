@@ -8,6 +8,7 @@ const CATEGORY_COLORS = {
   'Switched to AI Service':               { bg: 'rgba(6,182,212,0.12)',    color: '#0891b2' },
   'Price Too High':                        { bg: 'rgba(249,115,22,0.12)',   color: '#ea580c' },
   'Did Not Want to Pay Rate Increase / Overages': { bg: 'rgba(249,115,22,0.12)', color: '#c2410c' },
+  'Billing Issue':                         { bg: 'rgba(234,179,8,0.15)',    color: '#a16207' },
   'Downsizing Practice':                   { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
   'Hired Staff':                           { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
   'IVR / Auto Attendant':                  { bg: 'rgba(6,182,212,0.12)',    color: '#0e7490' },
