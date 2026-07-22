@@ -3096,16 +3096,23 @@ const CATEGORY_RULES = [
     [/have (someone|staff) (now|to answer)/i, 3],
   ]},
   { category: 'Billing Issue', patterns: [
-    [/billing (error|dispute|issue|problem|discrepanc(y|ies)|mistake)/i, 6],
+    [/(credit\s+card|cc)\s+dispute/i, 6], [/chargeback/i, 6],
+    [/(dispute|disputing)\s+(the|these|those|our|my)?\s*(charge|charges|bill|billing|invoice|amount)/i, 6],
+    [/filing\s+(a\s+)?dispute/i, 5],
+    [/(improper|incorrect|wrong|erroneous)\s+billing/i, 6],
+    [/billing (error|dispute|issue|problem|discrepanc(y|ies)|mistake|concern)/i, 6],
     [/billed (incorrectly|wrong|twice)/i, 6],
     [/(wrongly|improperly|incorrectly)\s+(charged|billed)/i, 6],
     [/double[-\s]?charged/i, 6], [/duplicate\s+charge/i, 5],
     [/(disputed|dispute)\s+(the\s+)?(charge|bill|invoice)/i, 5],
     [/charged (the )?wrong (plan|amount|rate|price)/i, 6],
-    [/charged (despite|after)\s+(downgrade|cancel|cancellation)/i, 6],
+    [/charged (despite|after)\s+(downgrade|cancel|cancellation|cancel(l?)ed)/i, 6],
+    [/still (billed|charged)\s+(after|despite)/i, 6],
+    [/(billed|charged)\s+after\s+(i|we)\s+cancel(l?)ed/i, 6],
     [/wrong (amount|charge)\s+on\s+(my|our|the)\s+(bill|invoice)/i, 5],
     [/invoice\s+(is|was)\s+(wrong|incorrect|not right)/i, 5],
-    [/refund (request|required|owed)/i, 4], [/owe(d|s)?\s+(me|us)\s+a\s+refund/i, 5],
+    [/refund (request|required|owed|for\s+(a|the|an)\s+(improper|wrong|incorrect|erroneous))/i, 5],
+    [/owe(d|s)?\s+(me|us)\s+a\s+refund/i, 5],
     [/should not have (been\s+)?charged/i, 5],
   ]},
   { category: 'Quality', patterns: [
@@ -3316,7 +3323,7 @@ Map CSV note phrases to categories like this (case-insensitive):
 - "low call volume", "not enough calls", "cost vs. call volume", "slow season", "tax season over" → "Not Enough Call Volume"
 - "new phone system", "got a new phone", "changed phone service", "switched telephone service", "zoom phone service", "automated phone system", "IVR", "auto attendant", "phone tree", "set up call routing", "answering machine", "using an answering machine", "will use voicemail", "using our own voicemail" → "IVR / Auto Attendant"
 - "quality", "messages never sent", "lost lead", "ruining business", "agents didn't know", "unhappy with service", "service no longer the quality", "bad service" → "Quality"
-- "billing error", "billing dispute", "billing issue", "billing discrepancy", "billing problem", "billed incorrectly", "billed wrong", "billed twice", "double-charged", "duplicate charge", "improperly charged", "wrongly charged", "incorrectly charged", "charged despite downgrade", "charged the wrong plan", "charged the wrong amount", "disputed charge", "disputed invoice", "wrong amount on bill/invoice", "invoice is wrong", "refund owed", "should not have been charged" → "Billing Issue"
+- "improper billing", "improperly billed", "incorrect billing", "wrong billing", "erroneous billing", "billing error", "billing dispute", "billing issue", "billing discrepancy", "billing concern (dispute-flavored)", "billing problem", "billed incorrectly", "billed wrong", "billed twice", "double-charged", "duplicate charge", "improperly charged", "wrongly charged", "incorrectly charged", "credit card dispute", "cc dispute", "chargeback", "filing a dispute", "disputing charges", "disputing the bill/invoice/charges", "charged despite downgrade", "charged despite cancellation", "still billed after cancellation", "still charged after I cancelled", "billed after cancellation", "charged after we cancelled", "charged the wrong plan", "charged the wrong amount", "disputed charge", "disputed invoice", "wrong amount on bill/invoice", "invoice is wrong", "refund for improper charge", "refund owed", "should not have been charged" → "Billing Issue"
 - "call forwarding not working", "CF not working", "forwarding broken", "forwarding stopped working", "calls not forwarding", "calls not being forwarded", "calls weren't reaching us", "couldn't patch calls", "can't patch calls", "calls not going through", "calls not connecting", "busy signal", "silent line", "phones ringing busy", "call routing issue", "call transfer issue" → "Call Forwarding Issue" (when the complaint is that CF was BROKEN or NOT WORKING as a service failure — NOT when CF was simply turned off during post-cancellation cleanup)
 - "moved to shared office", "wework", "regus", "shared office space", "coworking" → "Moved to Shared Office Space"
 - "answering service included in suite", "bundled with software" → "Answering Service Included In Suite"
@@ -3330,7 +3337,8 @@ Map CSV note phrases to categories like this (case-insensitive):
 
 DISAMBIGUATION RULES (apply BEFORE choosing the category):
 - Overages vs. Price Too High: If "overages", "minutes", "went over", or "unpredictable bill/price" appears, use "Did Not Want to Pay Rate Increase / Overages" even when the customer ALSO says the service is expensive or over budget. Overages/rate-increase is the specific driver — reserve "Price Too High" for customers whose only complaint is the base rate with no reference to overages, minutes, or a rate-change event.
-- Billing error vs. Overages vs. Quality: If the customer complains about being CHARGED INCORRECTLY (charged after downgrade, wrong plan applied, disputed line item, duplicate charge, billing mistake, invoice error, refund owed) — that is a "Billing Issue", NOT "Quality" and NOT "Price Too High". The customer isn't unhappy with the price, and it isn't a service-delivery quality problem — it's a billing/invoicing mistake. Use "Billing Issue" whenever the complaint is about the accuracy of a charge or invoice. If the customer is upset about overages/going over minutes/a rate increase specifically, that stays "Did Not Want to Pay Rate Increase / Overages".
+- Billing error vs. Overages vs. Quality: If the customer complains about being CHARGED INCORRECTLY (charged after downgrade, wrong plan applied, disputed line item, duplicate charge, billing mistake, invoice error, refund owed, improper billing, still billed after cancelling) — that is a "Billing Issue", NOT "Quality" and NOT "Price Too High". The customer isn't unhappy with the price, and it isn't a service-delivery quality problem — it's a billing/invoicing mistake.
+- Billing Issue vs. Overages — the DISPUTING test: If the customer is DISPUTING charges (credit card dispute, chargeback, filing a dispute, "I dispute this charge", "these charges are wrong", "I'm not paying this bill because it's incorrect", asking for a refund of specific charges they consider invalid) — that is "Billing Issue" regardless of whether the underlying charges happen to be overages. The signal is that the customer is contesting the ACCURACY or VALIDITY of a charge. Reserve "Did Not Want to Pay Rate Increase / Overages" for customers who ACCEPT that the overages/rate-increase are real charges but simply don't want to keep paying them (e.g. "the overages are too expensive, I can't afford this, I need a cheaper plan"). Dispute = Billing Issue. Sticker shock without dispute = Overages.
 - Answering machine / voicemail replacement: If the customer says they'll use an "answering machine" or "voicemail" going forward, that is IVR / Auto Attendant — an automated replacement for our human receptionists.
 
 INVOLUNTARY CANCELLATION OVERRIDE:
