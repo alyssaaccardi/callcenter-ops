@@ -11,6 +11,19 @@ function usd(n) {
   return v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
+function fmtWait(seconds) {
+  if (seconds == null) return '—';
+  const s = Math.round(seconds);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return rem ? `${m}m ${rem}s` : `${m}m`;
+}
+
+function monthLabel() {
+  return new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
 function fmtTime(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' });
@@ -80,21 +93,19 @@ function OutstandingTenant({ label, tenant }) {
               <th style={{ padding: '6px 8px' }}>Company</th>
               <th style={{ padding: '6px 8px', textAlign: 'right' }}>Days</th>
               <th style={{ padding: '6px 8px', textAlign: 'right' }}>Overdue</th>
-              <th style={{ padding: '6px 8px' }}>Admin</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={4} style={{ padding: 12, textAlign: 'center', color: 'var(--muted)' }}>None outstanding</td></tr>
+              <tr><td colSpan={3} style={{ padding: 12, textAlign: 'center', color: 'var(--muted)' }}>None outstanding</td></tr>
             )}
             {rows.map(c => (
               <tr key={c.customerId} style={{ borderTop: '1px solid var(--border)' }}>
-                <td style={{ padding: '6px 8px', maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <td style={{ padding: '6px 8px', maxWidth: 220, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {c.url ? <a href={c.url} target="_blank" rel="noreferrer" style={{ color: 'var(--royal)' }}>{c.company || `#${c.customerId}`}</a> : (c.company || `#${c.customerId}`)}
                 </td>
                 <td style={{ padding: '6px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{c.daysOverdue}</td>
                 <td style={{ padding: '6px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--danger)', fontWeight: 600 }}>{usd(c.amountOverdue)}</td>
-                <td style={{ padding: '6px 8px', color: 'var(--muted)' }}>{c.admin || '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -106,27 +117,46 @@ function OutstandingTenant({ label, tenant }) {
 
 function MitelQueues({ queueStats }) {
   if (queueStats?.offline || queueStats?.unconfigured) {
-    return <div style={{ color: 'var(--danger)', fontSize: 13 }}>Poller offline — no live queue data</div>;
+    return <div style={{ color: 'var(--danger)', fontSize: 13 }}>Poller offline — no queue data</div>;
   }
   const queues = queueStats?.queues || [];
   if (queues.length === 0) return <div style={{ color: 'var(--muted)', fontSize: 13 }}>Waiting for poller data…</div>;
+  const hasMtd = queues.some(q => q.mtdAnswered != null || q.mtdLongestWait != null);
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
-      {queues.map(q => (
-        <div key={q.id} style={{
-          padding: 10, borderRadius: 10, background: 'rgba(26,111,232,0.06)',
-          border: '1px solid rgba(26,111,232,0.15)',
-        }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 0.5 }}>QUEUE {q.id}</div>
-          <div style={{ fontSize: 14, fontWeight: 700, marginTop: 2, marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{q.name || `Queue ${q.id}`}</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 12 }}>
-            <div><span style={{ color: 'var(--muted)' }}>Waiting</span><br /><b>{q.callsWaiting ?? q.waiting ?? 0}</b></div>
-            <div><span style={{ color: 'var(--muted)' }}>Agents</span><br /><b>{q.agentsAvailable ?? q.available ?? 0}</b></div>
-            <div><span style={{ color: 'var(--muted)' }}>Answered</span><br /><b>{q.callsAnswered ?? q.answered ?? 0}</b></div>
-            <div><span style={{ color: 'var(--muted)' }}>Abandoned</span><br /><b style={{ color: q.callsAbandoned > 0 ? 'var(--danger)' : 'inherit' }}>{q.callsAbandoned ?? q.abandoned ?? 0}</b></div>
-          </div>
+    <div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 0.5, marginBottom: 6 }}>
+        HOLD TIMES — {monthLabel().toUpperCase()}
+      </div>
+      <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ textAlign: 'left', color: 'var(--muted)', fontSize: 11, letterSpacing: 0.5 }}>
+            <th style={{ padding: '6px 4px' }}>Queue</th>
+            <th style={{ padding: '6px 4px', textAlign: 'right' }}>Longest</th>
+            <th style={{ padding: '6px 4px', textAlign: 'right' }}>Avg</th>
+            <th style={{ padding: '6px 4px', textAlign: 'right' }}>Answered</th>
+            <th style={{ padding: '6px 4px', textAlign: 'right' }}>Aband</th>
+          </tr>
+        </thead>
+        <tbody>
+          {queues.map(q => (
+            <tr key={q.id} style={{ borderTop: '1px solid var(--border)' }}>
+              <td style={{ padding: '6px 4px' }}>
+                <div style={{ fontWeight: 700 }}>{q.name || q.id}</div>
+                <div style={{ fontSize: 10, color: 'var(--muted)' }}>{q.id}</div>
+              </td>
+              <td style={{ padding: '6px 4px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{fmtWait(q.mtdLongestWait)}</td>
+              <td style={{ padding: '6px 4px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtWait(q.mtdAvgWait)}</td>
+              <td style={{ padding: '6px 4px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{q.mtdAnswered ?? 0}</td>
+              <td style={{ padding: '6px 4px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: (q.mtdAbandoned || 0) > 0 ? 'var(--danger)' : 'inherit' }}>{q.mtdAbandoned ?? 0}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!hasMtd && (
+        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
+          Poller hasn't pushed month-to-date fields yet.
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -134,7 +164,6 @@ function MitelQueues({ queueStats }) {
 function DidCounts({ didCounts, hubspotDids }) {
   const cells = [
     { label: 'Mitel Active',    val: didCounts?.mitel,             hint: 'Bandwidth' },
-    { label: 'Total Active',    val: didCounts?.total,             hint: 'Bandwidth' },
     { label: 'DID Pool',        val: hubspotDids?.didPool,         hint: 'HubSpot (available)' },
     { label: 'Instant DIDs',    val: hubspotDids?.instantDidPool,  hint: 'HubSpot' },
   ];
@@ -259,7 +288,7 @@ export default function AdminDashboard() {
 
         {/* Phone / DID column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <Card title="Mitel Queues (live)">
+          <Card title="Mitel Queues — MTD">
             <MitelQueues queueStats={mitelQueues} />
           </Card>
           <Card title="Available DIDs">

@@ -80,7 +80,7 @@ function pushToServer(data) {
 async function fetchQueueStats() {
   const p = await getPool();
 
-  const [todayResult, recentResult, hourlyResult] = await Promise.all([
+  const [todayResult, recentResult, hourlyResult, monthResult] = await Promise.all([
     // Today's running totals
     p.request().query(`
       SELECT
@@ -123,11 +123,26 @@ async function fetchQueueStats() {
         AND CallStartTime >= CAST(GETDATE() AS DATE)
       GROUP BY DATEPART(HOUR, CallStartTime)
     `),
+    // Month-to-date hold-time aggregates per queue
+    p.request().query(`
+      SELECT
+        Queue,
+        SUM(CASE WHEN TimeToAnswer IS NOT NULL THEN 1 ELSE 0 END) AS mtdAnswered,
+        SUM(CASE WHEN TimeToAnswer IS NULL     THEN 1 ELSE 0 END) AS mtdAbandoned,
+        AVG(CASE WHEN TimeToAnswer > 0 THEN CAST(TimeToAnswer AS float) END) AS mtdAvgWait,
+        MAX(CASE WHEN TimeToAnswer > 0 THEN TimeToAnswer END)                AS mtdLongestWait
+      FROM [dbo].[tblData_LC_Trace]
+      WHERE Queue IN ('P862','P861','P803')
+        AND PegCount = 1
+        AND CallStartTime >= DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)
+      GROUP BY Queue
+    `),
   ]);
 
   const queues = ['P862', 'P861', 'P803'].map(id => {
     const t = todayResult.recordset.find(r => r.Queue === id);
     const r = recentResult.recordset.find(r => r.Queue === id);
+    const m = monthResult.recordset.find(r => r.Queue === id);
     return {
       id,
       name:           QUEUE_MAP[id],
@@ -138,6 +153,10 @@ async function fetchQueueStats() {
       recentAnswered: r?.recentAnswered ?? 0,
       recentAvgWait:  r?.recentAvgWait  != null ? Math.round(r.recentAvgWait) : null,
       recentMaxWait:  r?.recentMaxWait  ?? null,
+      mtdAnswered:    m?.mtdAnswered    ?? 0,
+      mtdAbandoned:   m?.mtdAbandoned   ?? 0,
+      mtdAvgWait:     m?.mtdAvgWait     != null ? Math.round(m.mtdAvgWait)     : null,
+      mtdLongestWait: m?.mtdLongestWait ?? null,
     };
   });
 
