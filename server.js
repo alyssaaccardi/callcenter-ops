@@ -1457,6 +1457,110 @@ app.get('/api/zendesk/stale-tickets', async (req, res) => {
   }
 });
 
+// Resolve a period name to a UTC start Date. Shared by CSAT + Quality endpoints.
+// Returns null for "all" / unrecognized so callers can fall back to their own default.
+function resolvePeriodStart(period) {
+  if (!period || period === 'all') return null;
+  const now = new Date();
+  if (period === 'today')      { const s = new Date(now); s.setUTCHours(0, 0, 0, 0); return s; }
+  if (period === 'yesterday')  { const s = new Date(now); s.setUTCDate(s.getUTCDate() - 1); s.setUTCHours(0, 0, 0, 0); return s; }
+  if (period === '90d')        { const s = new Date(now); s.setUTCDate(s.getUTCDate() - 90); return s; }
+  if (period === '180d')       { const s = new Date(now); s.setUTCDate(s.getUTCDate() - 180); return s; }
+  if (period === 'this-week')  {
+    const s = new Date(now);
+    const dow = now.getUTCDay();
+    s.setUTCDate(now.getUTCDate() - (dow === 0 ? 6 : dow - 1));
+    s.setUTCHours(0, 0, 0, 0);
+    return s;
+  }
+  if (period === 'last-week')  {
+    const s = new Date(now);
+    const dow = now.getUTCDay();
+    s.setUTCDate(now.getUTCDate() - (dow === 0 ? 6 : dow - 1) - 7);
+    s.setUTCHours(0, 0, 0, 0);
+    return s;
+  }
+  if (period === 'this-month') return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  if (period === 'last-month') return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  return null;
+}
+
+// ─── Zendesk: CSAT + SLA rollup for the Admin Dashboard ──────────────────────
+// Returns aggregate CSAT (all ratings, not just those with comments) and
+// SLA breach counts for a period. 2-minute cache per period key.
+const qualityCache = new Map(); // period → { data, expires }
+
+app.get('/api/zendesk/quality', requireRole('super_admin', 'call_center_ops'), async (req, res) => {
+  const period = req.query.period || 'this-week';
+  const cached = qualityCache.get(period);
+  if (cached && cached.expires > Date.now()) return res.json(cached.data);
+
+  try {
+    const headers = zdHeaders();
+    const base    = zdBase();
+    const sub     = process.env.ZENDESK_SUBDOMAIN;
+
+    const start = resolvePeriodStart(period);
+    if (!start) return res.status(400).json({ error: `Unsupported period "${period}"` });
+    const startDay = start.toISOString().slice(0, 10);
+    const startTs  = Math.floor(start.getTime() / 1000);
+
+    // Aggregate counts via search (fast — one API call each)
+    const [goodCountRes, badCountRes, slaCountRes, slaListRes] = await Promise.all([
+      axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket satisfaction:good created>${startDay}` } }),
+      axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket satisfaction:bad created>${startDay}` } }),
+      axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket sla_breach:true created>${startDay}` } }).catch(() => null),
+      axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket sla_breach:true created>${startDay}`, sort_by: 'created_at', sort_order: 'desc', per_page: 10 } }).catch(() => null),
+    ]);
+
+    const good = goodCountRes.data?.count || 0;
+    const bad  = badCountRes.data?.count  || 0;
+    const total = good + bad;
+    const pct   = total > 0 ? Math.round((good / total) * 1000) / 10 : null;
+
+    const slaSupported   = !!(slaCountRes && slaListRes);
+    const slaTotal       = slaCountRes?.data?.count || 0;
+    const slaTickets = (slaListRes?.data?.results || []).slice(0, 10).map(t => ({
+      id:        t.id,
+      subject:   t.subject,
+      status:    t.status,
+      createdAt: t.created_at,
+      link:      `https://${sub}.zendesk.com/agent/tickets/${t.id}`,
+    }));
+
+    // Recent CSAT comments — pull the top few bad + good with comments for context
+    const commentsRes = await axios.get(
+      `${base}/satisfaction_ratings.json?sort_order=desc&per_page=25&start_time=${startTs}`,
+      { headers }
+    ).catch(() => null);
+    const recentComments = (commentsRes?.data?.satisfaction_ratings || [])
+      .filter(r => r.comment && r.comment.trim() && r.score !== 'unoffered')
+      .slice(0, 8)
+      .map(r => ({
+        score:     r.score,
+        comment:   r.comment,
+        requester: r.requester?.name || '',
+        ticketId:  r.ticket_id,
+        createdAt: r.created_at,
+        link:      `https://${sub}.zendesk.com/agent/tickets/${r.ticket_id}`,
+      }));
+
+    const payload = {
+      period,
+      rangeStart: startDay,
+      csat: { good, bad, total, pct, recentComments },
+      sla:  { supported: slaSupported, totalBreaches: slaTotal, tickets: slaTickets },
+      generatedAt: new Date().toISOString(),
+    };
+    qualityCache.set(period, { data: payload, expires: Date.now() + 120_000 });
+    res.json(payload);
+  } catch (err) {
+    if (err.message === 'Zendesk not configured') return res.json({ unconfigured: true });
+    console.error('[zendesk-quality]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch quality metrics', details: err.message });
+  }
+});
+
 // ─── Zendesk: CSAT Ratings ───────────────────────────────────────────────────
 app.get('/api/zendesk/csat', async (req, res) => {
   const token = req.query.t;

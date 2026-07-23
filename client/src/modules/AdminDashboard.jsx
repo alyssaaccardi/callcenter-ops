@@ -5,6 +5,7 @@ import api from '../api';
 const CHARGEOVER_POLL_MS = 60_000;
 const MITEL_POLL_MS      = 10_000;
 const TASKS_POLL_MS      = 30_000;
+const QUALITY_POLL_MS    = 120_000;
 
 function usd(n) {
   const v = Number(n) || 0;
@@ -188,6 +189,96 @@ function DidCounts({ didCounts, hubspotDids }) {
   );
 }
 
+function QualityPanel({ data, loading, period, onPeriodChange }) {
+  const csat = data?.csat || {};
+  const sla  = data?.sla  || {};
+  const pctColor = csat.pct == null ? 'var(--muted)'
+    : csat.pct >= 95 ? 'var(--success)'
+    : csat.pct >= 85 ? 'var(--warn)'
+    : 'var(--danger)';
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        {['this-week', 'this-month'].map(p => (
+          <button
+            key={p}
+            onClick={() => onPeriodChange(p)}
+            style={{
+              padding: '4px 10px', fontSize: 11, borderRadius: 6, cursor: 'pointer',
+              border: `1px solid ${period === p ? 'var(--royal)' : 'var(--border)'}`,
+              background: period === p ? 'rgba(26,111,232,0.1)' : 'transparent',
+              color: period === p ? 'var(--royal)' : 'var(--text)',
+              fontWeight: period === p ? 700 : 400,
+            }}
+          >{p === 'this-week' ? 'This Week' : 'This Month'}</button>
+        ))}
+        {loading && <span style={{ fontSize: 11, color: 'var(--muted)', alignSelf: 'center' }}>refreshing…</span>}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 0.5, marginBottom: 4 }}>CSAT</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+            <div style={{ fontSize: 34, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: pctColor, lineHeight: 1 }}>
+              {csat.pct != null ? `${csat.pct}%` : '—'}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+              {csat.good ?? 0} good · <span style={{ color: (csat.bad || 0) > 0 ? 'var(--danger)' : 'inherit' }}>{csat.bad ?? 0} bad</span>
+            </div>
+          </div>
+          {(csat.recentComments || []).length > 0 && (
+            <div style={{ marginTop: 10, maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
+              {csat.recentComments.map(c => (
+                <a key={c.ticketId} href={c.link} target="_blank" rel="noreferrer"
+                   style={{ display: 'block', padding: '6px 8px', borderTop: '1px solid var(--border)', textDecoration: 'none', color: 'inherit', fontSize: 12 }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <span style={{
+                      fontSize: 10, padding: '1px 5px', borderRadius: 4,
+                      background: c.score === 'good' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                      color: c.score === 'good' ? '#166534' : '#991b1b',
+                    }}>{c.score}</span>
+                    <span style={{ fontWeight: 600 }}>#{c.ticketId}</span>
+                    <span style={{ color: 'var(--muted)' }}>{c.requester}</span>
+                  </div>
+                  <div style={{ marginTop: 2, fontSize: 11, color: 'var(--text)' }}>{c.comment}</div>
+                </a>
+              ))}
+            </div>
+          )}
+          {(csat.recentComments || []).length === 0 && csat.total > 0 && (
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>No comments left this period.</div>
+          )}
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 0.5, marginBottom: 4 }}>SLA BREACHES</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+            <div style={{
+              fontSize: 34, fontWeight: 800, fontVariantNumeric: 'tabular-nums', lineHeight: 1,
+              color: (sla.totalBreaches || 0) === 0 ? 'var(--success)' : 'var(--danger)',
+            }}>{sla.totalBreaches ?? 0}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>tickets breached</div>
+          </div>
+          {(sla.tickets || []).length > 0 && (
+            <div style={{ marginTop: 10, maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
+              {sla.tickets.map(t => (
+                <a key={t.id} href={t.link} target="_blank" rel="noreferrer"
+                   style={{ display: 'block', padding: '6px 8px', borderTop: '1px solid var(--border)', textDecoration: 'none', color: 'inherit', fontSize: 12 }}>
+                  <div><span style={{ fontWeight: 600 }}>#{t.id}</span> <span style={{ color: 'var(--muted)', fontSize: 10 }}>{t.status}</span></div>
+                  <div style={{ fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.subject}</div>
+                </a>
+              ))}
+            </div>
+          )}
+          {sla.supported === false && (
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>SLA data unavailable (no policies configured?)</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SupportTasks({ tasks }) {
   if (!tasks) return <div style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</div>;
   const overdue  = tasks.overdue || [];
@@ -226,6 +317,9 @@ export default function AdminDashboard() {
   const [outstandingError, setOutstandingError] = useState(null);
   const [mitelQueues, setMitelQueues] = useState(null);
   const [supportTasks, setSupportTasks] = useState(null);
+  const [qualityPeriod, setQualityPeriod] = useState('this-week');
+  const [quality, setQuality] = useState(null);
+  const [qualityLoading, setQualityLoading] = useState(false);
 
   const fetchOutstanding = useCallback(async () => {
     setOutstandingLoading(true);
@@ -259,6 +353,20 @@ export default function AdminDashboard() {
     const id = setInterval(fetch, TASKS_POLL_MS);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetch = () => {
+      setQualityLoading(true);
+      api.get(`/api/zendesk/quality?period=${qualityPeriod}`)
+        .then(r => { if (!cancelled) setQuality(r.data); })
+        .catch(() => {})
+        .finally(() => { if (!cancelled) setQualityLoading(false); });
+    };
+    fetch();
+    const id = setInterval(fetch, QUALITY_POLL_MS);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [qualityPeriod]);
 
   return (
     <div style={{ padding: 20, maxWidth: 1600, margin: '0 auto' }}>
@@ -307,6 +415,24 @@ export default function AdminDashboard() {
         {/* Support column */}
         <Card title="Open Support Tasks">
           <SupportTasks tasks={supportTasks} />
+        </Card>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <Card
+          title="Zendesk — Quality"
+          headerRight={
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              {quality?.generatedAt && `updated ${fmtTime(quality.generatedAt)}`}
+            </div>
+          }
+        >
+          <QualityPanel
+            data={quality}
+            loading={qualityLoading}
+            period={qualityPeriod}
+            onPeriodChange={setQualityPeriod}
+          />
         </Card>
       </div>
     </div>
