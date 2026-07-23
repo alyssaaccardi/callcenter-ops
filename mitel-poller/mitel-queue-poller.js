@@ -80,7 +80,7 @@ function pushToServer(data) {
 async function fetchQueueStats() {
   const p = await getPool();
 
-  const [todayResult, recentResult, hourlyResult, monthResult] = await Promise.all([
+  const [todayResult, recentResult, hourlyResult, last24hResult] = await Promise.all([
     // Today's running totals
     p.request().query(`
       SELECT
@@ -123,26 +123,47 @@ async function fetchQueueStats() {
         AND CallStartTime >= CAST(GETDATE() AS DATE)
       GROUP BY DATEPART(HOUR, CallStartTime)
     `),
-    // Month-to-date hold-time aggregates per queue
+    // Last-24-hours ring time — grouped per queue, per hour bucket
     p.request().query(`
       SELECT
         Queue,
-        SUM(CASE WHEN TimeToAnswer IS NOT NULL THEN 1 ELSE 0 END) AS mtdAnswered,
-        SUM(CASE WHEN TimeToAnswer IS NULL     THEN 1 ELSE 0 END) AS mtdAbandoned,
-        AVG(CASE WHEN TimeToAnswer > 0 THEN CAST(TimeToAnswer AS float) END) AS mtdAvgWait,
-        MAX(CASE WHEN TimeToAnswer > 0 THEN TimeToAnswer END)                AS mtdLongestWait
+        DATEADD(HOUR, DATEDIFF(HOUR, 0, CallStartTime), 0) AS HourBucket,
+        COUNT(*)                            AS answered,
+        AVG(CAST(TimeToAnswer AS float))    AS avgWait
       FROM [dbo].[tblData_LC_Trace]
       WHERE Queue IN ('P862','P861','P803')
         AND PegCount = 1
-        AND CallStartTime >= DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)
-      GROUP BY Queue
+        AND TimeToAnswer IS NOT NULL
+        AND TimeToAnswer > 0
+        AND CallStartTime >= DATEADD(HOUR, -24, GETDATE())
+      GROUP BY Queue, DATEADD(HOUR, DATEDIFF(HOUR, 0, CallStartTime), 0)
     `),
   ]);
+
+  // Build a 24-slot array (oldest → newest) of the last 24 clock hours.
+  // We use ISO strings for the bucket so timezone handling is done client-side.
+  const nowMs      = Date.now();
+  const oneHourMs  = 3_600_000;
+  const currentHrStart = new Date(Math.floor(nowMs / oneHourMs) * oneHourMs);
+  const hourSlots = Array.from({ length: 24 }, (_, i) =>
+    new Date(currentHrStart.getTime() - (23 - i) * oneHourMs));
 
   const queues = ['P862', 'P861', 'P803'].map(id => {
     const t = todayResult.recordset.find(r => r.Queue === id);
     const r = recentResult.recordset.find(r => r.Queue === id);
-    const m = monthResult.recordset.find(r => r.Queue === id);
+    const monthRows = last24hResult.recordset.filter(r => r.Queue === id);
+    const byBucket = new Map(monthRows.map(row => [
+      new Date(row.HourBucket).getTime(),
+      { avgWait: row.avgWait != null ? Math.round(row.avgWait) : null, answered: row.answered ?? 0 },
+    ]));
+    const hourly = hourSlots.map(d => {
+      const hit = byBucket.get(d.getTime());
+      return {
+        bucket:   d.toISOString(),
+        avgWait:  hit?.avgWait  ?? null,
+        answered: hit?.answered ?? 0,
+      };
+    });
     return {
       id,
       name:           QUEUE_MAP[id],
@@ -153,10 +174,7 @@ async function fetchQueueStats() {
       recentAnswered: r?.recentAnswered ?? 0,
       recentAvgWait:  r?.recentAvgWait  != null ? Math.round(r.recentAvgWait) : null,
       recentMaxWait:  r?.recentMaxWait  ?? null,
-      mtdAnswered:    m?.mtdAnswered    ?? 0,
-      mtdAbandoned:   m?.mtdAbandoned   ?? 0,
-      mtdAvgWait:     m?.mtdAvgWait     != null ? Math.round(m.mtdAvgWait)     : null,
-      mtdLongestWait: m?.mtdLongestWait ?? null,
+      hourly,
     };
   });
 

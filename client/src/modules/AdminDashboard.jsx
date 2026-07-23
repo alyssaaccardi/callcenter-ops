@@ -20,8 +20,10 @@ function fmtWait(seconds) {
   return rem ? `${m}m ${rem}s` : `${m}m`;
 }
 
-function monthLabel() {
-  return new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+function fmtHourEst(iso) {
+  return new Date(iso).toLocaleTimeString('en-US', {
+    hour: 'numeric', hour12: true, timeZone: 'America/New_York',
+  });
 }
 
 function fmtTime(iso) {
@@ -121,42 +123,48 @@ function MitelQueues({ queueStats }) {
   }
   const queues = queueStats?.queues || [];
   if (queues.length === 0) return <div style={{ color: 'var(--muted)', fontSize: 13 }}>Waiting for poller data…</div>;
-  const hasMtd = queues.some(q => q.mtdAnswered != null || q.mtdLongestWait != null);
+  const hasHourly = queues.some(q => Array.isArray(q.hourly) && q.hourly.length > 0);
+  if (!hasHourly) {
+    return <div style={{ color: 'var(--muted)', fontSize: 12, fontStyle: 'italic' }}>Poller hasn't pushed last-24h data yet.</div>;
+  }
+  const buckets = queues[0].hourly.map(h => h.bucket);
   return (
     <div>
       <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 0.5, marginBottom: 6 }}>
-        HOLD TIMES — {monthLabel().toUpperCase()}
+        AVG RING TIME — LAST 24 HOURS
       </div>
-      <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ textAlign: 'left', color: 'var(--muted)', fontSize: 11, letterSpacing: 0.5 }}>
-            <th style={{ padding: '6px 4px' }}>Queue</th>
-            <th style={{ padding: '6px 4px', textAlign: 'right' }}>Longest</th>
-            <th style={{ padding: '6px 4px', textAlign: 'right' }}>Avg</th>
-            <th style={{ padding: '6px 4px', textAlign: 'right' }}>Answered</th>
-            <th style={{ padding: '6px 4px', textAlign: 'right' }}>Aband</th>
-          </tr>
-        </thead>
-        <tbody>
-          {queues.map(q => (
-            <tr key={q.id} style={{ borderTop: '1px solid var(--border)' }}>
-              <td style={{ padding: '6px 4px' }}>
-                <div style={{ fontWeight: 700 }}>{q.name || q.id}</div>
-                <div style={{ fontSize: 10, color: 'var(--muted)' }}>{q.id}</div>
-              </td>
-              <td style={{ padding: '6px 4px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{fmtWait(q.mtdLongestWait)}</td>
-              <td style={{ padding: '6px 4px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtWait(q.mtdAvgWait)}</td>
-              <td style={{ padding: '6px 4px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{q.mtdAnswered ?? 0}</td>
-              <td style={{ padding: '6px 4px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: (q.mtdAbandoned || 0) > 0 ? 'var(--danger)' : 'inherit' }}>{q.mtdAbandoned ?? 0}</td>
+      <div style={{ maxHeight: 380, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+          <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)' }}>
+            <tr style={{ textAlign: 'left', color: 'var(--muted)', fontSize: 11, letterSpacing: 0.5 }}>
+              <th style={{ padding: '6px 8px' }}>Hour</th>
+              {queues.map(q => (
+                <th key={q.id} style={{ padding: '6px 8px', textAlign: 'right' }}>{q.name || q.id}</th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-      {!hasMtd && (
-        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
-          Poller hasn't pushed month-to-date fields yet.
-        </div>
-      )}
+          </thead>
+          <tbody>
+            {buckets.map((bucket, i) => (
+              <tr key={bucket} style={{ borderTop: '1px solid var(--border)' }}>
+                <td style={{ padding: '4px 8px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>{fmtHourEst(bucket)}</td>
+                {queues.map(q => {
+                  const cell = q.hourly?.[i];
+                  return (
+                    <td key={q.id} style={{ padding: '4px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                      {cell?.avgWait != null
+                        ? <span>{fmtWait(cell.avgWait)}<span style={{ color: 'var(--muted)', marginLeft: 4, fontSize: 10 }}>({cell.answered})</span></span>
+                        : <span style={{ color: 'var(--muted)' }}>—</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ marginTop: 6, fontSize: 10, color: 'var(--muted)' }}>
+        (count of answered calls per hour in parentheses)
+      </div>
     </div>
   );
 }
@@ -288,7 +296,7 @@ export default function AdminDashboard() {
 
         {/* Phone / DID column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <Card title="Mitel Queues — MTD">
+          <Card title="Mitel Queues — Avg Ring Time (24h)">
             <MitelQueues queueStats={mitelQueues} />
           </Card>
           <Card title="Available DIDs">
