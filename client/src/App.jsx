@@ -6,6 +6,7 @@ import Sidebar from './components/layout/Sidebar';
 import Topbar from './components/layout/Topbar';
 import Toast from './components/layout/Toast';
 import StatusBoard from './modules/StatusBoard';
+import AdminDashboard from './modules/AdminDashboard';
 import SmsModule from './modules/SmsModule';
 import SlackWorkflows from './modules/SlackWorkflows';
 import AgentBoard from './modules/AgentBoard';
@@ -51,6 +52,7 @@ function DashboardInner({ user, defaultModule }) {
   const isNewsletter = hasRole('super_admin', 'newsletter_contributor');
 
   const moduleMap = {
+    'admin-dashboard':  isOps     ? <AdminDashboard />          : null,
     status:             isOps     ? <StatusBoard />             : null,
     sms:                isOps     ? <SmsModule />               : null,
     slack:              isOps     ? <SlackWorkflows />           : null,

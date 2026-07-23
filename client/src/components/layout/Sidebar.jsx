@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../api';
 
 const ALL_NAV_ITEMS = [
+  { id: 'admin-dashboard',  icon: '🛡️', label: 'Admin Dashboard',                  roles: ['super_admin', 'call_center_ops'], section: 'Operations'    },
   { id: 'status',           icon: '📊', label: 'Status Board',    statusDot: true, roles: ['super_admin', 'call_center_ops'], section: 'Operations'    },
   { id: 'sms',              icon: '📱', label: 'SMS Messaging',                    roles: ['super_admin', 'call_center_ops'], section: 'Operations'    },
   { id: 'slack',            icon: '💬', label: 'Slack Workflows',                  roles: ['super_admin', 'call_center_ops'], section: 'Operations'    },

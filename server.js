@@ -4254,6 +4254,90 @@ async function hydrateCancellationCompanies(rows) {
   return rows;
 }
 
+// ─── ChargeOver outstanding balances (AL + RS) ────────────────────────────────
+// Aggregates active-overdue subscriptions and joins to the customer record.
+// Cached 60s to keep the admin dashboard cheap.
+const chargeoverOutstandingCache = { data: null, expires: 0 };
+
+async function fetchTenantOutstanding(tenant) {
+  const cfg = CHARGEOVER_TENANTS[tenant];
+  if (!cfg?.url || !cfg?.auth) return { count: 0, totalOverdue: 0, customers: [], configured: false };
+
+  const subs = [];
+  let offset = 0;
+  const pageSize = 100;
+  while (true) {
+    let batch;
+    try {
+      batch = await chargeoverGet(tenant, '/package', {
+        where: 'package_status_str:EQUALS:active-overdue',
+        limit: pageSize,
+        offset,
+      }) || [];
+    } catch (e) {
+      console.warn(`[co-outstanding:${tenant}] page ${offset} failed: ${e.message}`);
+      break;
+    }
+    if (!batch.length) break;
+    subs.push(...batch);
+    offset += pageSize;
+    if (batch.length < pageSize) break;
+    if (offset > 2000) break; // safety
+  }
+
+  const customerIds = [...new Set(subs.map(s => s.customer_id).filter(Boolean))];
+  const companyById = new Map();
+  const adminById   = new Map();
+  const emailById   = new Map();
+  const urlById     = new Map();
+  for (let i = 0; i < customerIds.length; i += 10) {
+    await Promise.all(customerIds.slice(i, i + 10).map(async id => {
+      try {
+        const r = await chargeoverGet(tenant, `/customer/${id}`);
+        const c = Array.isArray(r) ? r[0] : r;
+        if (!c) return;
+        companyById.set(id, c.company || null);
+        adminById.set(id, c.admin_name || null);
+        emailById.set(id, c.superuser_email || c.email || null);
+        urlById.set(id, c.url_self || null);
+      } catch (e) { /* skip */ }
+    }));
+  }
+
+  const customers = subs.map(s => ({
+    customerId:    s.customer_id,
+    company:       companyById.get(s.customer_id) || null,
+    email:         emailById.get(s.customer_id) || null,
+    admin:         adminById.get(s.customer_id) || null,
+    daysOverdue:   s.days_overdue ?? 0,
+    amountOverdue: s.amount_overdue ?? 0,
+    planTier:      s.custom_2 || null,
+    url:           urlById.get(s.customer_id) || null,
+  })).sort((a, b) => (b.amountOverdue || 0) - (a.amountOverdue || 0));
+
+  const totalOverdue = customers.reduce((sum, c) => sum + (Number(c.amountOverdue) || 0), 0);
+  return { count: customers.length, totalOverdue, customers, configured: true };
+}
+
+app.get('/api/chargeover/outstanding', requireRole('super_admin', 'call_center_ops'), async (req, res) => {
+  try {
+    if (chargeoverOutstandingCache.data && chargeoverOutstandingCache.expires > Date.now()) {
+      return res.json(chargeoverOutstandingCache.data);
+    }
+    const [AL, RS] = await Promise.all([
+      fetchTenantOutstanding('AL'),
+      fetchTenantOutstanding('RS'),
+    ]);
+    const payload = { AL, RS, generatedAt: new Date().toISOString() };
+    chargeoverOutstandingCache.data    = payload;
+    chargeoverOutstandingCache.expires = Date.now() + 60_000;
+    res.json(payload);
+  } catch (e) {
+    console.error('[chargeover-outstanding]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/farewell-insights
 //   ?from=YYYY-MM-DD&to=YYYY-MM-DD
 //   &compareFrom=YYYY-MM-DD&compareTo=YYYY-MM-DD
