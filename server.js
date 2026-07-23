@@ -1141,11 +1141,11 @@ app.get('/api/monday/support-tasks', async (req, res) => {
       cursor = page?.cursor || null;
     } while (cursor);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+    // Day-boundary comparisons use YYYY-MM-DD strings in America/New_York
+    // (the Monday.com workspace timezone) to avoid Date-parsing timezone drift.
+    // task.dueDate is dateCol.text — "YYYY-MM-DD" or "YYYY-MM-DD HH:MM" in EST.
     const todayEST = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-    const DONE_PHRASES = ['done', 'complete', 'closed', "won't fix", 'cancelled', 'resolved', 'send zendesk'];
+    const DONE_PHRASES = ['done', 'complete', 'closed', "won't fix", 'cancelled', 'resolved', 'send zendesk', 'send tech'];
 
     const allMapped = allItems.map(item => {
       const statusCol   = item.column_values?.find(c => c.id === 'color_mkxwxqsx');
@@ -1215,16 +1215,16 @@ app.get('/api/monday/support-tasks', async (req, res) => {
       const statusLow = (task.status || '').toLowerCase();
       if (statusLow === 'overdue') return true;
       if (!task.dueDate) return false;
-      const due = new Date(task.dueDate); due.setHours(0, 0, 0, 0);
-      return !isNaN(due) && due < today;
+      const dueDay = String(task.dueDate).split(' ')[0]; // "YYYY-MM-DD"
+      return /^\d{4}-\d{2}-\d{2}$/.test(dueDay) && dueDay < todayEST;
     });
 
     const upcoming = mapped.filter(task => {
       if (!task.dueDate) {
         return (task.status || '').toLowerCase() === 'due';
       }
-      const due = new Date(task.dueDate); due.setHours(0, 0, 0, 0);
-      return !isNaN(due) && due >= today && due < tomorrow;
+      const dueDay = String(task.dueDate).split(' ')[0];
+      return /^\d{4}-\d{2}-\d{2}$/.test(dueDay) && dueDay === todayEST;
     });
 
     res.json({ tasks: overdue, overdue, upcoming, completedToday });
