@@ -290,7 +290,7 @@ export default function AdminDashboard() {
           {outstandingError && <div style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 8 }}>Error: {outstandingError}</div>}
           <div style={{ display: 'grid', gap: 16 }}>
             <OutstandingTenant label="AL — Answering Legal"  tenant={outstanding?.AL} />
-            <OutstandingTenant label="RS — Reliable Service" tenant={outstanding?.RS} />
+            <OutstandingTenant label="RS — Ring Savvy" tenant={outstanding?.RS} />
           </div>
         </Card>
 
