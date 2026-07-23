@@ -32,7 +32,11 @@ export function AppProvider({ children }) {
 
   const addLog = useCallback((msg, type = 'info') => {
     const entry = {
-      time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' }),
+      time: new Date().toLocaleString('en-US', {
+        month: 'short', day: 'numeric',
+        hour: 'numeric', minute: '2-digit', second: '2-digit',
+        hour12: true, timeZone: 'America/New_York',
+      }) + ' EST',
       user: user?.name || '',
       msg,
       type: type || 'info',

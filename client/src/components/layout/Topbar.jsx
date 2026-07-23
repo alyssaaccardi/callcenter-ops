@@ -66,6 +66,7 @@ export default function Topbar() {
   const firstName = user?.name?.split(' ')[0] || '';
   const estTime = useClock('America/New_York');
   const bzTime  = useClock('America/Belize');
+  const jmTime  = useClock('America/Jamaica');
 
   const allOp = status ? (
     // status.savvyPhone?.state !== 'DOWN' && // RESERVED - SAVVY PHONE
@@ -97,6 +98,11 @@ export default function Topbar() {
               <div className="dual-clock-entry">
                 <span className="dual-clock-label">BZ</span>
                 <span className="dual-clock-time">{bzTime}</span>
+              </div>
+              <div className="dual-clock-sep" />
+              <div className="dual-clock-entry">
+                <span className="dual-clock-label">JM</span>
+                <span className="dual-clock-time">{jmTime}</span>
               </div>
             </>
           )}

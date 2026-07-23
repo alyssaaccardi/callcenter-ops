@@ -308,6 +308,16 @@ function saveLog(entries) {
   fs.writeFileSync(LOG_FILE, JSON.stringify(entries));
 }
 
+// EST timestamp used across all activity-log entries — includes date so
+// entries older than "today" are still recognizable.
+function activityLogTimestamp() {
+  return new Date().toLocaleString('en-US', {
+    month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', second: '2-digit',
+    hour12: true, timeZone: 'America/New_York',
+  }) + ' EST';
+}
+
 let activityLog = loadLog();
 
 app.get('/api/activity-log', requireAuth, (req, res) => {
@@ -318,7 +328,7 @@ app.post('/api/activity-log', requireAuth, (req, res) => {
   const { msg, type, user } = req.body;
   if (!msg) return res.status(400).json({ error: 'msg required' });
   const entry = {
-    time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' }),
+    time: activityLogTimestamp(),
     user: user || req.user?.name || '',
     userPicture: req.user?.picture || '',
     msg,
@@ -516,7 +526,7 @@ function saveWorkflows(wfs) {
 
 function auditWorkflow(msg, userName, userPicture) {
   const entry = {
-    time: new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York' }),
+    time: activityLogTimestamp(),
     user: userName || '',
     userPicture: userPicture || '',
     msg,
