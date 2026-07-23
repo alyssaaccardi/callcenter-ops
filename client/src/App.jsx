@@ -49,10 +49,11 @@ function DashboardInner({ user, defaultModule }) {
   const isSupport  = hasRole('super_admin', 'support');
   const isTech     = hasRole('super_admin', 'tech');
   const isAuditor  = hasRole('super_admin', 'zendesk_auditor');
+  const isAnalytics = hasRole('super_admin', 'call_center_ops', 'zendesk_auditor'); // gates the Analytics section (Admin Dashboard + Farewell Reporter — tied together)
   const isNewsletter = hasRole('super_admin', 'newsletter_contributor');
 
   const moduleMap = {
-    'admin-dashboard':  isOps     ? <AdminDashboard />          : null,
+    'admin-dashboard':  isAnalytics ? <AdminDashboard />        : null,
     status:             isOps     ? <StatusBoard />             : null,
     sms:                isOps     ? <SmsModule />               : null,
     slack:              isOps     ? <SlackWorkflows />           : null,
@@ -67,7 +68,7 @@ function DashboardInner({ user, defaultModule }) {
     'staff-broadcast':  isOps ? <StaffBroadcast /> : null,
     settings:           (user?.role === 'super_admin' || user?.role === 'call_center_ops') ? <Settings /> : null,
     'user-management':  user?.role === 'super_admin' ? <UserManagementModule /> : null,
-    'zendesk-auditor':  isAuditor ? <ZendeskAuditor /> : null,
+    'zendesk-auditor':  isAnalytics ? <ZendeskAuditor /> : null,
     'ring-leader':      isNewsletter ? <RingLeader /> : null,
   };
 

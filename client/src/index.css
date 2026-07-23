@@ -904,3 +904,6 @@ body.dark .tag-teal { background: rgba(0,201,177,0.12); color: var(--teal); }
 body.dark .code-snippet { background: #070d18; color: var(--teal); }
 .alert-type-row { background: rgba(255,255,255,0.5); border: 1px solid rgba(168,85,247,0.15); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
 body.dark .alert-type-row { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.08); }
+.quality-row { transition: background 0.12s; }
+.quality-row:hover { background: rgba(26,111,232,0.06); }
+body.dark .quality-row:hover { background: rgba(26,111,232,0.12); }

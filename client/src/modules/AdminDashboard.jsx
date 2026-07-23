@@ -226,10 +226,11 @@ function QualityPanel({ data, loading, period, onPeriodChange }) {
               {csat.good ?? 0} good · <span style={{ color: (csat.bad || 0) > 0 ? 'var(--danger)' : 'inherit' }}>{csat.bad ?? 0} bad</span>
             </div>
           </div>
-          {(csat.recentComments || []).length > 0 && (
-            <div style={{ marginTop: 10, maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
-              {csat.recentComments.map(c => (
+          {(csat.ratedTickets || []).length > 0 && (
+            <div style={{ marginTop: 10, maxHeight: 240, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
+              {csat.ratedTickets.map(c => (
                 <a key={c.ticketId} href={c.link} target="_blank" rel="noreferrer"
+                   className="quality-row"
                    style={{ display: 'block', padding: '6px 8px', borderTop: '1px solid var(--border)', textDecoration: 'none', color: 'inherit', fontSize: 12 }}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <span style={{
@@ -237,16 +238,20 @@ function QualityPanel({ data, loading, period, onPeriodChange }) {
                       background: c.score === 'good' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
                       color: c.score === 'good' ? '#166534' : '#991b1b',
                     }}>{c.score}</span>
-                    <span style={{ fontWeight: 600 }}>#{c.ticketId}</span>
-                    <span style={{ color: 'var(--muted)' }}>{c.requester}</span>
+                    <span style={{ fontWeight: 600, color: 'var(--royal)' }}>#{c.ticketId}</span>
+                    {c.requester && <span style={{ color: 'var(--muted)' }}>{c.requester}</span>}
+                    <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: 10 }}>↗</span>
                   </div>
-                  <div style={{ marginTop: 2, fontSize: 11, color: 'var(--text)' }}>{c.comment}</div>
+                  <div style={{ marginTop: 2, fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.subject}</div>
+                  {c.comment && (
+                    <div style={{ marginTop: 2, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>“{c.comment}”</div>
+                  )}
                 </a>
               ))}
             </div>
           )}
-          {(csat.recentComments || []).length === 0 && csat.total > 0 && (
-            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>No comments left this period.</div>
+          {(csat.ratedTickets || []).length === 0 && csat.total > 0 && (
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>No rated tickets returned for this period.</div>
           )}
         </div>
 
@@ -260,11 +265,16 @@ function QualityPanel({ data, loading, period, onPeriodChange }) {
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>tickets breached</div>
           </div>
           {(sla.tickets || []).length > 0 && (
-            <div style={{ marginTop: 10, maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
+            <div style={{ marginTop: 10, maxHeight: 240, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
               {sla.tickets.map(t => (
                 <a key={t.id} href={t.link} target="_blank" rel="noreferrer"
+                   className="quality-row"
                    style={{ display: 'block', padding: '6px 8px', borderTop: '1px solid var(--border)', textDecoration: 'none', color: 'inherit', fontSize: 12 }}>
-                  <div><span style={{ fontWeight: 600 }}>#{t.id}</span> <span style={{ color: 'var(--muted)', fontSize: 10 }}>{t.status}</span></div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--royal)' }}>#{t.id}</span>
+                    <span style={{ color: 'var(--muted)', fontSize: 10 }}>{t.status}</span>
+                    <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: 10 }}>↗</span>
+                  </div>
                   <div style={{ fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.subject}</div>
                 </a>
               ))}

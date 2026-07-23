@@ -1490,7 +1490,7 @@ function resolvePeriodStart(period) {
 // SLA breach counts for a period. 2-minute cache per period key.
 const qualityCache = new Map(); // period → { data, expires }
 
-app.get('/api/zendesk/quality', requireRole('super_admin', 'call_center_ops'), async (req, res) => {
+app.get('/api/zendesk/quality', requireRole('super_admin', 'call_center_ops', 'zendesk_auditor'), async (req, res) => {
   const period = req.query.period || 'this-week';
   const cached = qualityCache.get(period);
   if (cached && cached.expires > Date.now()) return res.json(cached.data);
@@ -1505,22 +1505,50 @@ app.get('/api/zendesk/quality', requireRole('super_admin', 'call_center_ops'), a
     const startDay = start.toISOString().slice(0, 10);
     const startTs  = Math.floor(start.getTime() / 1000);
 
-    // Aggregate counts via search (fast — one API call each)
-    const [goodCountRes, badCountRes, slaCountRes, slaListRes] = await Promise.all([
-      axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket satisfaction:good created>${startDay}` } }),
-      axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket satisfaction:bad created>${startDay}` } }),
-      axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket sla_breach:true created>${startDay}` } }).catch(() => null),
-      axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket sla_breach:true created>${startDay}`, sort_by: 'created_at', sort_order: 'desc', per_page: 10 } }).catch(() => null),
+    // Fetch full ticket lists (up to per_page=100) so each satisfaction rating
+    // includes subject + status for click-through, plus counts in the same call.
+    const [goodRes, badRes, slaRes, ratingsRes] = await Promise.all([
+      axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket satisfaction:good created>${startDay}`, sort_by: 'created_at', sort_order: 'desc', per_page: 100 } }),
+      axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket satisfaction:bad created>${startDay}`,  sort_by: 'created_at', sort_order: 'desc', per_page: 100 } }),
+      axios.get(`${base}/search.json`, { headers, params: { query: `type:ticket sla_breach:true created>${startDay}`,   sort_by: 'created_at', sort_order: 'desc', per_page: 25  } }).catch(() => null),
+      axios.get(`${base}/satisfaction_ratings.json?sort_order=desc&per_page=100&start_time=${startTs}`, { headers }).catch(() => null),
     ]);
 
-    const good = goodCountRes.data?.count || 0;
-    const bad  = badCountRes.data?.count  || 0;
+    const good = goodRes.data?.count || 0;
+    const bad  = badRes.data?.count  || 0;
     const total = good + bad;
     const pct   = total > 0 ? Math.round((good / total) * 1000) / 10 : null;
 
-    const slaSupported   = !!(slaCountRes && slaListRes);
-    const slaTotal       = slaCountRes?.data?.count || 0;
-    const slaTickets = (slaListRes?.data?.results || []).slice(0, 10).map(t => ({
+    // Merge tickets with rating comments/requester so each row has full context.
+    const ratingByTicket = new Map();
+    for (const r of (ratingsRes?.data?.satisfaction_ratings || [])) {
+      if (r.score === 'unoffered') continue;
+      ratingByTicket.set(r.ticket_id, {
+        comment:   r.comment || '',
+        requester: r.requester?.name || '',
+        ratedAt:   r.created_at,
+      });
+    }
+    function toRatingRow(t, score) {
+      const r = ratingByTicket.get(t.id) || {};
+      return {
+        ticketId:  t.id,
+        subject:   t.subject,
+        status:    t.status,
+        score,
+        comment:   r.comment || '',
+        requester: r.requester || '',
+        createdAt: t.created_at,
+        link:      `https://${sub}.zendesk.com/agent/tickets/${t.id}`,
+      };
+    }
+    const badRows  = (badRes.data?.results  || []).map(t => toRatingRow(t, 'bad'));
+    const goodRows = (goodRes.data?.results || []).map(t => toRatingRow(t, 'good'));
+    const ratedTickets = [...badRows, ...goodRows].slice(0, 40);
+
+    const slaSupported = !!slaRes;
+    const slaTotal     = slaRes?.data?.count || 0;
+    const slaTickets   = (slaRes?.data?.results || []).slice(0, 25).map(t => ({
       id:        t.id,
       subject:   t.subject,
       status:    t.status,
@@ -1528,27 +1556,10 @@ app.get('/api/zendesk/quality', requireRole('super_admin', 'call_center_ops'), a
       link:      `https://${sub}.zendesk.com/agent/tickets/${t.id}`,
     }));
 
-    // Recent CSAT comments — pull the top few bad + good with comments for context
-    const commentsRes = await axios.get(
-      `${base}/satisfaction_ratings.json?sort_order=desc&per_page=25&start_time=${startTs}`,
-      { headers }
-    ).catch(() => null);
-    const recentComments = (commentsRes?.data?.satisfaction_ratings || [])
-      .filter(r => r.comment && r.comment.trim() && r.score !== 'unoffered')
-      .slice(0, 8)
-      .map(r => ({
-        score:     r.score,
-        comment:   r.comment,
-        requester: r.requester?.name || '',
-        ticketId:  r.ticket_id,
-        createdAt: r.created_at,
-        link:      `https://${sub}.zendesk.com/agent/tickets/${r.ticket_id}`,
-      }));
-
     const payload = {
       period,
       rangeStart: startDay,
-      csat: { good, bad, total, pct, recentComments },
+      csat: { good, bad, total, pct, ratedTickets },
       sla:  { supported: slaSupported, totalBreaches: slaTotal, tickets: slaTickets },
       generatedAt: new Date().toISOString(),
     };
@@ -4010,12 +4021,12 @@ async function runAuditJob(jobId, rows) {
   setTimeout(() => auditorJobs.delete(jobId), 2 * 60 * 60 * 1000);
 }
 
-app.get('/api/zendesk-auditor/categories', requireRole('super_admin', 'zendesk_auditor'), (req, res) => {
+app.get('/api/zendesk-auditor/categories', requireRole('super_admin', 'call_center_ops', 'zendesk_auditor'), (req, res) => {
   res.json({ categories: AUDITOR_CATEGORIES });
 });
 
 // Single-customer lookup — same logic as batch, returns directly with CSAT pulse
-app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'zendesk_auditor'), async (req, res) => {
+app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'call_center_ops', 'zendesk_auditor'), async (req, res) => {
   // Normalize a domain input like "@ezdivorce.com", "https://www.ezdivorce.com/",
   // "www.EZDivorce.com", or a full email "hi@ezdivorce.com" down to "ezdivorce.com".
   function sanitizeDomain(raw) {
@@ -4433,7 +4444,7 @@ async function fetchTenantOutstanding(tenant) {
   return { count: customers.length, totalOverdue, customers, configured: true };
 }
 
-app.get('/api/chargeover/outstanding', requireRole('super_admin', 'call_center_ops'), async (req, res) => {
+app.get('/api/chargeover/outstanding', requireRole('super_admin', 'call_center_ops', 'zendesk_auditor'), async (req, res) => {
   try {
     if (chargeoverOutstandingCache.data && chargeoverOutstandingCache.expires > Date.now()) {
       return res.json(chargeoverOutstandingCache.data);
@@ -4458,7 +4469,7 @@ app.get('/api/chargeover/outstanding', requireRole('super_admin', 'call_center_o
 //   &tenant=AL|RS|BOTH   (default BOTH)
 //   &source=chargeover|ai|agree   (default chargeover)
 //   &drilldown=<category>   (optional — return customer list for that bucket)
-app.get('/api/farewell-insights', requireRole('super_admin', 'zendesk_auditor'), async (req, res) => {
+app.get('/api/farewell-insights', requireRole('super_admin', 'call_center_ops', 'zendesk_auditor'), async (req, res) => {
   try {
     const from        = String(req.query.from || '').slice(0, 10);
     const to          = String(req.query.to || '').slice(0, 10);
@@ -4570,7 +4581,7 @@ app.get('/api/farewell-insights', requireRole('super_admin', 'zendesk_auditor'),
 });
 
 // POST /api/farewell-insights/narrative — Gemini 2-sentence summary
-app.post('/api/farewell-insights/narrative', requireRole('super_admin', 'zendesk_auditor'), async (req, res) => {
+app.post('/api/farewell-insights/narrative', requireRole('super_admin', 'call_center_ops', 'zendesk_auditor'), async (req, res) => {
   try {
     if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'Gemini not configured' });
     const { current, compare, deltas, disagreements, source } = req.body || {};
@@ -4605,7 +4616,7 @@ Write just the two sentences, no preamble.`;
   }
 });
 
-app.post('/api/zendesk-auditor/run', requireRole('super_admin', 'zendesk_auditor'), auditorUpload.single('file'), (req, res) => {
+app.post('/api/zendesk-auditor/run', requireRole('super_admin', 'call_center_ops', 'zendesk_auditor'), auditorUpload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
   let rows;
@@ -4632,7 +4643,7 @@ app.post('/api/zendesk-auditor/run', requireRole('super_admin', 'zendesk_auditor
   res.json({ jobId, total: rows.length });
 });
 
-app.get('/api/zendesk-auditor/stream/:jobId', requireRole('super_admin', 'zendesk_auditor'), (req, res) => {
+app.get('/api/zendesk-auditor/stream/:jobId', requireRole('super_admin', 'call_center_ops', 'zendesk_auditor'), (req, res) => {
   const { jobId } = req.params;
   const job = auditorJobs.get(jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -4668,7 +4679,7 @@ app.get('/api/zendesk-auditor/stream/:jobId', requireRole('super_admin', 'zendes
   req.on('close', () => clearInterval(interval));
 });
 
-app.get('/api/zendesk-auditor/results/:jobId', requireRole('super_admin', 'zendesk_auditor'), (req, res) => {
+app.get('/api/zendesk-auditor/results/:jobId', requireRole('super_admin', 'call_center_ops', 'zendesk_auditor'), (req, res) => {
   const { jobId } = req.params;
   const job = auditorJobs.get(jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });

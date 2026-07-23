@@ -4,7 +4,6 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../api';
 
 const ALL_NAV_ITEMS = [
-  { id: 'admin-dashboard',  icon: '🛡️', label: 'Admin Dashboard',                  roles: ['super_admin', 'call_center_ops'], section: 'Operations'    },
   { id: 'status',           icon: '📊', label: 'Status Board',    statusDot: true, roles: ['super_admin', 'call_center_ops'], section: 'Operations'    },
   { id: 'sms',              icon: '📱', label: 'SMS Messaging',                    roles: ['super_admin', 'call_center_ops'], section: 'Operations'    },
   { id: 'slack',            icon: '💬', label: 'Slack Workflows',                  roles: ['super_admin', 'call_center_ops'], section: 'Operations'    },
@@ -19,7 +18,8 @@ const ALL_NAV_ITEMS = [
   { id: 'tech-leaderboard', icon: '🏆', label: 'Team Leaderboard', roles: ['super_admin', 'tech'], section: 'Tech'           },
   { id: 'app-portal',       icon: '🌐', label: 'App Portal',       roles: ['super_admin', 'tech'], section: 'Tech'           },
   { id: 'user-management',  icon: '👥', label: 'User Management',  roles: ['super_admin'],                          section: 'Administration' },
-  { id: 'zendesk-auditor', icon: '🔎', label: 'The Farewell Reporter', roles: ['super_admin', 'zendesk_auditor'], section: 'Analytics'      },
+  { id: 'admin-dashboard',  icon: '🛡️', label: 'Admin Dashboard',                    roles: ['super_admin', 'call_center_ops', 'zendesk_auditor'], section: 'Analytics'      },
+  { id: 'zendesk-auditor', icon: '🔎', label: 'The Farewell Reporter',              roles: ['super_admin', 'call_center_ops', 'zendesk_auditor'], section: 'Analytics'      },
   { id: 'ring-leader',      icon: '🛎️', label: 'The Ring Leader',  roles: ['super_admin', 'newsletter_contributor'], section: 'Newsletter'    },
 ];
 
