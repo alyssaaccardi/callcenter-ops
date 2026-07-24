@@ -1274,8 +1274,8 @@ app.get('/api/monday/trainees', tvOrRole('super_admin', 'call_center_ops', 'zend
   const apiKey = process.env.MONDAY_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'Monday.com credentials not configured' });
   const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
-  // Status, Day 1, Day 2, Independent Start Date
-  const itemFields = `id name updated_at column_values(ids: ["color_mksx4rsq","date_mksy9mn9","date_mksyez12","date_mksxxran"]) { id text }`;
+  // Status, Team, Day 1, Day 2, Independent Start Date
+  const itemFields = `id name updated_at column_values(ids: ["color_mksx4rsq","dropdown_mksxj4z6","date_mksy9mn9","date_mksyez12","date_mksxxran"]) { id text }`;
 
   try {
     const allItems = [];
@@ -1299,6 +1299,7 @@ app.get('/api/monday/trainees', tvOrRole('super_admin', 'call_center_ops', 'zend
     const trainees = allItems.map(item => {
       const cols = Object.fromEntries((item.column_values || []).map(c => [c.id, c.text || '']));
       const status               = cols['color_mksx4rsq'] || '';
+      const team                 = cols['dropdown_mksxj4z6'] || '';
       const day1Date             = cols['date_mksy9mn9']  || '';
       const day2Date             = cols['date_mksyez12']  || '';
       const independentStartDate = cols['date_mksxxran']  || '';
@@ -1310,6 +1311,7 @@ app.get('/api/monday/trainees', tvOrRole('super_admin', 'call_center_ops', 'zend
         id:                   item.id,
         name:                 item.name,
         status,
+        team,
         day1Date,
         day2Date,
         independentStartDate,

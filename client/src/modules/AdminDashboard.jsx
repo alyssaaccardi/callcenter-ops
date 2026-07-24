@@ -250,14 +250,19 @@ function DidChips({ didCounts, hubspotDids }) {
 function TraineesCard({ trainees }) {
   if (!trainees) return <div style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</div>;
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const cutoff = (() => {
+    const d = new Date(); d.setDate(d.getDate() - 14);
+    return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  })();
   const active = (trainees.activeTrainees || [])
     .map(t => {
       const dates = [t.day1Date, t.day2Date].filter(Boolean);
+      if (dates.length === 0) return null;
       const upcoming = dates.filter(d => d >= today).sort();
-      const nextDate = upcoming[0] || (dates.length ? dates.sort()[dates.length - 1] : null);
+      const nextDate = upcoming[0] || dates.sort()[dates.length - 1];
       return { ...t, nextDate };
     })
-    .filter(t => t.nextDate)
+    .filter(t => t && t.nextDate && t.nextDate >= cutoff)
     .sort((a, b) => (a.nextDate || '').localeCompare(b.nextDate || ''))
     .slice(0, 8);
   return (
@@ -285,8 +290,11 @@ function TraineesCard({ trainees }) {
           className="quality-row"
           style={{ display: 'block', padding: '6px 4px', borderTop: '1px solid var(--border)', fontSize: 12, textDecoration: 'none', color: 'inherit' }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-            <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{t.name}</span>
+            {t.team && (
+              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'rgba(163,230,53,0.15)', color: '#65a30d', fontWeight: 600 }}>{t.team}</span>
+            )}
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t.status}</span>
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>

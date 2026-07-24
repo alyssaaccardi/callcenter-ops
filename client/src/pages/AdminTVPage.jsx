@@ -512,27 +512,28 @@ function fmtDayShort(iso) {
 
 function TraineesPanel({ trainees }) {
   if (!trainees) return <Panel title="Upcoming Trainees"><div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14 }}>Loading…</div></Panel>;
-  // Show trainees whose more-recent training date is within the recent past or upcoming.
+  // Show trainees whose most-recent training date is within the last 14 days
+  // or upcoming — anything older is stale (never got status updated).
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const cutoff = (() => {
+    const d = new Date(); d.setDate(d.getDate() - 14);
+    return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  })();
   const rows = (trainees.activeTrainees || [])
-    .map(t => ({
-      ...t,
-      // nextDate = whichever training date is closest to today (upcoming preferred over past)
-      nextDate: (() => {
-        const dates = [t.day1Date, t.day2Date].filter(Boolean);
-        if (dates.length === 0) return null;
-        const upcoming = dates.filter(d => d >= today).sort();
-        if (upcoming.length) return upcoming[0];
-        return dates.sort()[dates.length - 1]; // most recent past date
-      })(),
-    }))
-    .filter(t => t.nextDate)
+    .map(t => {
+      const dates = [t.day1Date, t.day2Date].filter(Boolean);
+      if (dates.length === 0) return null;
+      const upcoming = dates.filter(d => d >= today).sort();
+      const nextDate = upcoming.length ? upcoming[0] : dates.sort()[dates.length - 1];
+      return { ...t, nextDate };
+    })
+    .filter(t => t && t.nextDate && t.nextDate >= cutoff)
     .sort((a, b) => (a.nextDate || '').localeCompare(b.nextDate || ''))
     .slice(0, 10);
   return (
-    <Panel title={`Upcoming Trainees (${(trainees.activeTrainees || []).length})`}>
+    <Panel title={`Upcoming Trainees (${rows.length})`}>
       {rows.length === 0 && (
-        <div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14, fontStyle: 'italic' }}>No active trainees</div>
+        <div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14, fontStyle: 'italic' }}>No trainees in the current window</div>
       )}
       {rows.map(t => (
         <a
@@ -543,16 +544,22 @@ function TraineesPanel({ trainees }) {
           className="tv-clickable"
           style={{
             display: 'grid',
-            gridTemplateColumns: '2fr 1fr 1fr',
+            gridTemplateColumns: '1.6fr 0.7fr 0.8fr 1fr',
             columnGap: 8,
             padding: '7px 8px',
             borderTop: '1px solid rgba(255,255,255,0.06)',
             fontSize: 13,
             textDecoration: 'none',
             color: 'inherit',
+            alignItems: 'center',
           }}
         >
           <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
+          <div>
+            {t.team && (
+              <span style={{ fontSize: 10, padding: '1px 8px', borderRadius: 4, background: 'rgba(163,230,53,0.15)', color: '#a3e635', fontWeight: 600 }}>{t.team}</span>
+            )}
+          </div>
           <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.6)' }}>{t.status}</div>
           <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
             {t.day1Date && <span>D1 {fmtDayShort(t.day1Date)}</span>}
