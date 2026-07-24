@@ -187,7 +187,7 @@ export default function AdminTVPage() {
   useEffect(() => {
     if (!tokenValid) return;
     const run = () => get('/api/monday/agents').then(r => {
-      const agents = r.data?.agents || [];
+      const agents = (r.data?.agents || []).filter(a => (a.callCenter || '').toLowerCase().includes('mitel'));
       const here    = agents.filter(a => a.status === 'Here').length;
       const standby = agents.filter(a => a.status === 'On Standby').length;
       setAgentCounts({ here, standby, total: here + standby });
@@ -271,7 +271,7 @@ export default function AdminTVPage() {
           href="https://ringsavvy.chargeover.com/admin"
         />
         <KpiTile
-          label="Agents Logged In"
+          label="Mitel Agents Logged In"
           value={agentCounts?.total ?? '—'}
           sub={agentCounts ? `${agentCounts.here} here · ${agentCounts.standby} standby` : ''}
           valueColor="#38bdf8"

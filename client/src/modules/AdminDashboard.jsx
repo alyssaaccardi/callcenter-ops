@@ -433,7 +433,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     const fetch = () => api.get('/api/monday/agents').then(r => {
-      const agents = r.data?.agents || [];
+      const agents = (r.data?.agents || []).filter(a => (a.callCenter || '').toLowerCase().includes('mitel'));
       const here    = agents.filter(a => a.status === 'Here').length;
       const standby = agents.filter(a => a.status === 'On Standby').length;
       setAgentCounts({ here, standby, total: here + standby });
@@ -460,7 +460,7 @@ export default function AdminDashboard() {
               }}
             >
               <span>👥</span>
-              <span>{agentCounts.total} logged in</span>
+              <span>{agentCounts.total} Mitel agents</span>
               <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>
                 ({agentCounts.here} here · {agentCounts.standby} standby)
               </span>
