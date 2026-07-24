@@ -66,8 +66,12 @@ export default function Scriptor() {
     setError(''); setResult(null); setText('');
     setFile(f);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(f.type === 'application/pdf' ? null : URL.createObjectURL(f));
+    // Preview URL is used for images AND PDFs (rendered in an iframe) so the
+    // source is always visible next to the transcription for eyeballing.
+    setPreviewUrl(URL.createObjectURL(f));
   }, [previewUrl]);
+
+  const isPdf = file?.type === 'application/pdf' || /\.pdf$/i.test(file?.name || '');
 
   const onDrop = useCallback((e) => {
     e.preventDefault(); setDragOver(false);
@@ -299,35 +303,43 @@ export default function Scriptor() {
                   title="Remove"
                 >×</button>
               </div>
-              {previewUrl ? (
-                <img
+              {isPdf ? (
+                <iframe
                   src={previewUrl}
-                  alt="preview"
+                  title="PDF preview"
                   style={{
-                    width: '100%', maxHeight: 440, objectFit: 'contain',
+                    width: '100%', height: '72vh', minHeight: 480,
                     borderRadius: T.radiusSm, background: T.surfaceAlt,
                     border: `1px solid ${T.border}`,
                   }}
                 />
               ) : (
-                <div style={{
-                  padding: '60px 0', textAlign: 'center', color: T.textMuted, fontSize: 14,
-                  background: T.surfaceAlt, borderRadius: T.radiusSm, border: `1px solid ${T.border}`,
-                }}>
-                  PDF ready to transcribe
-                </div>
+                <a href={previewUrl} target="_blank" rel="noreferrer" title="Open full size">
+                  <img
+                    src={previewUrl}
+                    alt="preview"
+                    style={{
+                      display: 'block', width: '100%',
+                      maxHeight: '72vh', objectFit: 'contain',
+                      borderRadius: T.radiusSm, background: T.surfaceAlt,
+                      border: `1px solid ${T.border}`, cursor: 'zoom-in',
+                    }}
+                  />
+                </a>
               )}
-              <button
-                onClick={transcribe}
-                disabled={loading}
-                style={{
-                  ...primaryBtn,
-                  width: '100%', marginTop: 14, padding: '13px', fontSize: 14,
-                  opacity: loading ? 0.5 : 1, cursor: loading ? 'default' : 'pointer',
-                }}
-              >
-                {loading ? 'Reading the handwriting…' : 'Transcribe'}
-              </button>
+              {!result && (
+                <button
+                  onClick={transcribe}
+                  disabled={loading}
+                  style={{
+                    ...primaryBtn,
+                    width: '100%', marginTop: 14, padding: '13px', fontSize: 14,
+                    opacity: loading ? 0.5 : 1, cursor: loading ? 'default' : 'pointer',
+                  }}
+                >
+                  {loading ? 'Reading the handwriting…' : 'Transcribe'}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -353,14 +365,21 @@ export default function Scriptor() {
                 <textarea
                   value={text}
                   onChange={e => setText(e.target.value)}
-                  rows={16}
-                  style={{ ...textareaStyle, fontSize: 14, lineHeight: 1.65 }}
+                  style={{
+                    ...textareaStyle, fontSize: 14, lineHeight: 1.65,
+                    // Match the preview's height so the two columns feel
+                    // balanced for side-by-side eyeballing.
+                    height: '72vh', minHeight: 480,
+                  }}
                 />
                 <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
                   <button onClick={copyText} style={ghostBtn}>{copied ? 'Copied' : 'Copy'}</button>
                   <button onClick={downloadTxt} style={ghostBtn}>Download .txt</button>
                   <button onClick={downloadDocx} disabled={docxLoading} style={ghostBtn}>
                     {docxLoading ? 'Building…' : 'Download .docx'}
+                  </button>
+                  <button onClick={transcribe} style={ghostBtn} title="Run the transcription again on the same file">
+                    Re-transcribe
                   </button>
                 </div>
 
