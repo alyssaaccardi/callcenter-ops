@@ -304,15 +304,39 @@ export default function Scriptor() {
                 >×</button>
               </div>
               {isPdf ? (
-                <iframe
-                  src={previewUrl}
-                  title="PDF preview"
-                  style={{
-                    width: '100%', height: '72vh', minHeight: 480,
-                    borderRadius: T.radiusSm, background: T.surfaceAlt,
-                    border: `1px solid ${T.border}`,
-                  }}
-                />
+                <div>
+                  {/* <object> handles blob-URL PDFs more reliably than <iframe>
+                      in Chrome; the fallback children render if the browser
+                      refuses to embed it inline. */}
+                  <object
+                    data={previewUrl}
+                    type="application/pdf"
+                    style={{
+                      display: 'block', width: '100%', height: '72vh', minHeight: 480,
+                      borderRadius: T.radiusSm, background: T.surfaceAlt,
+                      border: `1px solid ${T.border}`,
+                    }}
+                  >
+                    <div style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                      gap: 10, height: '72vh', minHeight: 480,
+                      background: T.surfaceAlt, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+                      padding: 24, textAlign: 'center',
+                    }}>
+                      <div style={{ fontSize: 14, color: T.textMuted }}>
+                        Your browser can't preview this PDF inline.
+                      </div>
+                      <a href={previewUrl} target="_blank" rel="noreferrer" style={{ ...ghostBtn, textDecoration: 'none' }}>
+                        Open PDF in new tab
+                      </a>
+                    </div>
+                  </object>
+                  <div style={{ marginTop: 8, fontSize: 12, color: T.textMuted, textAlign: 'right' }}>
+                    <a href={previewUrl} target="_blank" rel="noreferrer" style={{ color: T.textMuted }}>
+                      Open PDF in new tab ↗
+                    </a>
+                  </div>
+                </div>
               ) : (
                 <a href={previewUrl} target="_blank" rel="noreferrer" title="Open full size">
                   <img
