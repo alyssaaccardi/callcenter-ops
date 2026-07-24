@@ -1259,6 +1259,86 @@ app.get('/api/monday/support-tasks', async (req, res) => {
   }
 });
 
+// ─── Monday.com: Trainees / New Hires ────────────────────────────────────────
+// Reads the Training board (id 9606096056). Returns everyone on the board
+// with parsed status, Day 1/2 training dates, and Independent Start Date, plus
+// a derived flag `isNewHireThisMonth` for anyone with status "Passed QC Shifts"
+// whose Independent Start Date (or Day 2 fallback) lands in the current EST
+// calendar month. Cached 60s in memory.
+const TRAINEE_BOARD_ID = process.env.MONDAY_TRAINEE_BOARD_ID || '9606096056';
+const traineeCache = { data: null, expires: 0 };
+
+app.get('/api/monday/trainees', tvOrRole('super_admin', 'call_center_ops', 'zendesk_auditor'), async (req, res) => {
+  if (traineeCache.data && traineeCache.expires > Date.now()) return res.json(traineeCache.data);
+
+  const apiKey = process.env.MONDAY_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'Monday.com credentials not configured' });
+  const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
+  // Status, Day 1, Day 2, Independent Start Date
+  const itemFields = `id name updated_at column_values(ids: ["color_mksx4rsq","date_mksy9mn9","date_mksyez12","date_mksxxran"]) { id text }`;
+
+  try {
+    const allItems = [];
+    let cursor = null;
+    do {
+      const query = cursor
+        ? `query { next_items_page(limit: 200, cursor: "${cursor}") { cursor items { ${itemFields} } } }`
+        : `query { boards(ids: [${TRAINEE_BOARD_ID}]) { items_page(limit: 200) { cursor items { ${itemFields} } } } }`;
+      const response = await axios.post('https://api.monday.com/v2', { query }, { headers });
+      if (response.data?.errors) throw new Error(response.data.errors[0]?.message);
+      const page = cursor
+        ? response.data?.data?.next_items_page
+        : response.data?.data?.boards?.[0]?.items_page;
+      allItems.push(...(page?.items || []));
+      cursor = page?.cursor || null;
+    } while (cursor);
+
+    // Current EST calendar month, as YYYY-MM
+    const monthKey = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }).slice(0, 7);
+
+    const trainees = allItems.map(item => {
+      const cols = Object.fromEntries((item.column_values || []).map(c => [c.id, c.text || '']));
+      const status               = cols['color_mksx4rsq'] || '';
+      const day1Date             = cols['date_mksy9mn9']  || '';
+      const day2Date             = cols['date_mksyez12']  || '';
+      const independentStartDate = cols['date_mksxxran']  || '';
+      // "New hire this month" = passed QC AND their independent-start (or Day 2 fallback) is in this month
+      const passedQC = /passed qc/i.test(status);
+      const effectiveDate = independentStartDate || day2Date;
+      const isNewHireThisMonth = passedQC && effectiveDate && effectiveDate.slice(0, 7) === monthKey;
+      return {
+        id:                   item.id,
+        name:                 item.name,
+        status,
+        day1Date,
+        day2Date,
+        independentStartDate,
+        isNewHireThisMonth,
+        link:                 `https://answeringlegal-unit.monday.com/boards/${TRAINEE_BOARD_ID}/pulses/${item.id}`,
+      };
+    });
+
+    const newHiresThisMonth = trainees.filter(t => t.isNewHireThisMonth);
+    // Active trainees: still moving through the pipeline (not failed, not yet passed).
+    const activeTrainees = trainees.filter(t => /training day/i.test(t.status));
+
+    const payload = {
+      boardId:            TRAINEE_BOARD_ID,
+      monthKey,
+      totalOnBoard:       trainees.length,
+      activeTrainees,
+      newHiresThisMonth,
+      generatedAt:        new Date().toISOString(),
+    };
+    traineeCache.data    = payload;
+    traineeCache.expires = Date.now() + 60_000;
+    res.json(payload);
+  } catch (err) {
+    console.error('[monday-trainees]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch trainees', details: err.message });
+  }
+});
+
 // ─── Monday.com: Support Task Board Stats ────────────────────────────────────
 app.get('/api/monday/support-stats', async (req, res) => {
   const token = req.query.t;

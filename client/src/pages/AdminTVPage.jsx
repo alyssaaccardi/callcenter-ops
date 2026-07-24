@@ -13,6 +13,7 @@ const QUALITY_POLL_MS    = 120_000;
 const AGENTS_POLL_MS     = 60_000;
 const STATUS_POLL_MS     = 15_000;
 const DIDS_POLL_MS       = 30_000;
+const TRAINEES_POLL_MS   = 60_000;
 const CLOCK_MS           = 1000;
 
 function withToken(url, token) {
@@ -140,6 +141,7 @@ export default function AdminTVPage() {
   const [supportTasks, setSupportTasks] = useState(null);
   const [quality, setQuality]         = useState(null);
   const [agentCounts, setAgentCounts] = useState(null);
+  const [trainees, setTrainees]       = useState(null);
 
   // Validate token once so we can show a proper error if the URL is stale.
   useEffect(() => {
@@ -205,6 +207,11 @@ export default function AdminTVPage() {
       setAgentCounts({ here, standby, total: here + standby });
     }).catch(() => {});
     run(); const id = setInterval(run, AGENTS_POLL_MS); return () => clearInterval(id);
+  }, [tokenValid, get]);
+  useEffect(() => {
+    if (!tokenValid) return;
+    const run = () => get('/api/monday/trainees').then(r => setTrainees(r.data)).catch(() => {});
+    run(); const id = setInterval(run, TRAINEES_POLL_MS); return () => clearInterval(id);
   }, [tokenValid, get]);
 
   if (tokenValid === false) {
@@ -275,8 +282,8 @@ export default function AdminTVPage() {
         <StatusPill label="DIDs"          state={status?.didStatus} />
       </div>
 
-      {/* KPI row — 6 tiles, each clickable to its source */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 14, marginBottom: 18 }}>
+      {/* KPI row — 7 tiles, each clickable to its source */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 12, marginBottom: 18 }}>
         <KpiTile
           label="AL Outstanding"
           value={usd(outstanding?.AL?.totalOverdue || 0)}
@@ -322,6 +329,13 @@ export default function AdminTVPage() {
           danger={overdueTasks.length > 0}
           valueColor={overdueTasks.length === 0 ? '#4ade80' : undefined}
           href="https://answeringlegal-unit.monday.com/boards/18358060875"
+        />
+        <KpiTile
+          label="New Hires · This Month"
+          value={trainees?.newHiresThisMonth?.length ?? '—'}
+          sub={trainees?.activeTrainees ? `${trainees.activeTrainees.length} in training` : ''}
+          valueColor="#a3e635"
+          href="https://answeringlegal-unit.monday.com/boards/9606096056"
         />
       </div>
 
@@ -472,6 +486,118 @@ export default function AdminTVPage() {
           )}
         </Panel>
       </div>
+
+      {/* Trainees row — active trainees sorted by nearest date + new hires this month */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: 14, marginTop: 18 }}>
+        <TraineesPanel trainees={trainees} />
+        <NewHiresPanel trainees={trainees} />
+      </div>
     </div>
+  );
+}
+
+function fmtDayShort(iso) {
+  if (!iso) return '—';
+  // "YYYY-MM-DD" — construct a local date so timezone parsing doesn't shift it
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  const dt = new Date(y, m - 1, d);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((dt - today) / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Tomorrow';
+  if (diffDays === -1) return 'Yesterday';
+  return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function TraineesPanel({ trainees }) {
+  if (!trainees) return <Panel title="Upcoming Trainees"><div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14 }}>Loading…</div></Panel>;
+  // Show trainees whose more-recent training date is within the recent past or upcoming.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const rows = (trainees.activeTrainees || [])
+    .map(t => ({
+      ...t,
+      // nextDate = whichever training date is closest to today (upcoming preferred over past)
+      nextDate: (() => {
+        const dates = [t.day1Date, t.day2Date].filter(Boolean);
+        if (dates.length === 0) return null;
+        const upcoming = dates.filter(d => d >= today).sort();
+        if (upcoming.length) return upcoming[0];
+        return dates.sort()[dates.length - 1]; // most recent past date
+      })(),
+    }))
+    .filter(t => t.nextDate)
+    .sort((a, b) => (a.nextDate || '').localeCompare(b.nextDate || ''))
+    .slice(0, 10);
+  return (
+    <Panel title={`Upcoming Trainees (${(trainees.activeTrainees || []).length})`}>
+      {rows.length === 0 && (
+        <div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14, fontStyle: 'italic' }}>No active trainees</div>
+      )}
+      {rows.map(t => (
+        <a
+          key={t.id}
+          href={t.link}
+          target="_blank"
+          rel="noreferrer"
+          className="tv-clickable"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '2fr 1fr 1fr',
+            columnGap: 8,
+            padding: '7px 8px',
+            borderTop: '1px solid rgba(255,255,255,0.06)',
+            fontSize: 13,
+            textDecoration: 'none',
+            color: 'inherit',
+          }}
+        >
+          <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
+          <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.6)' }}>{t.status}</div>
+          <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+            {t.day1Date && <span>D1 {fmtDayShort(t.day1Date)}</span>}
+            {t.day2Date && <span style={{ marginLeft: 6, color: 'rgba(240,244,255,0.6)' }}>D2 {fmtDayShort(t.day2Date)}</span>}
+          </div>
+        </a>
+      ))}
+    </Panel>
+  );
+}
+
+function NewHiresPanel({ trainees }) {
+  if (!trainees) return <Panel title="New Hires This Month"><div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14 }}>Loading…</div></Panel>;
+  const rows = (trainees.newHiresThisMonth || [])
+    .slice()
+    .sort((a, b) => (b.independentStartDate || b.day2Date || '').localeCompare(a.independentStartDate || a.day2Date || ''));
+  return (
+    <Panel title={`New Hires · ${trainees.monthKey || ''} (${rows.length})`}>
+      {rows.length === 0 && (
+        <div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14, fontStyle: 'italic' }}>None yet this month</div>
+      )}
+      {rows.map(t => (
+        <a
+          key={t.id}
+          href={t.link}
+          target="_blank"
+          rel="noreferrer"
+          className="tv-clickable"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '2fr 1fr',
+            columnGap: 8,
+            padding: '7px 8px',
+            borderTop: '1px solid rgba(255,255,255,0.06)',
+            fontSize: 13,
+            textDecoration: 'none',
+            color: 'inherit',
+          }}
+        >
+          <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
+          <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: 12, color: 'rgba(240,244,255,0.7)' }}>
+            {t.independentStartDate ? `Start ${fmtDayShort(t.independentStartDate)}` : (t.day2Date ? `D2 ${fmtDayShort(t.day2Date)}` : '')}
+          </div>
+        </a>
+      ))}
+    </Panel>
   );
 }

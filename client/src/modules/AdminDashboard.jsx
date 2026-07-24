@@ -7,6 +7,7 @@ const MITEL_POLL_MS      = 10_000;
 const TASKS_POLL_MS      = 30_000;
 const QUALITY_POLL_MS    = 120_000;
 const AGENTS_POLL_MS     = 60_000;
+const TRAINEES_POLL_MS   = 60_000;
 
 function usd(n) {
   const v = Number(n) || 0;
@@ -222,20 +223,77 @@ function MitelQueues({ queueStats }) {
   );
 }
 
-function DidCounts({ didCounts, hubspotDids }) {
-  const cells = [
-    { label: 'Mitel Active',    val: didCounts?.mitel,             hint: 'Bandwidth' },
-    { label: 'DID Pool',        val: hubspotDids?.didPool,         hint: 'HubSpot (available)' },
-    { label: 'Instant DIDs',    val: hubspotDids?.instantDidPool,  hint: 'HubSpot' },
+function DidChips({ didCounts, hubspotDids }) {
+  const chips = [
+    { label: 'Mitel DIDs',    val: didCounts?.mitel,             color: '#7c3aed' },
+    { label: 'DID Pool',      val: hubspotDids?.didPool,         color: '#7c3aed' },
+    { label: 'Instant',       val: hubspotDids?.instantDidPool,  color: '#7c3aed' },
   ];
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
-      {cells.map(c => (
-        <div key={c.label} style={{ padding: 10, borderRadius: 10, background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.15)' }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 0.5 }}>{c.label.toUpperCase()}</div>
-          <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{c.val ?? '—'}</div>
-          <div style={{ fontSize: 10, color: 'var(--muted)' }}>{c.hint}</div>
+    <>
+      {chips.map(c => (
+        <div key={c.label} style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '6px 12px', borderRadius: 999,
+          background: 'rgba(124,58,237,0.10)',
+          border: '1px solid rgba(124,58,237,0.30)',
+          fontSize: 13, fontWeight: 600, color: c.color,
+        }}>
+          <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>{c.label}</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{c.val ?? '—'}</span>
         </div>
+      ))}
+    </>
+  );
+}
+
+function TraineesCard({ trainees }) {
+  if (!trainees) return <div style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</div>;
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const active = (trainees.activeTrainees || [])
+    .map(t => {
+      const dates = [t.day1Date, t.day2Date].filter(Boolean);
+      const upcoming = dates.filter(d => d >= today).sort();
+      const nextDate = upcoming[0] || (dates.length ? dates.sort()[dates.length - 1] : null);
+      return { ...t, nextDate };
+    })
+    .filter(t => t.nextDate)
+    .sort((a, b) => (a.nextDate || '').localeCompare(b.nextDate || ''))
+    .slice(0, 8);
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
+        <div style={{ flex: 1, padding: '8px 10px', borderRadius: 8, background: 'rgba(163,230,53,0.08)', border: '1px solid rgba(163,230,53,0.25)' }}>
+          <div style={{ fontSize: 10, letterSpacing: 0.5, color: 'var(--muted)' }}>NEW HIRES · {trainees.monthKey || ''}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#65a30d', fontVariantNumeric: 'tabular-nums' }}>{(trainees.newHiresThisMonth || []).length}</div>
+        </div>
+        <div style={{ flex: 1, padding: '8px 10px', borderRadius: 8, background: 'rgba(26,111,232,0.08)', border: '1px solid rgba(26,111,232,0.25)' }}>
+          <div style={{ fontSize: 10, letterSpacing: 0.5, color: 'var(--muted)' }}>IN TRAINING</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--royal)', fontVariantNumeric: 'tabular-nums' }}>{(trainees.activeTrainees || []).length}</div>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 0.5, marginBottom: 4 }}>UPCOMING</div>
+      {active.length === 0 && (
+        <div style={{ color: 'var(--muted)', fontSize: 12, fontStyle: 'italic' }}>None on the calendar</div>
+      )}
+      {active.map(t => (
+        <a
+          key={t.id}
+          href={t.link}
+          target="_blank"
+          rel="noreferrer"
+          className="quality-row"
+          style={{ display: 'block', padding: '6px 4px', borderTop: '1px solid var(--border)', fontSize: 12, textDecoration: 'none', color: 'inherit' }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t.status}</span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+            {t.day1Date && <span>D1 {t.day1Date}</span>}
+            {t.day2Date && <span style={{ marginLeft: 8 }}>D2 {t.day2Date}</span>}
+          </div>
+        </a>
       ))}
     </div>
   );
@@ -383,6 +441,7 @@ export default function AdminDashboard() {
   const [quality, setQuality] = useState(null);
   const [qualityLoading, setQualityLoading] = useState(false);
   const [agentCounts, setAgentCounts] = useState(null); // { here, standby, total }
+  const [trainees, setTrainees]       = useState(null);
 
   const fetchOutstanding = useCallback(async () => {
     setOutstandingLoading(true);
@@ -443,6 +502,13 @@ export default function AdminDashboard() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    const fetch = () => api.get('/api/monday/trainees').then(r => setTrainees(r.data)).catch(() => {});
+    fetch();
+    const id = setInterval(fetch, TRAINEES_POLL_MS);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <div style={{ padding: 20, maxWidth: 1600, margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 16, flexWrap: 'wrap' }}>
@@ -470,6 +536,7 @@ export default function AdminDashboard() {
           <StatusChip label="Mobile App"    state={status?.mobileApp?.state} />
           <StatusChip label="Integrations"  state={status?.integrations?.state} />
           <StatusChip label="DIDs"          state={status?.didStatus} />
+          <DidChips didCounts={didCounts} hubspotDids={hubspotDids} />
         </div>
       </div>
 
@@ -495,13 +562,13 @@ export default function AdminDashboard() {
           </div>
         </Card>
 
-        {/* Phone / DID column */}
+        {/* Phone + Trainees column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Card title="Mitel Queues — Avg Ring Time (24h)">
             <MitelQueues queueStats={mitelQueues} />
           </Card>
-          <Card title="Available DIDs">
-            <DidCounts didCounts={didCounts} hubspotDids={hubspotDids} />
+          <Card title="Trainees">
+            <TraineesCard trainees={trainees} />
           </Card>
         </div>
 
