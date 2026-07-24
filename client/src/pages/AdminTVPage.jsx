@@ -76,24 +76,34 @@ function StatusPill({ label, state }) {
   );
 }
 
-function KpiTile({ label, value, sub, valueColor, danger, warn }) {
+function KpiTile({ label, value, sub, valueColor, danger, warn, href }) {
   const color = danger ? '#f87171' : warn ? '#fbbf24' : (valueColor || '#f0f4ff');
-  return (
-    <div style={{
-      background: 'rgba(255,255,255,0.03)',
-      border: '1px solid rgba(255,255,255,0.08)',
-      borderRadius: 14,
-      padding: '18px 22px',
-      minHeight: 128,
-      display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-    }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(240,244,255,0.55)', letterSpacing: 0.8, textTransform: 'uppercase' }}>{label}</div>
+  const inner = (
+    <>
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(240,244,255,0.55)', letterSpacing: 0.8, textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>{label}</span>
+        {href && <span style={{ color: 'rgba(240,244,255,0.35)', fontSize: 12 }}>↗</span>}
+      </div>
       <div>
         <div style={{ fontSize: 44, fontWeight: 800, color, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
         {sub && <div style={{ marginTop: 6, fontSize: 13, color: 'rgba(240,244,255,0.6)' }}>{sub}</div>}
       </div>
-    </div>
+    </>
   );
+  const style = {
+    background: 'rgba(255,255,255,0.03)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: 14,
+    padding: '18px 22px',
+    minHeight: 128,
+    display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+    textDecoration: 'none', color: 'inherit',
+    transition: 'background 0.12s, border-color 0.12s',
+  };
+  if (href) return (
+    <a href={href} target="_blank" rel="noreferrer" className="tv-clickable" style={style}>{inner}</a>
+  );
+  return <div style={style}>{inner}</div>;
 }
 
 function Panel({ title, children, right }) {
@@ -244,19 +254,28 @@ export default function AdminTVPage() {
         <StatusPill label="DIDs"          state={status?.didStatus} />
       </div>
 
-      {/* KPI row — 5 tiles */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 14, marginBottom: 18 }}>
+      {/* KPI row — 6 tiles, each clickable to its source */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 14, marginBottom: 18 }}>
         <KpiTile
-          label="Total Outstanding"
-          value={usd(totalOverdue)}
-          sub={`${totalOverdueCount} accounts · AL ${usd(outstanding?.AL?.totalOverdue || 0)} · RS ${usd(outstanding?.RS?.totalOverdue || 0)}`}
-          danger={totalOverdue > 0}
+          label="AL Outstanding"
+          value={usd(outstanding?.AL?.totalOverdue || 0)}
+          sub={`${outstanding?.AL?.count || 0} accounts`}
+          danger={(outstanding?.AL?.totalOverdue || 0) > 0}
+          href="https://answeringlegal.chargeover.com/admin"
+        />
+        <KpiTile
+          label="RS Outstanding"
+          value={usd(outstanding?.RS?.totalOverdue || 0)}
+          sub={`${outstanding?.RS?.count || 0} accounts`}
+          danger={(outstanding?.RS?.totalOverdue || 0) > 0}
+          href="https://ringsavvy.chargeover.com/admin"
         />
         <KpiTile
           label="Agents Logged In"
           value={agentCounts?.total ?? '—'}
           sub={agentCounts ? `${agentCounts.here} here · ${agentCounts.standby} standby` : ''}
           valueColor="#38bdf8"
+          href="https://answeringlegal-unit.monday.com/boards/7846367704"
         />
         <KpiTile
           label="CSAT · This Month"
@@ -265,6 +284,7 @@ export default function AdminTVPage() {
           warn={csat.pct != null && csat.pct < 95 && csat.pct >= 85}
           danger={csat.pct != null && csat.pct < 85}
           valueColor={csat.pct != null && csat.pct >= 95 ? '#4ade80' : undefined}
+          href="https://answeringlegalhelp.zendesk.com/agent/reporting"
         />
         <KpiTile
           label="SLA Breaches · This Month"
@@ -272,6 +292,7 @@ export default function AdminTVPage() {
           sub={(sla.totalBreaches || 0) === 0 ? 'clean' : 'needs attention'}
           danger={(sla.totalBreaches || 0) > 0}
           valueColor={(sla.totalBreaches || 0) === 0 ? '#4ade80' : undefined}
+          href="https://answeringlegalhelp.zendesk.com/agent/search/1?type=ticket&q=type%3Aticket%20sla_breach%3Atrue"
         />
         <KpiTile
           label="Overdue Support Tasks"
@@ -279,6 +300,7 @@ export default function AdminTVPage() {
           sub={`${upcomingTasks.length} due today`}
           danger={overdueTasks.length > 0}
           valueColor={overdueTasks.length === 0 ? '#4ade80' : undefined}
+          href="https://answeringlegal-unit.monday.com/boards/18358060875"
         />
       </div>
 
@@ -345,32 +367,44 @@ export default function AdminTVPage() {
           {allOutstanding.length === 0 ? (
             <div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14, fontStyle: 'italic' }}>None outstanding</div>
           ) : (
-            <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', color: 'rgba(240,244,255,0.5)', fontSize: 11, letterSpacing: 0.6, textTransform: 'uppercase' }}>
-                  <th style={{ padding: '6px 8px' }}>Company</th>
-                  <th style={{ padding: '6px 8px' }}>Tenant</th>
-                  <th style={{ padding: '6px 8px', textAlign: 'right' }}>Days</th>
-                  <th style={{ padding: '6px 8px', textAlign: 'right' }}>Overdue</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allOutstanding.slice(0, 8).map(c => (
-                  <tr key={`${c.tenant}-${c.customerId}`} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                    <td style={{ padding: '7px 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 320 }}>{c.company || `#${c.customerId}`}</td>
-                    <td style={{ padding: '7px 8px' }}>
-                      <span style={{
-                        fontSize: 11, padding: '1px 8px', borderRadius: 4,
-                        background: c.tenant === 'AL' ? 'rgba(26,111,232,0.2)' : 'rgba(0,201,177,0.2)',
-                        color: c.tenant === 'AL' ? '#60a5fa' : '#5eead4',
-                      }}>{c.tenant}</span>
-                    </td>
-                    <td style={{ padding: '7px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{c.daysOverdue}</td>
-                    <td style={{ padding: '7px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#f87171', fontWeight: 700 }}>{usd(c.amountOverdue)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: '3fr 0.6fr 0.6fr 1fr', columnGap: 8, padding: '6px 8px', color: 'rgba(240,244,255,0.5)', fontSize: 11, letterSpacing: 0.6, textTransform: 'uppercase' }}>
+                <div>Company</div>
+                <div>Tenant</div>
+                <div style={{ textAlign: 'right' }}>Days</div>
+                <div style={{ textAlign: 'right' }}>Overdue</div>
+              </div>
+              {allOutstanding.slice(0, 8).map(c => (
+                <a
+                  key={`${c.tenant}-${c.customerId}`}
+                  href={c.url || '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="tv-clickable"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '3fr 0.6fr 0.6fr 1fr',
+                    columnGap: 8,
+                    padding: '7px 8px',
+                    borderTop: '1px solid rgba(255,255,255,0.06)',
+                    fontSize: 14,
+                    textDecoration: 'none',
+                    color: 'inherit',
+                  }}
+                >
+                  <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.company || `#${c.customerId}`}</div>
+                  <div>
+                    <span style={{
+                      fontSize: 11, padding: '1px 8px', borderRadius: 4,
+                      background: c.tenant === 'AL' ? 'rgba(26,111,232,0.2)' : 'rgba(0,201,177,0.2)',
+                      color: c.tenant === 'AL' ? '#60a5fa' : '#5eead4',
+                    }}>{c.tenant}</span>
+                  </div>
+                  <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{c.daysOverdue}</div>
+                  <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#f87171', fontWeight: 700 }}>{usd(c.amountOverdue)}</div>
+                </a>
+              ))}
+            </div>
           )}
         </Panel>
 
@@ -379,25 +413,39 @@ export default function AdminTVPage() {
             <div style={{ color: '#4ade80', fontSize: 14, fontStyle: 'italic' }}>All clear — no overdue or upcoming tasks</div>
           )}
           {overdueTasks.slice(0, 6).map(t => (
-            <div key={t.id} style={{ padding: '7px 4px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: 13 }}>
+            <a
+              key={t.id}
+              href={t.link || '#'}
+              target="_blank"
+              rel="noreferrer"
+              className="tv-clickable"
+              style={{ display: 'block', padding: '7px 4px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: 13, textDecoration: 'none', color: 'inherit' }}
+            >
               <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
               <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.55)' }}>
                 {t.accountName && <>{t.accountName} · </>}
                 {t.worker || 'unassigned'}
               </div>
-            </div>
+            </a>
           ))}
           {overdueTasks.length === 0 && upcomingTasks.length > 0 && (
             <>
               <div style={{ marginTop: 4, fontSize: 11, color: 'rgba(240,244,255,0.5)', textTransform: 'uppercase', letterSpacing: 0.6 }}>Due today</div>
               {upcomingTasks.slice(0, 6).map(t => (
-                <div key={t.id} style={{ padding: '7px 4px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: 13 }}>
+                <a
+                  key={t.id}
+                  href={t.link || '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="tv-clickable"
+                  style={{ display: 'block', padding: '7px 4px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: 13, textDecoration: 'none', color: 'inherit' }}
+                >
                   <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
                   <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.55)' }}>
                     {t.accountName && <>{t.accountName} · </>}
                     {t.worker || 'unassigned'}
                   </div>
-                </div>
+                </a>
               ))}
             </>
           )}

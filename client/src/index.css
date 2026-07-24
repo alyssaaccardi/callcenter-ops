@@ -907,3 +907,5 @@ body.dark .alert-type-row { background: rgba(255,255,255,0.03); border-color: rg
 .quality-row { transition: background 0.12s; }
 .quality-row:hover { background: rgba(26,111,232,0.06); }
 body.dark .quality-row:hover { background: rgba(26,111,232,0.12); }
+.tv-clickable { cursor: pointer; }
+.tv-clickable:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.2); }
