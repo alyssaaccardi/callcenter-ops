@@ -37,15 +37,34 @@ function RobLogin({ returnTo = '/rob' }) {
 
 // Chrome-less shell: no sidebar, just a slim top bar + the module.
 // Exported so App.jsx can render it at the root for scriptor-only users.
+// Forces a white background so the app's dark-mode CSS vars can't leak in.
 export function RobStoneApp() {
   const { user } = useAuth();
   return (
-    <div style={{ minHeight: '100vh', padding: '20px 24px' }}>
-      <div style={{ maxWidth: 1100, margin: '0 auto 6px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
-        {user?.name && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{user.name}</span>}
+    <div style={{
+      minHeight: '100vh',
+      background: '#ffffff',
+      color: '#0c0a09',
+      padding: '20px 24px 48px',
+    }}>
+      <div style={{
+        maxWidth: 1080, margin: '0 auto 16px',
+        display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 14,
+      }}>
+        {user?.name && (
+          <span style={{ fontSize: 13, color: '#78716c' }}>{user.name}</span>
+        )}
         <button
           onClick={() => { window.location.href = '/auth/logout'; }}
-          style={{ background: 'none', border: '1px solid var(--border, rgba(0,0,0,0.15))', borderRadius: 8, padding: '5px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'var(--text)' }}
+          style={{
+            background: '#ffffff',
+            border: '1px solid #e7e5e4',
+            borderRadius: 999,
+            padding: '7px 14px',
+            fontSize: 13, fontWeight: 500,
+            cursor: 'pointer',
+            color: '#0c0a09',
+          }}
         >
           Sign out
         </button>

@@ -1,10 +1,32 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import api from '../api';
 
-// The Scribe — drop a handwritten note (phone photo or PDF) and get clean,
-// typed text back. Accuracy improves over time via the glossary + corrections.
+// The Rob-osetta Stone — drop a handwritten note (photo or PDF) and get
+// clean, typed text back. Accuracy improves via the glossary + corrections.
 
 const ACCEPT = '.jpg,.jpeg,.png,.heic,.heif,.webp,.pdf,image/*,application/pdf';
+
+// Design tokens — kept local so the /rob shell can't be pulled into the
+// app's dark-mode variables. Everything reads cleanly against white.
+const T = {
+  bg:            '#ffffff',
+  surface:       '#ffffff',
+  surfaceAlt:    '#fafaf9',
+  border:        '#e7e5e4',
+  borderStrong:  '#d6d3d1',
+  text:          '#0c0a09',
+  textMuted:     '#78716c',
+  textFaint:     '#a8a29e',
+  accent:        '#0c0a09',
+  accentInk:     '#ffffff',
+  danger:        '#b91c1c',
+  dangerBg:      '#fef2f2',
+  dangerBorder:  '#fecaca',
+  success:       '#15803d',
+  radius:        12,
+  radiusSm:      8,
+  radiusLg:      16,
+};
 
 function isSupported(f) {
   return /^image\//.test(f.type) || f.type === 'application/pdf' ||
@@ -17,20 +39,18 @@ export default function Scriptor() {
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState(null);     // { text, provider }
-  const [text, setText] = useState('');            // editable transcription
+  const [result, setResult] = useState(null);
+  const [text, setText] = useState('');
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Glossary panel
   const [showGlossary, setShowGlossary] = useState(false);
   const [glossary, setGlossary] = useState('');
   const [glossaryDirty, setGlossaryDirty] = useState(false);
   const [glossarySaved, setGlossarySaved] = useState(false);
   const [corrections, setCorrections] = useState([]);
-
-  // Correction form
   const [corr, setCorr] = useState({ before: '', after: '' });
+  const [docxLoading, setDocxLoading] = useState(false);
 
   useEffect(() => {
     api.get('/api/scriptor/glossary')
@@ -94,7 +114,6 @@ export default function Scriptor() {
     URL.revokeObjectURL(url);
   }
 
-  const [docxLoading, setDocxLoading] = useState(false);
   async function downloadDocx() {
     setDocxLoading(true); setError('');
     try {
@@ -132,83 +151,111 @@ export default function Scriptor() {
   }
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+    <div style={{ maxWidth: 1080, margin: '0 auto', color: T.text }}>
+      {/* Header — brand mark + glossary toggle */}
+      <header style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 20, padding: '8px 4px 28px', borderBottom: `1px solid ${T.border}`, marginBottom: 32,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <img
             src="/rob-osetta-stone.png"
-            alt="The Rob-osetta Stone"
-            style={{ width: 52, height: 52, borderRadius: 10, objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border, rgba(0,0,0,0.1))' }}
+            alt=""
+            style={{ width: 56, height: 56, borderRadius: T.radiusSm, objectFit: 'cover', flexShrink: 0 }}
             onError={e => { e.target.style.display = 'none'; }}
           />
           <div>
-            <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>The Rob-osetta Stone</h1>
-            <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>
-              Decoding Rob's handwriting since 2014. Drop a photo or PDF and get clean, typed text back.
+            <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>
+              The Rob-osetta Stone
+            </h1>
+            <p style={{ color: T.textMuted, margin: '3px 0 0', fontSize: 14, fontWeight: 400 }}>
+              Decoding Rob's handwriting since 2014.
             </p>
           </div>
         </div>
         <button
           onClick={() => setShowGlossary(v => !v)}
-          className="btn"
           style={{
-            padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-            border: '1px solid var(--border, rgba(0,0,0,0.12))', background: showGlossary ? 'var(--accent, #6366f1)' : 'transparent',
-            color: showGlossary ? '#fff' : 'var(--text)', whiteSpace: 'nowrap',
+            padding: '9px 16px', borderRadius: 999, fontSize: 13, fontWeight: 500, cursor: 'pointer',
+            border: `1px solid ${showGlossary ? T.accent : T.border}`,
+            background: showGlossary ? T.accent : T.surface,
+            color: showGlossary ? T.accentInk : T.text, whiteSpace: 'nowrap',
+            transition: 'all 120ms ease',
           }}
         >
-          📖 Glossary{corrections.length ? ` · ${corrections.length}` : ''}
+          Glossary{corrections.length ? ` · ${corrections.length}` : ''}
         </button>
-      </div>
+      </header>
 
       {error && (
-        <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#b91c1c', fontSize: 13, marginBottom: 14 }}>
+        <div style={{
+          padding: '12px 16px', borderRadius: T.radiusSm,
+          background: T.dangerBg, border: `1px solid ${T.dangerBorder}`, color: T.danger,
+          fontSize: 13, marginBottom: 20,
+        }}>
           {error}
         </div>
       )}
 
       {/* Glossary panel */}
       {showGlossary && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 8 }}>
-            Handwriting glossary
-          </div>
-          <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 8px' }}>
-            Notes about the writer's quirks, abbreviations, and recurring names. This is fed to the reader on every transcription — the more you add, the more accurate it gets. This replaces "training a model."
+        <section style={{
+          background: T.surfaceAlt, border: `1px solid ${T.border}`, borderRadius: T.radius,
+          padding: 20, marginBottom: 24,
+        }}>
+          <div style={sectionLabel}>Handwriting glossary</div>
+          <p style={{ fontSize: 13, color: T.textMuted, margin: '0 0 12px', lineHeight: 1.5 }}>
+            Notes about the writer's quirks, abbreviations, and recurring names. This is fed to the reader on every transcription — the more you add, the more accurate it gets.
           </p>
           <textarea
             value={glossary}
             onChange={e => { setGlossary(e.target.value); setGlossaryDirty(true); }}
             rows={7}
-            style={{ width: '100%', fontSize: 13, fontFamily: 'inherit', padding: 10, borderRadius: 8, border: '1px solid var(--border, rgba(0,0,0,0.15))', resize: 'vertical', boxSizing: 'border-box' }}
+            style={{ ...textareaStyle, background: T.surface }}
           />
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
-            <button onClick={saveGlossary} disabled={!glossaryDirty} style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: glossaryDirty ? 'var(--accent, #6366f1)' : 'rgba(107,114,128,0.25)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: glossaryDirty ? 'pointer' : 'default' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 }}>
+            <button
+              onClick={saveGlossary}
+              disabled={!glossaryDirty}
+              style={{
+                ...primaryBtn,
+                opacity: glossaryDirty ? 1 : 0.4,
+                cursor: glossaryDirty ? 'pointer' : 'default',
+              }}
+            >
               Save glossary
             </button>
-            {glossarySaved && <span style={{ fontSize: 12, color: '#15803d', fontWeight: 600 }}>Saved ✓</span>}
+            {glossarySaved && <span style={{ fontSize: 13, color: T.success, fontWeight: 500 }}>Saved</span>}
           </div>
 
           {corrections.length > 0 && (
-            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border, rgba(0,0,0,0.08))' }}>
-              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 6 }}>
-                Learned corrections ({corrections.length})
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
+              <div style={{ ...sectionLabel, marginBottom: 10 }}>
+                Learned corrections · {corrections.length}
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {corrections.slice().reverse().slice(0, 30).map((c, i) => (
-                  <span key={i} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: 'rgba(99,102,241,0.1)', color: 'var(--text)' }}>
-                    <s style={{ color: '#dc2626' }}>{c.before}</s> → <strong>{c.after}</strong>
+                  <span key={i} style={{
+                    fontSize: 12, padding: '4px 10px', borderRadius: 999,
+                    background: T.surface, border: `1px solid ${T.border}`, color: T.text,
+                  }}>
+                    <s style={{ color: T.textFaint }}>{c.before}</s>
+                    <span style={{ color: T.textFaint, margin: '0 6px' }}>→</span>
+                    <strong style={{ fontWeight: 600 }}>{c.after}</strong>
                   </span>
                 ))}
               </div>
             </div>
           )}
-        </div>
+        </section>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: result || loading ? '1fr 1fr' : '1fr', gap: 16, alignItems: 'start' }}>
-        {/* Left: upload / preview */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: result || loading ? '1fr 1fr' : '1fr',
+        gap: 24, alignItems: 'start',
+      }}>
+        {/* Upload / preview */}
         <div>
           {!file ? (
             <div
@@ -217,36 +264,73 @@ export default function Scriptor() {
               onDragLeave={() => setDragOver(false)}
               onClick={() => fileInputRef.current?.click()}
               style={{
-                border: `2px dashed ${dragOver ? 'var(--accent, #6366f1)' : 'var(--border, rgba(0,0,0,0.2))'}`,
-                borderRadius: 12, padding: '48px 24px', textAlign: 'center', cursor: 'pointer',
-                background: dragOver ? 'rgba(99,102,241,0.06)' : 'transparent', transition: 'all 0.15s',
+                border: `1.5px dashed ${dragOver ? T.accent : T.borderStrong}`,
+                borderRadius: T.radiusLg,
+                padding: '72px 32px', textAlign: 'center', cursor: 'pointer',
+                background: dragOver ? T.surfaceAlt : T.surface,
+                transition: 'all 150ms ease',
               }}
             >
               <img
                 src="/rob-osetta-stone.png"
-                alt="The Rob-osetta Stone"
-                style={{ width: 84, height: 84, borderRadius: 12, objectFit: 'cover', marginBottom: 12, filter: dragOver ? 'none' : 'grayscale(0.25) opacity(0.9)', transition: 'filter 0.15s' }}
+                alt=""
+                style={{
+                  width: 128, height: 128, borderRadius: T.radius, objectFit: 'cover', marginBottom: 20,
+                  opacity: dragOver ? 1 : 0.92,
+                  transition: 'all 150ms ease',
+                }}
                 onError={e => { e.target.style.display = 'none'; }}
               />
-              <div style={{ fontSize: 15, fontWeight: 600 }}>Drop Rob's chicken scratch here 🐔</div>
-              <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>or click to browse · JPEG, PNG, HEIC, or PDF · up to 20MB</div>
+              <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>
+                Drop Rob's chicken scratch here
+              </div>
+              <div style={{ fontSize: 13, color: T.textMuted, marginTop: 6 }}>
+                or click to browse · JPEG, PNG, HEIC, or PDF · up to 20MB
+              </div>
               <input ref={fileInputRef} type="file" accept={ACCEPT} style={{ display: 'none' }} onChange={e => handleFile(e.target.files?.[0])} />
             </div>
           ) : (
-            <div className="card">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</div>
-                <button onClick={reset} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--muted)', lineHeight: 1 }} title="Remove">×</button>
+            <div style={cardStyle}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: T.text }}>
+                  {file.name}
+                </div>
+                <button
+                  onClick={reset}
+                  style={{
+                    background: 'transparent', border: `1px solid ${T.border}`, borderRadius: 999,
+                    width: 26, height: 26, cursor: 'pointer', fontSize: 14, color: T.textMuted, lineHeight: 1, padding: 0,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  }}
+                  title="Remove"
+                >×</button>
               </div>
               {previewUrl ? (
-                <img src={previewUrl} alt="preview" style={{ width: '100%', maxHeight: 420, objectFit: 'contain', borderRadius: 8, background: 'rgba(0,0,0,0.03)' }} />
+                <img
+                  src={previewUrl}
+                  alt="preview"
+                  style={{
+                    width: '100%', maxHeight: 440, objectFit: 'contain',
+                    borderRadius: T.radiusSm, background: T.surfaceAlt,
+                    border: `1px solid ${T.border}`,
+                  }}
+                />
               ) : (
-                <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>📄 PDF ready to transcribe</div>
+                <div style={{
+                  padding: '60px 0', textAlign: 'center', color: T.textMuted, fontSize: 14,
+                  background: T.surfaceAlt, borderRadius: T.radiusSm, border: `1px solid ${T.border}`,
+                }}>
+                  PDF ready to transcribe
+                </div>
               )}
               <button
                 onClick={transcribe}
                 disabled={loading}
-                style={{ width: '100%', marginTop: 12, padding: '11px', borderRadius: 8, border: 'none', background: loading ? 'rgba(107,114,128,0.4)' : 'var(--accent, #6366f1)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: loading ? 'default' : 'pointer' }}
+                style={{
+                  ...primaryBtn,
+                  width: '100%', marginTop: 14, padding: '13px', fontSize: 14,
+                  opacity: loading ? 0.5 : 1, cursor: loading ? 'default' : 'pointer',
+                }}
               >
                 {loading ? 'Reading the handwriting…' : 'Transcribe'}
               </button>
@@ -254,19 +338,21 @@ export default function Scriptor() {
           )}
         </div>
 
-        {/* Right: result */}
+        {/* Result */}
         {(loading || result) && (
-          <div className="card">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>
-                Transcription
-              </div>
-              {result?.provider && <span style={{ fontSize: 10, color: 'var(--muted)' }}>{result.provider}</span>}
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <div style={sectionLabel}>Transcription</div>
+              {result?.provider && (
+                <span style={{ fontSize: 11, color: T.textFaint, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                  {result.provider}
+                </span>
+              )}
             </div>
 
             {loading ? (
-              <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>
-                <span className="spinner" style={{ marginRight: 8 }} /> Reading…
+              <div style={{ padding: '80px 0', textAlign: 'center', color: T.textMuted, fontSize: 14 }}>
+                <Spinner /> <span style={{ marginLeft: 10 }}>Reading…</span>
               </div>
             ) : (
               <>
@@ -274,24 +360,35 @@ export default function Scriptor() {
                   value={text}
                   onChange={e => setText(e.target.value)}
                   rows={16}
-                  style={{ width: '100%', fontSize: 14, lineHeight: 1.6, fontFamily: 'inherit', padding: 12, borderRadius: 8, border: '1px solid var(--border, rgba(0,0,0,0.15))', resize: 'vertical', boxSizing: 'border-box' }}
+                  style={{ ...textareaStyle, fontSize: 14, lineHeight: 1.65 }}
                 />
-                <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                  <button onClick={copyText} style={btnStyle}>{copied ? 'Copied ✓' : 'Copy'}</button>
-                  <button onClick={downloadTxt} style={btnStyle}>Download .txt</button>
-                  <button onClick={downloadDocx} disabled={docxLoading} style={btnStyle}>{docxLoading ? 'Building…' : 'Download .docx'}</button>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                  <button onClick={copyText} style={ghostBtn}>{copied ? 'Copied' : 'Copy'}</button>
+                  <button onClick={downloadTxt} style={ghostBtn}>Download .txt</button>
+                  <button onClick={downloadDocx} disabled={docxLoading} style={ghostBtn}>
+                    {docxLoading ? 'Building…' : 'Download .docx'}
+                  </button>
                 </div>
 
-                {/* Teach a correction */}
-                <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border, rgba(0,0,0,0.08))' }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 8 }}>
-                    Fix a misread word (teaches the glossary)
+                <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
+                  <div style={{ ...sectionLabel, marginBottom: 10 }}>
+                    Fix a misread word
                   </div>
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <input value={corr.before} onChange={e => setCorr({ ...corr, before: e.target.value })} placeholder="it read…" style={inputStyle} />
-                    <span style={{ color: 'var(--muted)' }}>→</span>
-                    <input value={corr.after} onChange={e => setCorr({ ...corr, after: e.target.value })} placeholder="should be…" style={inputStyle} />
-                    <button onClick={addCorrection} style={{ ...btnStyle, background: 'var(--accent, #6366f1)', color: '#fff', border: 'none' }}>Save</button>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input
+                      value={corr.before}
+                      onChange={e => setCorr({ ...corr, before: e.target.value })}
+                      placeholder="it read…"
+                      style={inputStyle}
+                    />
+                    <span style={{ color: T.textFaint, fontSize: 14 }}>→</span>
+                    <input
+                      value={corr.after}
+                      onChange={e => setCorr({ ...corr, after: e.target.value })}
+                      placeholder="should be…"
+                      style={inputStyle}
+                    />
+                    <button onClick={addCorrection} style={primaryBtn}>Save</button>
                   </div>
                 </div>
               </>
@@ -300,18 +397,67 @@ export default function Scriptor() {
         )}
       </div>
 
-      <div style={{ textAlign: 'center', marginTop: 28, fontSize: 10, letterSpacing: '0.04em', color: 'var(--muted)', opacity: 0.55 }}>
-        powered by Gallicch Vision™
+      <div style={{
+        textAlign: 'center', marginTop: 48, paddingTop: 20,
+        fontSize: 11, letterSpacing: '0.06em', color: T.textFaint, textTransform: 'uppercase',
+      }}>
+        Powered by Gallicch Vision™
       </div>
     </div>
   );
 }
 
-const btnStyle = {
-  padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-  border: '1px solid var(--border, rgba(0,0,0,0.15))', background: 'transparent', color: 'var(--text)',
+// ─── Shared style objects ────────────────────────────────────────────────────
+const cardStyle = {
+  background: T.surface,
+  border: `1px solid ${T.border}`,
+  borderRadius: T.radius,
+  padding: 20,
 };
+
+const sectionLabel = {
+  fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em',
+  color: T.textMuted,
+};
+
+const primaryBtn = {
+  padding: '9px 18px', borderRadius: 999, fontSize: 13, fontWeight: 500,
+  border: `1px solid ${T.accent}`, background: T.accent, color: T.accentInk,
+  cursor: 'pointer', transition: 'opacity 120ms ease',
+};
+
+const ghostBtn = {
+  padding: '8px 16px', borderRadius: 999, fontSize: 13, fontWeight: 500,
+  border: `1px solid ${T.border}`, background: T.surface, color: T.text,
+  cursor: 'pointer', transition: 'all 120ms ease',
+};
+
 const inputStyle = {
-  flex: '1 1 120px', minWidth: 100, fontSize: 13, padding: '6px 10px', borderRadius: 8,
-  border: '1px solid var(--border, rgba(0,0,0,0.15))', boxSizing: 'border-box',
+  flex: '1 1 140px', minWidth: 120, fontSize: 13,
+  padding: '8px 12px', borderRadius: T.radiusSm,
+  border: `1px solid ${T.border}`, background: T.surface, color: T.text,
+  boxSizing: 'border-box', outline: 'none',
 };
+
+const textareaStyle = {
+  width: '100%', fontSize: 13, fontFamily: 'inherit',
+  padding: 12, borderRadius: T.radiusSm,
+  border: `1px solid ${T.border}`, background: T.surface, color: T.text,
+  resize: 'vertical', boxSizing: 'border-box', outline: 'none',
+};
+
+// Simple spinner (avoids depending on the app's global .spinner class)
+function Spinner() {
+  return (
+    <span
+      style={{
+        display: 'inline-block', width: 14, height: 14,
+        border: `2px solid ${T.border}`, borderTopColor: T.accent,
+        borderRadius: '50%', animation: 'rob-spin 700ms linear infinite',
+        verticalAlign: 'middle',
+      }}
+    >
+      <style>{`@keyframes rob-spin { to { transform: rotate(360deg); } }`}</style>
+    </span>
+  );
+}
