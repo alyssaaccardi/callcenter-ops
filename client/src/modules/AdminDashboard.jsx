@@ -8,6 +8,7 @@ const TASKS_POLL_MS      = 30_000;
 const QUALITY_POLL_MS    = 120_000;
 const AGENTS_POLL_MS     = 60_000;
 const TRAINEES_POLL_MS   = 60_000;
+const INTERVIEWS_POLL_MS = 120_000;
 
 function usd(n) {
   const v = Number(n) || 0;
@@ -450,6 +451,8 @@ export default function AdminDashboard() {
   const [qualityLoading, setQualityLoading] = useState(false);
   const [agentCounts, setAgentCounts] = useState(null); // { here, standby, total }
   const [trainees, setTrainees]       = useState(null);
+  const [interviews, setInterviews]   = useState(null);
+  const [interviewsError, setInterviewsError] = useState(null);
 
   const fetchOutstanding = useCallback(async () => {
     setOutstandingLoading(true);
@@ -514,6 +517,17 @@ export default function AdminDashboard() {
     const fetch = () => api.get('/api/monday/trainees').then(r => setTrainees(r.data)).catch(() => {});
     fetch();
     const id = setInterval(fetch, TRAINEES_POLL_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const fetch = () => api.get('/api/interviews?days=14')
+      .then(r => { setInterviews(r.data); setInterviewsError(null); })
+      .catch(e => setInterviewsError(e.response?.data?.error === 'setup_required'
+        ? e.response.data.message
+        : (e.response?.data?.error || 'Failed to load interviews')));
+    fetch();
+    const id = setInterval(fetch, INTERVIEWS_POLL_MS);
     return () => clearInterval(id);
   }, []);
 
@@ -603,6 +617,82 @@ export default function AdminDashboard() {
           />
         </Card>
       </div>
+
+      <div style={{ marginTop: 16 }}>
+        <Card title="Agent Interviews — Past & Next 14d">
+          <InterviewsCard interviews={interviews} error={interviewsError} />
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function fmtInterviewTime(iso, isAllDay) {
+  if (!iso) return '—';
+  if (isAllDay) {
+    const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', weekday: 'short' }) + ' (all day)';
+  }
+  return new Date(iso).toLocaleString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+    timeZone: 'America/New_York',
+  }) + ' EST';
+}
+
+function InterviewsCard({ interviews, error }) {
+  if (error) return <div style={{ color: 'var(--warn)', fontSize: 12 }}>{error}</div>;
+  if (!interviews) return <div style={{ color: 'var(--muted)', fontSize: 12 }}>Loading…</div>;
+  const now = Date.now();
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      {interviews.teams.map(t => {
+        const upcoming = (t.events || []).filter(e => new Date(e.start).getTime() >= now).slice(0, 5);
+        const past     = (t.events || []).filter(e => new Date(e.start).getTime() <  now).slice(-3).reverse();
+        const teamColor = t.team === 'US' ? 'var(--royal)' : 'var(--teal-dk)';
+        return (
+          <div key={t.team} style={{ padding: 10, borderRadius: 8, background: 'rgba(0,0,0,0.02)', border: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: teamColor, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 6 }}>
+              {t.label} · {upcoming.length} up · {past.length} recent
+            </div>
+            {t.error && <div style={{ fontSize: 11, color: 'var(--danger)', fontStyle: 'italic' }}>{t.error}</div>}
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', marginTop: 4, marginBottom: 2 }}>Upcoming</div>
+            {upcoming.length === 0 && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>None</div>}
+            {upcoming.map(ev => (
+              <a
+                key={ev.id}
+                href={ev.htmlLink || ev.hangout || '#'}
+                target="_blank"
+                rel="noreferrer"
+                className="quality-row"
+                style={{ display: 'block', padding: '4px 6px', borderTop: '1px solid var(--border)', textDecoration: 'none', color: 'inherit', fontSize: 12 }}
+              >
+                <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.title}</div>
+                <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
+              </a>
+            ))}
+            {past.length > 0 && (
+              <>
+                <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', marginTop: 6, marginBottom: 2 }}>Recent</div>
+                {past.map(ev => (
+                  <a
+                    key={ev.id}
+                    href={ev.htmlLink || '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="quality-row"
+                    style={{ display: 'block', padding: '4px 6px', borderTop: '1px solid var(--border)', textDecoration: 'none', color: 'inherit', fontSize: 12, opacity: 0.75 }}
+                  >
+                    <div style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.title}</div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
+                  </a>
+                ))}
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

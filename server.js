@@ -167,7 +167,15 @@ app.get('/api/tv-session/validate', (req, res) => {
 });
 
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
-app.get('/auth/google', authLimiter, passport.authenticate('google', { scope: ['profile', 'email'] }));
+app.get('/auth/google', authLimiter, passport.authenticate('google', {
+  scope: [
+    'profile',
+    'email',
+    'https://www.googleapis.com/auth/calendar.readonly',
+  ],
+  accessType: 'offline',    // returns a refresh_token
+  prompt:     'consent',    // force consent screen so we actually get one
+}));
 
 app.get('/auth/google/callback', authLimiter,
   passport.authenticate('google', { failureRedirect: '/login?error=unauthorized' }),
@@ -1256,6 +1264,108 @@ app.get('/api/monday/support-tasks', async (req, res) => {
   } catch (err) {
     console.error('Monday support tasks error:', err.response?.data || err.message);
     res.status(500).json({ error: 'Failed to fetch support tasks', details: err.message });
+  }
+});
+
+// ─── Google Calendar: Agent Interviews (US + Belize) ─────────────────────────
+// Two calendars: US = group calendar, Belize = user calendar hiringint@... .
+// We use the OAuth refresh token stored on any logged-in user during
+// authentication (offline access) to mint short-lived access tokens
+// server-side; that way both the in-app dash and the TV display can hit
+// this endpoint without the requester needing their own Google session.
+const INTERVIEW_CALENDARS = [
+  { key: 'US',     label: 'US Team',    id: process.env.INTERVIEW_CALENDAR_US     || 'answeringlegal.com_343f4o4tcusdj29ci7b28g3slk@group.calendar.google.com' },
+  { key: 'BELIZE', label: 'Team Belize', id: process.env.INTERVIEW_CALENDAR_BELIZE || 'hiringint@answeringlegal.com' },
+];
+
+const gcalTokenCache = { token: null, expires: 0 };
+
+async function getCalendarAccessToken() {
+  if (gcalTokenCache.token && gcalTokenCache.expires > Date.now() + 30_000) {
+    return gcalTokenCache.token;
+  }
+  // Find any user with a stored google_refresh_token.
+  const usersObj = listUsers();
+  const authorized = Object.values(usersObj).find(u => u.google_refresh_token);
+  if (!authorized) {
+    const err = new Error('No Google refresh token stored yet. An ops user must sign out and back in to grant Calendar scope.');
+    err.code = 'no_refresh_token';
+    throw err;
+  }
+  const resp = await axios.post('https://oauth2.googleapis.com/token', new URLSearchParams({
+    client_id:     process.env.GOOGLE_CLIENT_ID,
+    client_secret: process.env.GOOGLE_CLIENT_SECRET,
+    refresh_token: authorized.google_refresh_token,
+    grant_type:    'refresh_token',
+  }), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 8000 });
+  const token = resp.data?.access_token;
+  const expiresIn = (resp.data?.expires_in || 3600) * 1000;
+  if (!token) throw new Error('Google returned no access_token when refreshing');
+  gcalTokenCache.token   = token;
+  gcalTokenCache.expires = Date.now() + expiresIn;
+  return token;
+}
+
+const interviewCache = { data: null, expires: 0 };
+
+app.get('/api/interviews', tvOrRole('super_admin', 'call_center_ops', 'zendesk_auditor'), async (req, res) => {
+  if (interviewCache.data && interviewCache.expires > Date.now()) return res.json(interviewCache.data);
+
+  const days = Math.min(parseInt(req.query.days) || 14, 90);
+  const now = Date.now();
+  const timeMin = new Date(now - days * 24 * 60 * 60 * 1000).toISOString();
+  const timeMax = new Date(now + days * 24 * 60 * 60 * 1000).toISOString();
+
+  try {
+    const token = await getCalendarAccessToken();
+    const perCal = await Promise.all(INTERVIEW_CALENDARS.map(async cal => {
+      try {
+        const r = await axios.get(
+          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cal.id)}/events`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            params: {
+              timeMin, timeMax,
+              singleEvents: true,
+              orderBy: 'startTime',
+              maxResults: 100,
+              showDeleted: false,
+            },
+            timeout: 8000,
+          }
+        );
+        const events = (r.data?.items || []).map(ev => ({
+          id:       ev.id,
+          title:    ev.summary || '(untitled)',
+          start:    ev.start?.dateTime || ev.start?.date || null,
+          end:      ev.end?.dateTime   || ev.end?.date   || null,
+          isAllDay: !ev.start?.dateTime,
+          hangout:  ev.hangoutLink || ev.conferenceData?.entryPoints?.find(e => e.entryPointType === 'video')?.uri || null,
+          htmlLink: ev.htmlLink || null,
+          location: ev.location || null,
+          status:   ev.status || null,
+        }));
+        return { team: cal.key, label: cal.label, events, error: null };
+      } catch (e) {
+        console.warn(`[interviews:${cal.key}] failed: ${e.response?.status || e.message}`);
+        return { team: cal.key, label: cal.label, events: [], error: e.response?.data?.error?.message || e.message };
+      }
+    }));
+
+    const payload = {
+      windowDays: days,
+      rangeStart: timeMin,
+      rangeEnd:   timeMax,
+      teams:      perCal,
+      generatedAt: new Date().toISOString(),
+    };
+    interviewCache.data    = payload;
+    interviewCache.expires = Date.now() + 120_000;
+    res.json(payload);
+  } catch (err) {
+    if (err.code === 'no_refresh_token') return res.status(503).json({ error: 'setup_required', message: err.message });
+    console.error('[interviews]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch interviews', details: err.response?.data?.error?.message || err.message });
   }
 });
 

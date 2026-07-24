@@ -33,10 +33,18 @@ if (process.env.GOOGLE_CLIENT_ID) {
     if (!record) return done(null, false, { message: 'unauthorized' });
 
     const picture = profile.photos?.[0]?.value || '';
+    let changed = false;
     if (picture && users[email].picture !== picture) {
       users[email].picture = picture;
-      saveUsers(users);
+      changed = true;
     }
+    // Preserve refresh_token — Google only returns it on first consent, so
+    // don't overwrite a stored value with an empty one on later logins.
+    if (refreshToken) {
+      users[email].google_refresh_token = refreshToken;
+      changed = true;
+    }
+    if (changed) saveUsers(users);
 
     done(null, { email, name: record.name || profile.displayName, role: record.role, additionalRoles: record.additionalRoles || [], picture });
   }));

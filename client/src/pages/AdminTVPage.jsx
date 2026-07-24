@@ -14,6 +14,7 @@ const AGENTS_POLL_MS     = 60_000;
 const STATUS_POLL_MS     = 15_000;
 const DIDS_POLL_MS       = 30_000;
 const TRAINEES_POLL_MS   = 60_000;
+const INTERVIEWS_POLL_MS = 120_000;
 const CLOCK_MS           = 1000;
 
 function withToken(url, token) {
@@ -142,6 +143,8 @@ export default function AdminTVPage() {
   const [quality, setQuality]         = useState(null);
   const [agentCounts, setAgentCounts] = useState(null);
   const [trainees, setTrainees]       = useState(null);
+  const [interviews, setInterviews]   = useState(null);
+  const [interviewsError, setInterviewsError] = useState(null);
 
   // Validate token once so we can show a proper error if the URL is stale.
   useEffect(() => {
@@ -212,6 +215,15 @@ export default function AdminTVPage() {
     if (!tokenValid) return;
     const run = () => get('/api/monday/trainees').then(r => setTrainees(r.data)).catch(() => {});
     run(); const id = setInterval(run, TRAINEES_POLL_MS); return () => clearInterval(id);
+  }, [tokenValid, get]);
+  useEffect(() => {
+    if (!tokenValid) return;
+    const run = () => get('/api/interviews?days=14')
+      .then(r => { setInterviews(r.data); setInterviewsError(null); })
+      .catch(e => setInterviewsError(e.response?.data?.error === 'setup_required'
+        ? e.response.data.message
+        : (e.response?.data?.error || 'Failed to load interviews')));
+    run(); const id = setInterval(run, INTERVIEWS_POLL_MS); return () => clearInterval(id);
   }, [tokenValid, get]);
 
   if (tokenValid === false) {
@@ -492,7 +504,99 @@ export default function AdminTVPage() {
         <TraineesPanel trainees={trainees} />
         <NewHiresPanel trainees={trainees} />
       </div>
+
+      {/* Interviews row — US + Belize, ±14 days */}
+      <div style={{ marginTop: 18 }}>
+        <InterviewsPanel interviews={interviews} error={interviewsError} />
+      </div>
     </div>
+  );
+}
+
+function fmtInterviewTime(iso, isAllDay) {
+  if (!iso) return '—';
+  if (isAllDay) {
+    // "YYYY-MM-DD" — parse as local
+    const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', weekday: 'short' }) + ' (all day)';
+  }
+  const d = new Date(iso);
+  return d.toLocaleString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+    timeZone: 'America/New_York',
+  }) + ' EST';
+}
+
+function InterviewsPanel({ interviews, error }) {
+  if (error) {
+    return (
+      <Panel title="Agent Interviews (Next 14 Days)">
+        <div style={{ color: '#fbbf24', fontSize: 13 }}>{error}</div>
+      </Panel>
+    );
+  }
+  if (!interviews) {
+    return <Panel title="Agent Interviews"><div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14 }}>Loading…</div></Panel>;
+  }
+  const now = Date.now();
+  const teams = interviews.teams || [];
+  return (
+    <Panel title={`Agent Interviews · Past & Next ${interviews.windowDays}d`}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        {teams.map(t => {
+          const upcoming = (t.events || []).filter(e => new Date(e.start).getTime() >= now).slice(0, 6);
+          const past     = (t.events || []).filter(e => new Date(e.start).getTime() <  now).slice(-4).reverse();
+          const teamColor = t.team === 'US' ? '#60a5fa' : '#5eead4';
+          const teamBg    = t.team === 'US' ? 'rgba(26,111,232,0.10)' : 'rgba(0,201,177,0.10)';
+          const teamBorder= t.team === 'US' ? 'rgba(26,111,232,0.30)' : 'rgba(0,201,177,0.30)';
+          return (
+            <div key={t.team} style={{ padding: 12, borderRadius: 10, background: teamBg, border: `1px solid ${teamBorder}` }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: teamColor, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 }}>
+                {t.label} · {upcoming.length} upcoming · {past.length} recent
+              </div>
+              {t.error && (
+                <div style={{ fontSize: 12, color: '#f87171', fontStyle: 'italic', marginBottom: 8 }}>calendar error: {t.error}</div>
+              )}
+              <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.5)', letterSpacing: 0.6, marginTop: 4, marginBottom: 4, textTransform: 'uppercase' }}>Upcoming</div>
+              {upcoming.length === 0 && <div style={{ fontSize: 12, color: 'rgba(240,244,255,0.5)', fontStyle: 'italic' }}>None scheduled</div>}
+              {upcoming.map(ev => (
+                <a
+                  key={ev.id}
+                  href={ev.htmlLink || ev.hangout || '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="tv-clickable"
+                  style={{ display: 'block', padding: '6px 8px', borderTop: '1px solid rgba(255,255,255,0.06)', textDecoration: 'none', color: 'inherit' }}
+                >
+                  <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.title}</div>
+                  <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.6)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
+                </a>
+              ))}
+              {past.length > 0 && (
+                <>
+                  <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.5)', letterSpacing: 0.6, marginTop: 8, marginBottom: 4, textTransform: 'uppercase' }}>Recent</div>
+                  {past.map(ev => (
+                    <a
+                      key={ev.id}
+                      href={ev.htmlLink || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="tv-clickable"
+                      style={{ display: 'block', padding: '6px 8px', borderTop: '1px solid rgba(255,255,255,0.06)', textDecoration: 'none', color: 'inherit', opacity: 0.75 }}
+                    >
+                      <div style={{ fontWeight: 500, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.title}</div>
+                      <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.5)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
+                    </a>
+                  ))}
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
   );
 }
 
