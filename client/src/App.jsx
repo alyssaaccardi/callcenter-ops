@@ -24,6 +24,7 @@ import MobilePage from './pages/MobilePage';
 import LoginPage from './pages/LoginPage';
 import DialedInPage from './pages/DialedInPage';
 import SupportTVPage from './pages/SupportTVPage';
+import AdminTVPage from './pages/AdminTVPage';
 import WhatsNew from './components/WhatsNew';
 import ZendeskAuditor from './modules/ZendeskAuditor';
 import MitelLeaderboard from './modules/MitelLeaderboard';
@@ -114,6 +115,7 @@ export default function App() {
             <Route path="/dialed-in"      element={<DialedInPage />} />
             <Route path="/support-dash"   element={<SupportTVPage />} />
             <Route path="/tech-dash"      element={<TechTVPage />} />
+            <Route path="/admin-tv"       element={<AdminTVPage />} />
             <Route path="/dialed-in-pulse" element={<Navigate to="/support-dash" replace />} />
             <Route path="/mobile" element={
               <ProtectedRoute><MobilePage /></ProtectedRoute>

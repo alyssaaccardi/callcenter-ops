@@ -99,11 +99,20 @@ export default function Sidebar({ activeModule, onModuleChange }) {
     } catch { toast('Could not open Tech Team Dash', 'error'); }
   }
 
+  async function openAdminTV() {
+    try {
+      const res = await api.post('/api/tv-session');
+      const token = res.data?.token;
+      if (token) window.open(`/admin-tv?t=${token}`, '_blank');
+    } catch { toast('Could not open Admin TV Dash', 'error'); }
+  }
+
   const DISPLAY_ITEMS = [
     { id: 'dialed-in',    icon: '🖥️', label: 'Dialed In Dash',    roles: ['super_admin', 'call_center_ops', 'tv_display'], onClick: openDialedIn },
     { id: 'mobile',       icon: '📲', label: 'Mobile Quick Dash',  roles: ['super_admin', 'call_center_ops', 'tv_display'], onClick: openMobile },
     { id: 'support-dash', icon: '📡', label: 'Support Teams Dash', roles: ['super_admin', 'support', 'tv_display'],         onClick: openSupportDash },
     { id: 'tech-dash',    icon: '🔬', label: 'Tech Team Dash',     roles: ['super_admin', 'tech', 'tv_display'],             onClick: openTechDash },
+    { id: 'admin-tv',     icon: '🛡️', label: 'Admin TV Dash',      roles: ['super_admin', 'call_center_ops', 'zendesk_auditor'], onClick: openAdminTV },
   ];
 
   const visibleDisplays = DISPLAY_ITEMS.filter(d => d.roles.includes(user?.role));

@@ -411,6 +411,21 @@ function saveStatusStore() {
 
 let statusStore = loadStatusStore();
 
+// Same as tvOrAuth but layered on top of a role check when no TV token is
+// present. Lets TV displays hit role-gated endpoints (auth is proven by the
+// short-lived tv-session token issued to logged-in operators).
+function tvOrRole(...roles) {
+  return function (req, res, next) {
+    const token = req.query.t;
+    if (token) {
+      const sessions = loadTvSessions();
+      if (!sessions.has(token)) return res.status(401).json({ error: 'Invalid or expired token' });
+      return next();
+    }
+    return requireRole(...roles)(req, res, next);
+  };
+}
+
 // Middleware: accepts a TV session token via ?t= OR delegates to requireAuth
 // (which accepts session cookie or X-API-Key on GETs). Used on endpoints that
 // must be reachable by both the internal React app and the office TV displays.
@@ -749,7 +764,7 @@ app.post('/api/smsto/send', requireAuth, async (req, res) => {
 });
 
 // ─── Bandwidth: DID Counts ─────────────────────────────────────────────────────
-app.get('/api/bandwidth/dids', requireAuth, async (req, res) => {
+app.get('/api/bandwidth/dids', tvOrAuth, async (req, res) => {
   try {
     const accountId = process.env.BANDWIDTH_ACCOUNT_ID;
     const clientId = process.env.BANDWIDTH_API_TOKEN;
@@ -1490,7 +1505,7 @@ function resolvePeriodStart(period) {
 // SLA breach counts for a period. 2-minute cache per period key.
 const qualityCache = new Map(); // period → { data, expires }
 
-app.get('/api/zendesk/quality', requireRole('super_admin', 'call_center_ops', 'zendesk_auditor'), async (req, res) => {
+app.get('/api/zendesk/quality', tvOrRole('super_admin', 'call_center_ops', 'zendesk_auditor'), async (req, res) => {
   const period = req.query.period || 'this-week';
   const cached = qualityCache.get(period);
   if (cached && cached.expires > Date.now()) return res.json(cached.data);
@@ -4444,7 +4459,7 @@ async function fetchTenantOutstanding(tenant) {
   return { count: customers.length, totalOverdue, customers, configured: true };
 }
 
-app.get('/api/chargeover/outstanding', requireRole('super_admin', 'call_center_ops', 'zendesk_auditor'), async (req, res) => {
+app.get('/api/chargeover/outstanding', tvOrRole('super_admin', 'call_center_ops', 'zendesk_auditor'), async (req, res) => {
   try {
     if (chargeoverOutstandingCache.data && chargeoverOutstandingCache.expires > Date.now()) {
       return res.json(chargeoverOutstandingCache.data);
