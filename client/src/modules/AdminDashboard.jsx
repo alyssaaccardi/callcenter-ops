@@ -270,7 +270,7 @@ function TraineesCard({ trainees }) {
     <div>
       <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
         <div style={{ flex: 1, padding: '8px 10px', borderRadius: 8, background: 'rgba(163,230,53,0.08)', border: '1px solid rgba(163,230,53,0.25)' }}>
-          <div style={{ fontSize: 10, letterSpacing: 0.5, color: 'var(--muted)' }}>NEW HIRES · {trainees.monthKey || ''}</div>
+          <div style={{ fontSize: 10, letterSpacing: 0.5, color: 'var(--muted)' }}>NEW AGENTS · {trainees.monthKey || ''}</div>
           <div style={{ fontSize: 22, fontWeight: 800, color: '#65a30d', fontVariantNumeric: 'tabular-nums' }}>{(trainees.newHiresThisMonth || []).length}</div>
         </div>
         <div style={{ flex: 1, padding: '8px 10px', borderRadius: 8, background: 'rgba(26,111,232,0.08)', border: '1px solid rgba(26,111,232,0.25)' }}>
@@ -336,7 +336,7 @@ function QualityPanel({ data, loading, period, onPeriodChange }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 0.5, marginBottom: 4 }}>CSAT</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 0.5, marginBottom: 4 }}>SUPPORT CSAT (Zendesk)</div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
             <div style={{ fontSize: 34, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: pctColor, lineHeight: 1 }}>
               {csat.pct != null ? `${csat.pct}%` : '—'}

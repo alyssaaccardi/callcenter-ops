@@ -82,22 +82,22 @@ function KpiTile({ label, value, sub, valueColor, danger, warn, href }) {
   const color = danger ? '#f87171' : warn ? '#fbbf24' : (valueColor || '#f0f4ff');
   const inner = (
     <>
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(240,244,255,0.55)', letterSpacing: 0.8, textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(240,244,255,0.55)', letterSpacing: 0.7, textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>{label}</span>
-        {href && <span style={{ color: 'rgba(240,244,255,0.35)', fontSize: 12 }}>↗</span>}
+        {href && <span style={{ color: 'rgba(240,244,255,0.35)', fontSize: 11 }}>↗</span>}
       </div>
       <div>
-        <div style={{ fontSize: 44, fontWeight: 800, color, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
-        {sub && <div style={{ marginTop: 6, fontSize: 13, color: 'rgba(240,244,255,0.6)' }}>{sub}</div>}
+        <div style={{ fontSize: 34, fontWeight: 800, color, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+        {sub && <div style={{ marginTop: 4, fontSize: 12, color: 'rgba(240,244,255,0.6)' }}>{sub}</div>}
       </div>
     </>
   );
   const style = {
     background: 'rgba(255,255,255,0.03)',
     border: '1px solid rgba(255,255,255,0.08)',
-    borderRadius: 14,
-    padding: '18px 22px',
-    minHeight: 128,
+    borderRadius: 12,
+    padding: '14px 16px',
+    minHeight: 102,
     display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
     textDecoration: 'none', color: 'inherit',
     transition: 'background 0.12s, border-color 0.12s',
@@ -113,14 +113,29 @@ function Panel({ title, children, right }) {
     <div style={{
       background: 'rgba(255,255,255,0.02)',
       border: '1px solid rgba(255,255,255,0.08)',
-      borderRadius: 14,
-      padding: 18,
+      borderRadius: 12,
+      padding: 14,
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(240,244,255,0.7)', letterSpacing: 0.8, textTransform: 'uppercase' }}>{title}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(240,244,255,0.7)', letterSpacing: 0.8, textTransform: 'uppercase' }}>{title}</div>
         {right}
       </div>
       {children}
+    </div>
+  );
+}
+
+function DidChip({ label, val }) {
+  return (
+    <div style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      padding: '6px 12px', borderRadius: 999,
+      background: 'rgba(124,58,237,0.12)',
+      border: '1px solid rgba(124,58,237,0.35)',
+      fontSize: 13, fontWeight: 600, color: '#c4b5fd',
+    }}>
+      <span style={{ fontSize: 10, color: 'rgba(240,244,255,0.55)', fontWeight: 500, letterSpacing: 0.4, textTransform: 'uppercase' }}>{label}</span>
+      <span style={{ fontVariantNumeric: 'tabular-nums' }}>{val ?? '—'}</span>
     </div>
   );
 }
@@ -257,20 +272,30 @@ export default function AdminTVPage() {
   const hasHourly = mitelQ.some(q => Array.isArray(q.hourly) && q.hourly.length > 0);
   const buckets = hasHourly ? mitelQ[0].hourly.map(h => h.bucket) : [];
 
+  // Interviews this month = every event across both calendars whose start
+  // date lands in the current EST calendar month.
+  const monthKey = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }).slice(0, 7);
+  const interviewsThisMonth = (interviews?.teams || []).reduce((sum, t) => {
+    return sum + (t.events || []).filter(ev => {
+      const day = (ev.start || '').slice(0, 10);
+      return day && day.startsWith(monthKey);
+    }).length;
+  }, 0);
+
   return (
     <div style={{
       minHeight: '100vh',
       background: 'radial-gradient(1200px 800px at 20% 0%, #0e1828 0%, #070d18 60%, #05080f 100%)',
       color: '#f0f4ff',
       fontFamily: 'Barlow Condensed, sans-serif',
-      padding: 24,
+      padding: 18,
       boxSizing: 'border-box',
     }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      {/* Header — title/date on left, clocks on right */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: 0.5 }}>Admin Dashboard</div>
-          <div style={{ fontSize: 14, color: 'rgba(240,244,255,0.55)' }}>{nowDate()}</div>
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.5 }}>Admin Dashboard</div>
+          <div style={{ fontSize: 13, color: 'rgba(240,244,255,0.55)' }}>{nowDate()}</div>
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'flex-end' }}>
           {[
@@ -280,22 +305,26 @@ export default function AdminTVPage() {
           ].map(c => (
             <div key={c.label} style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', color: 'rgba(240,244,255,0.5)', fontWeight: 600, marginBottom: 2 }}>{c.label}</div>
-              <div style={{ fontSize: 26, fontWeight: 800, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{c.time}</div>
+              <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{c.time}</div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* System-status strip */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
+      {/* Combined status + DID chips */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
         <StatusPill label="Mitel Classic" state={status?.mitelClassic?.state} />
         <StatusPill label="Mobile App"    state={status?.mobileApp?.state} />
         <StatusPill label="Integrations"  state={status?.integrations?.state} />
         <StatusPill label="DIDs"          state={status?.didStatus} />
+        <div style={{ width: 1, background: 'rgba(255,255,255,0.1)', margin: '0 4px' }} />
+        <DidChip label="Mitel"   val={didCounts?.mitel} />
+        <DidChip label="Pool"    val={hubspotDids?.didPool} />
+        <DidChip label="Instant" val={hubspotDids?.instantDidPool} />
       </div>
 
       {/* KPI row — 7 tiles, each clickable to its source */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 12, marginBottom: 18 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 10, marginBottom: 14 }}>
         <KpiTile
           label="AL Outstanding"
           value={usd(outstanding?.AL?.totalOverdue || 0)}
@@ -318,21 +347,13 @@ export default function AdminTVPage() {
           href="https://answeringlegal-unit.monday.com/boards/7846367704"
         />
         <KpiTile
-          label="CSAT · This Month"
+          label="Support CSAT · This Month"
           value={csat.pct != null ? `${csat.pct}%` : '—'}
-          sub={`${csat.good ?? 0} good · ${csat.bad ?? 0} bad`}
+          sub={`${csat.good ?? 0} good · ${csat.bad ?? 0} bad · from Zendesk`}
           warn={csat.pct != null && csat.pct < 95 && csat.pct >= 85}
           danger={csat.pct != null && csat.pct < 85}
           valueColor={csat.pct != null && csat.pct >= 95 ? '#4ade80' : undefined}
           href="https://answeringlegalhelp.zendesk.com/agent/reporting"
-        />
-        <KpiTile
-          label="SLA Breaches · This Month"
-          value={sla.totalBreaches ?? 0}
-          sub={(sla.totalBreaches || 0) === 0 ? 'clean' : 'needs attention'}
-          danger={(sla.totalBreaches || 0) > 0}
-          valueColor={(sla.totalBreaches || 0) === 0 ? '#4ade80' : undefined}
-          href="https://answeringlegalhelp.zendesk.com/agent/search/1?type=ticket&q=type%3Aticket%20sla_breach%3Atrue"
         />
         <KpiTile
           label="Overdue Support Tasks"
@@ -343,7 +364,13 @@ export default function AdminTVPage() {
           href="https://answeringlegal-unit.monday.com/boards/18358060875"
         />
         <KpiTile
-          label="New Hires · This Month"
+          label="Interviews · This Month"
+          value={interviews ? interviewsThisMonth : '—'}
+          sub={interviews ? '±14d shown below' : ''}
+          valueColor="#fbbf24"
+        />
+        <KpiTile
+          label="New Agents · This Month"
           value={trainees?.newHiresThisMonth?.length ?? '—'}
           sub={trainees?.activeTrainees ? `${trainees.activeTrainees.length} in training` : ''}
           valueColor="#a3e635"
@@ -351,35 +378,35 @@ export default function AdminTVPage() {
         />
       </div>
 
-      {/* Middle row — Mitel queues + DIDs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) minmax(0, 1fr)', gap: 14, marginBottom: 18 }}>
+      {/* Ops row — Mitel queues (wide left) + stacked Outstanding & Overdue Tasks (right) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1.1fr)', gap: 12, marginBottom: 12 }}>
         <Panel title="Mitel Queues · Avg Ring Time (Last 24 h)">
           {mitelQueues?.offline || mitelQueues?.unconfigured ? (
             <div style={{ color: '#f87171', fontSize: 14 }}>Poller offline — no queue data</div>
           ) : !hasHourly ? (
             <div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14, fontStyle: 'italic' }}>Waiting for poller data…</div>
           ) : (
-            <div style={{ maxHeight: 340, overflowY: 'auto' }}>
-              <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ textAlign: 'left', color: 'rgba(240,244,255,0.5)', fontSize: 11, letterSpacing: 0.6, textTransform: 'uppercase' }}>
-                    <th style={{ padding: '6px 8px' }}>Hour</th>
+            <div style={{ maxHeight: 460, overflowY: 'auto' }}>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <thead style={{ position: 'sticky', top: 0, background: 'rgba(14,24,40,0.95)', backdropFilter: 'blur(4px)' }}>
+                  <tr style={{ textAlign: 'left', color: 'rgba(240,244,255,0.5)', fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase' }}>
+                    <th style={{ padding: '5px 8px' }}>Hour</th>
                     {mitelQ.map(q => (
-                      <th key={q.id} style={{ padding: '6px 8px', textAlign: 'right' }}>{q.name || q.id}</th>
+                      <th key={q.id} style={{ padding: '5px 8px', textAlign: 'right' }}>{q.name || q.id}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {buckets.map((bucket, i) => (
                     <tr key={bucket} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                      <td style={{ padding: '5px 8px', color: 'rgba(240,244,255,0.65)', whiteSpace: 'nowrap' }}>{fmtHourEst(bucket)}</td>
+                      <td style={{ padding: '4px 8px', color: 'rgba(240,244,255,0.65)', whiteSpace: 'nowrap' }}>{fmtHourEst(bucket)}</td>
                       {mitelQ.map(q => {
                         const cell = q.hourly?.[i];
                         return (
-                          <td key={q.id} style={{ padding: '5px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          <td key={q.id} style={{ padding: '4px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                             {cell?.avgWait != null
                               ? <><span style={{ fontWeight: 700 }}>{fmtWait(cell.avgWait)}</span>
-                                  <span style={{ color: 'rgba(240,244,255,0.4)', marginLeft: 6, fontSize: 11 }}>({cell.answered})</span></>
+                                  <span style={{ color: 'rgba(240,244,255,0.4)', marginLeft: 4, fontSize: 10 }}>({cell.answered})</span></>
                               : <span style={{ color: 'rgba(240,244,255,0.3)' }}>—</span>}
                           </td>
                         );
@@ -392,122 +419,103 @@ export default function AdminTVPage() {
           )}
         </Panel>
 
-        <Panel title="Available DIDs">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-            {[
-              { label: 'Mitel Active', val: didCounts?.mitel },
-              { label: 'DID Pool',     val: hubspotDids?.didPool },
-              { label: 'Instant',      val: hubspotDids?.instantDidPool },
-            ].map(c => (
-              <div key={c.label} style={{ padding: '12px 10px', borderRadius: 10, background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
-                <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.55)', letterSpacing: 0.6, textTransform: 'uppercase' }}>{c.label}</div>
-                <div style={{ fontSize: 30, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: '#a855f7', lineHeight: 1.1 }}>{c.val ?? '—'}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <Panel title="Top Outstanding Accounts">
+            {allOutstanding.length === 0 ? (
+              <div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14, fontStyle: 'italic' }}>None outstanding</div>
+            ) : (
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: '3fr 0.5fr 0.5fr 1fr', columnGap: 6, padding: '4px 8px', color: 'rgba(240,244,255,0.5)', fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase' }}>
+                  <div>Company</div>
+                  <div>Tenant</div>
+                  <div style={{ textAlign: 'right' }}>Days</div>
+                  <div style={{ textAlign: 'right' }}>$</div>
+                </div>
+                {allOutstanding.slice(0, 6).map(c => (
+                  <a
+                    key={`${c.tenant}-${c.customerId}`}
+                    href={c.url || '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="tv-clickable"
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '3fr 0.5fr 0.5fr 1fr',
+                      columnGap: 6,
+                      padding: '5px 8px',
+                      borderTop: '1px solid rgba(255,255,255,0.06)',
+                      fontSize: 13,
+                      textDecoration: 'none',
+                      color: 'inherit',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.company || `#${c.customerId}`}</div>
+                    <div>
+                      <span style={{
+                        fontSize: 10, padding: '1px 6px', borderRadius: 4,
+                        background: c.tenant === 'AL' ? 'rgba(26,111,232,0.2)' : 'rgba(0,201,177,0.2)',
+                        color: c.tenant === 'AL' ? '#60a5fa' : '#5eead4',
+                      }}>{c.tenant}</span>
+                    </div>
+                    <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{c.daysOverdue}</div>
+                    <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#f87171', fontWeight: 700 }}>{usd(c.amountOverdue)}</div>
+                  </a>
+                ))}
               </div>
+            )}
+          </Panel>
+
+          <Panel title={`Overdue Support Tasks (${overdueTasks.length})`}>
+            {overdueTasks.length === 0 && upcomingTasks.length === 0 && (
+              <div style={{ color: '#4ade80', fontSize: 13, fontStyle: 'italic' }}>All clear</div>
+            )}
+            {overdueTasks.slice(0, 5).map(t => (
+              <a
+                key={t.id}
+                href={t.link || '#'}
+                target="_blank"
+                rel="noreferrer"
+                className="tv-clickable"
+                style={{ display: 'block', padding: '5px 6px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: 12, textDecoration: 'none', color: 'inherit' }}
+              >
+                <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
+                <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.55)' }}>
+                  {t.accountName && <>{t.accountName} · </>}
+                  {t.worker || 'unassigned'}
+                </div>
+              </a>
             ))}
-          </div>
-        </Panel>
+            {overdueTasks.length === 0 && upcomingTasks.length > 0 && (
+              <>
+                <div style={{ marginTop: 2, fontSize: 10, color: 'rgba(240,244,255,0.5)', textTransform: 'uppercase', letterSpacing: 0.6 }}>Due today</div>
+                {upcomingTasks.slice(0, 5).map(t => (
+                  <a
+                    key={t.id}
+                    href={t.link || '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="tv-clickable"
+                    style={{ display: 'block', padding: '5px 6px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: 12, textDecoration: 'none', color: 'inherit' }}
+                  >
+                    <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
+                    <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.55)' }}>
+                      {t.accountName && <>{t.accountName} · </>}
+                      {t.worker || 'unassigned'}
+                    </div>
+                  </a>
+                ))}
+              </>
+            )}
+          </Panel>
+        </div>
       </div>
 
-      {/* Bottom row — outstanding accounts + overdue tasks */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.3fr) minmax(0, 1fr)', gap: 14 }}>
-        <Panel title="Top Outstanding Accounts">
-          {allOutstanding.length === 0 ? (
-            <div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14, fontStyle: 'italic' }}>None outstanding</div>
-          ) : (
-            <div>
-              <div style={{ display: 'grid', gridTemplateColumns: '3fr 0.6fr 0.6fr 1fr', columnGap: 8, padding: '6px 8px', color: 'rgba(240,244,255,0.5)', fontSize: 11, letterSpacing: 0.6, textTransform: 'uppercase' }}>
-                <div>Company</div>
-                <div>Tenant</div>
-                <div style={{ textAlign: 'right' }}>Days</div>
-                <div style={{ textAlign: 'right' }}>Overdue</div>
-              </div>
-              {allOutstanding.slice(0, 8).map(c => (
-                <a
-                  key={`${c.tenant}-${c.customerId}`}
-                  href={c.url || '#'}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="tv-clickable"
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '3fr 0.6fr 0.6fr 1fr',
-                    columnGap: 8,
-                    padding: '7px 8px',
-                    borderTop: '1px solid rgba(255,255,255,0.06)',
-                    fontSize: 14,
-                    textDecoration: 'none',
-                    color: 'inherit',
-                  }}
-                >
-                  <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.company || `#${c.customerId}`}</div>
-                  <div>
-                    <span style={{
-                      fontSize: 11, padding: '1px 8px', borderRadius: 4,
-                      background: c.tenant === 'AL' ? 'rgba(26,111,232,0.2)' : 'rgba(0,201,177,0.2)',
-                      color: c.tenant === 'AL' ? '#60a5fa' : '#5eead4',
-                    }}>{c.tenant}</span>
-                  </div>
-                  <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{c.daysOverdue}</div>
-                  <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#f87171', fontWeight: 700 }}>{usd(c.amountOverdue)}</div>
-                </a>
-              ))}
-            </div>
-          )}
-        </Panel>
-
-        <Panel title={`Overdue Support Tasks (${overdueTasks.length})`}>
-          {overdueTasks.length === 0 && upcomingTasks.length === 0 && (
-            <div style={{ color: '#4ade80', fontSize: 14, fontStyle: 'italic' }}>All clear — no overdue or upcoming tasks</div>
-          )}
-          {overdueTasks.slice(0, 6).map(t => (
-            <a
-              key={t.id}
-              href={t.link || '#'}
-              target="_blank"
-              rel="noreferrer"
-              className="tv-clickable"
-              style={{ display: 'block', padding: '7px 4px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: 13, textDecoration: 'none', color: 'inherit' }}
-            >
-              <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
-              <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.55)' }}>
-                {t.accountName && <>{t.accountName} · </>}
-                {t.worker || 'unassigned'}
-              </div>
-            </a>
-          ))}
-          {overdueTasks.length === 0 && upcomingTasks.length > 0 && (
-            <>
-              <div style={{ marginTop: 4, fontSize: 11, color: 'rgba(240,244,255,0.5)', textTransform: 'uppercase', letterSpacing: 0.6 }}>Due today</div>
-              {upcomingTasks.slice(0, 6).map(t => (
-                <a
-                  key={t.id}
-                  href={t.link || '#'}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="tv-clickable"
-                  style={{ display: 'block', padding: '7px 4px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: 13, textDecoration: 'none', color: 'inherit' }}
-                >
-                  <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
-                  <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.55)' }}>
-                    {t.accountName && <>{t.accountName} · </>}
-                    {t.worker || 'unassigned'}
-                  </div>
-                </a>
-              ))}
-            </>
-          )}
-        </Panel>
-      </div>
-
-      {/* Trainees row — active trainees sorted by nearest date + new hires this month */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: 14, marginTop: 18 }}>
+      {/* Workforce row — Trainees + US Interviews + Belize Interviews */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
         <TraineesPanel trainees={trainees} />
-        <NewHiresPanel trainees={trainees} />
-      </div>
-
-      {/* Interviews row — US + Belize, ±14 days */}
-      <div style={{ marginTop: 18 }}>
-        <InterviewsPanel interviews={interviews} error={interviewsError} />
+        <InterviewsTeamPanel interviews={interviews} error={interviewsError} teamKey="US"     label="US Team" color="#60a5fa" />
+        <InterviewsTeamPanel interviews={interviews} error={interviewsError} teamKey="BELIZE" label="Team Belize" color="#5eead4" />
       </div>
     </div>
   );
@@ -543,82 +551,54 @@ function fmtInterviewTime(iso, isAllDay) {
   }) + ' EST';
 }
 
-function InterviewsPanel({ interviews, error }) {
-  if (error) {
-    return (
-      <Panel title="Agent Interviews (Next 14 Days)">
-        <div style={{ color: '#fbbf24', fontSize: 13 }}>{error}</div>
-      </Panel>
-    );
-  }
-  if (!interviews) {
-    return <Panel title="Agent Interviews"><div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14 }}>Loading…</div></Panel>;
-  }
+function InterviewsTeamPanel({ interviews, error, teamKey, label, color }) {
+  if (error) return <Panel title={`${label} · Interviews`}><div style={{ color: '#fbbf24', fontSize: 12 }}>{error}</div></Panel>;
+  if (!interviews) return <Panel title={`${label} · Interviews`}><div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 13 }}>Loading…</div></Panel>;
+  const team = (interviews.teams || []).find(t => t.team === teamKey);
+  if (!team) return <Panel title={`${label} · Interviews`}><div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 13, fontStyle: 'italic' }}>No calendar data</div></Panel>;
+
   const now = Date.now();
-  const teams = interviews.teams || [];
+  const upcoming = (team.events || []).filter(e => new Date(e.start).getTime() >= now).slice(0, 5);
+  const past     = (team.events || []).filter(e => new Date(e.start).getTime() <  now).slice(-3).reverse();
+
+  const Row = ({ ev, muted }) => {
+    const names = candidateLine(ev);
+    return (
+      <a
+        href={ev.htmlLink || ev.hangout || '#'}
+        target="_blank"
+        rel="noreferrer"
+        className="tv-clickable"
+        style={{ display: 'block', padding: '5px 6px', borderTop: '1px solid rgba(255,255,255,0.06)', textDecoration: 'none', color: 'inherit', opacity: muted ? 0.72 : 1 }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{names || ev.title}</div>
+        <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.55)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
+        {names && <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.35)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.title}</div>}
+        {!names && ev.description && <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.description}</div>}
+      </a>
+    );
+  };
+
   return (
-    <Panel title={`Agent Interviews · Past & Next ${interviews.windowDays}d`}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        {teams.map(t => {
-          const upcoming = (t.events || []).filter(e => new Date(e.start).getTime() >= now).slice(0, 6);
-          const past     = (t.events || []).filter(e => new Date(e.start).getTime() <  now).slice(-4).reverse();
-          const teamColor = t.team === 'US' ? '#60a5fa' : '#5eead4';
-          const teamBg    = t.team === 'US' ? 'rgba(26,111,232,0.10)' : 'rgba(0,201,177,0.10)';
-          const teamBorder= t.team === 'US' ? 'rgba(26,111,232,0.30)' : 'rgba(0,201,177,0.30)';
-          return (
-            <div key={t.team} style={{ padding: 12, borderRadius: 10, background: teamBg, border: `1px solid ${teamBorder}` }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: teamColor, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 }}>
-                {t.label} · {upcoming.length} upcoming · {past.length} recent
-              </div>
-              {t.error && (
-                <div style={{ fontSize: 12, color: '#f87171', fontStyle: 'italic', marginBottom: 8 }}>calendar error: {t.error}</div>
-              )}
-              <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.5)', letterSpacing: 0.6, marginTop: 4, marginBottom: 4, textTransform: 'uppercase' }}>Upcoming</div>
-              {upcoming.length === 0 && <div style={{ fontSize: 12, color: 'rgba(240,244,255,0.5)', fontStyle: 'italic' }}>None scheduled</div>}
-              {upcoming.map(ev => {
-                const names = candidateLine(ev);
-                return (
-                  <a
-                    key={ev.id}
-                    href={ev.htmlLink || ev.hangout || '#'}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="tv-clickable"
-                    style={{ display: 'block', padding: '6px 8px', borderTop: '1px solid rgba(255,255,255,0.06)', textDecoration: 'none', color: 'inherit' }}
-                  >
-                    <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{names || ev.title}</div>
-                    <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.6)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
-                    {names && <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.title}</div>}
-                    {!names && ev.description && <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.description}</div>}
-                  </a>
-                );
-              })}
-              {past.length > 0 && (
-                <>
-                  <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.5)', letterSpacing: 0.6, marginTop: 8, marginBottom: 4, textTransform: 'uppercase' }}>Recent</div>
-                  {past.map(ev => {
-                    const names = candidateLine(ev);
-                    return (
-                      <a
-                        key={ev.id}
-                        href={ev.htmlLink || '#'}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="tv-clickable"
-                        style={{ display: 'block', padding: '6px 8px', borderTop: '1px solid rgba(255,255,255,0.06)', textDecoration: 'none', color: 'inherit', opacity: 0.75 }}
-                      >
-                        <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{names || ev.title}</div>
-                        <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.5)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
-                        {!names && ev.description && <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.description}</div>}
-                      </a>
-                    );
-                  })}
-                </>
-              )}
-            </div>
-          );
-        })}
-      </div>
+    <Panel
+      title={
+        <span>
+          <span style={{ color }}>{label}</span>
+          <span style={{ color: 'rgba(240,244,255,0.5)', marginLeft: 8 }}>· Interviews</span>
+        </span>
+      }
+      right={<span style={{ fontSize: 10, color: 'rgba(240,244,255,0.5)' }}>{upcoming.length} up · {past.length} recent</span>}
+    >
+      {team.error && <div style={{ fontSize: 11, color: '#f87171', fontStyle: 'italic', marginBottom: 4 }}>calendar error: {team.error}</div>}
+      <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.5)', letterSpacing: 0.6, marginBottom: 2, textTransform: 'uppercase' }}>Upcoming</div>
+      {upcoming.length === 0 && <div style={{ fontSize: 12, color: 'rgba(240,244,255,0.5)', fontStyle: 'italic' }}>None scheduled</div>}
+      {upcoming.map(ev => <Row key={ev.id} ev={ev} />)}
+      {past.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.5)', letterSpacing: 0.6, marginTop: 8, marginBottom: 2, textTransform: 'uppercase' }}>Recent</div>
+          {past.map(ev => <Row key={ev.id} ev={ev} muted />)}
+        </>
+      )}
     </Panel>
   );
 }
@@ -638,9 +618,7 @@ function fmtDayShort(iso) {
 }
 
 function TraineesPanel({ trainees }) {
-  if (!trainees) return <Panel title="Upcoming Trainees"><div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14 }}>Loading…</div></Panel>;
-  // Show trainees whose most-recent training date is within the last 14 days
-  // or upcoming — anything older is stale (never got status updated).
+  if (!trainees) return <Panel title="Trainees"><div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 13 }}>Loading…</div></Panel>;
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
   const cutoff = (() => {
     const d = new Date(); d.setDate(d.getDate() - 14);
@@ -656,82 +634,70 @@ function TraineesPanel({ trainees }) {
     })
     .filter(t => t && t.nextDate && t.nextDate >= cutoff)
     .sort((a, b) => (a.nextDate || '').localeCompare(b.nextDate || ''))
-    .slice(0, 10);
-  return (
-    <Panel title={`Upcoming Trainees (${rows.length})`}>
-      {rows.length === 0 && (
-        <div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14, fontStyle: 'italic' }}>No trainees in the current window</div>
-      )}
-      {rows.map(t => (
-        <a
-          key={t.id}
-          href={t.link}
-          target="_blank"
-          rel="noreferrer"
-          className="tv-clickable"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1.6fr 0.7fr 0.8fr 1fr',
-            columnGap: 8,
-            padding: '7px 8px',
-            borderTop: '1px solid rgba(255,255,255,0.06)',
-            fontSize: 13,
-            textDecoration: 'none',
-            color: 'inherit',
-            alignItems: 'center',
-          }}
-        >
-          <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
-          <div>
-            {t.team && (
-              <span style={{ fontSize: 10, padding: '1px 8px', borderRadius: 4, background: 'rgba(163,230,53,0.15)', color: '#a3e635', fontWeight: 600 }}>{t.team}</span>
-            )}
-          </div>
-          <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.6)' }}>{t.status}</div>
-          <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-            {t.day1Date && <span>D1 {fmtDayShort(t.day1Date)}</span>}
-            {t.day2Date && <span style={{ marginLeft: 6, color: 'rgba(240,244,255,0.6)' }}>D2 {fmtDayShort(t.day2Date)}</span>}
-          </div>
-        </a>
-      ))}
-    </Panel>
-  );
-}
-
-function NewHiresPanel({ trainees }) {
-  if (!trainees) return <Panel title="New Hires This Month"><div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14 }}>Loading…</div></Panel>;
-  const rows = (trainees.newHiresThisMonth || [])
+    .slice(0, 8);
+  const newHires = (trainees.newHiresThisMonth || [])
     .slice()
     .sort((a, b) => (b.independentStartDate || b.day2Date || '').localeCompare(a.independentStartDate || a.day2Date || ''));
+
   return (
-    <Panel title={`New Hires · ${trainees.monthKey || ''} (${rows.length})`}>
-      {rows.length === 0 && (
-        <div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 14, fontStyle: 'italic' }}>None yet this month</div>
+    <Panel
+      title={<span style={{ color: '#a3e635' }}>Trainees</span>}
+      right={<span style={{ fontSize: 10, color: 'rgba(240,244,255,0.5)' }}>{rows.length} upcoming · {newHires.length} new agents this month</span>}
+    >
+      {rows.length === 0 && newHires.length === 0 && (
+        <div style={{ color: 'rgba(240,244,255,0.5)', fontSize: 13, fontStyle: 'italic' }}>No trainees or new hires in the current window</div>
       )}
-      {rows.map(t => (
-        <a
-          key={t.id}
-          href={t.link}
-          target="_blank"
-          rel="noreferrer"
-          className="tv-clickable"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '2fr 1fr',
-            columnGap: 8,
-            padding: '7px 8px',
-            borderTop: '1px solid rgba(255,255,255,0.06)',
-            fontSize: 13,
-            textDecoration: 'none',
-            color: 'inherit',
-          }}
-        >
-          <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
-          <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: 12, color: 'rgba(240,244,255,0.7)' }}>
-            {t.independentStartDate ? `Start ${fmtDayShort(t.independentStartDate)}` : (t.day2Date ? `D2 ${fmtDayShort(t.day2Date)}` : '')}
+
+      {rows.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.5)', letterSpacing: 0.6, marginBottom: 2, textTransform: 'uppercase' }}>Upcoming</div>
+          {rows.map(t => (
+            <a
+              key={t.id}
+              href={t.link}
+              target="_blank"
+              rel="noreferrer"
+              className="tv-clickable"
+              style={{ display: 'block', padding: '5px 6px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: 12, textDecoration: 'none', color: 'inherit' }}
+            >
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{t.name}</span>
+                {t.team && <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'rgba(163,230,53,0.15)', color: '#a3e635', fontWeight: 600 }}>{t.team}</span>}
+              </div>
+              <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.55)' }}>
+                {t.status}
+                {t.day1Date && <span style={{ marginLeft: 6 }}>D1 {fmtDayShort(t.day1Date)}</span>}
+                {t.day2Date && <span style={{ marginLeft: 6 }}>D2 {fmtDayShort(t.day2Date)}</span>}
+              </div>
+            </a>
+          ))}
+        </>
+      )}
+
+      {newHires.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.5)', letterSpacing: 0.6, marginTop: 8, marginBottom: 2, textTransform: 'uppercase' }}>
+            New Agents · {trainees.monthKey || ''}
           </div>
-        </a>
-      ))}
+          {newHires.map(t => (
+            <a
+              key={t.id}
+              href={t.link}
+              target="_blank"
+              rel="noreferrer"
+              className="tv-clickable"
+              style={{ display: 'block', padding: '5px 6px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: 12, textDecoration: 'none', color: 'inherit', opacity: 0.85 }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                <span style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
+                <span style={{ fontSize: 10, color: 'rgba(240,244,255,0.55)', whiteSpace: 'nowrap' }}>
+                  {t.independentStartDate ? `Start ${fmtDayShort(t.independentStartDate)}` : (t.day2Date ? `D2 ${fmtDayShort(t.day2Date)}` : '')}
+                </span>
+              </div>
+            </a>
+          ))}
+        </>
+      )}
     </Panel>
   );
 }
