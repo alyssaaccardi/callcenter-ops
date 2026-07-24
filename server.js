@@ -12,6 +12,7 @@ const rateLimit = require('express-rate-limit');
 const { passport, requireAuth, requireRole, isAuthedOrKey, listUsers, addUser, removeUser } = require('./auth');
 const multer = require('multer');
 const XLSX   = require('xlsx');
+const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
 const Anthropic = require('@anthropic-ai/sdk');
 const mitelLeaderboard = require('./mitel-leaderboard');
 
@@ -167,19 +168,31 @@ app.get('/api/tv-session/validate', (req, res) => {
 });
 
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
-app.get('/auth/google', authLimiter, passport.authenticate('google', {
-  scope: [
-    'profile',
-    'email',
-    'https://www.googleapis.com/auth/calendar.readonly',
-  ],
-  accessType: 'offline',    // returns a refresh_token
-  prompt:     'consent',    // force consent screen so we actually get one
-}));
+app.get('/auth/google', authLimiter, (req, res, next) => {
+  // Remember where to land after login (e.g. /rob). Only allow local paths
+  // (must start with a single '/') to avoid open-redirect abuse.
+  const rt = req.query.returnTo;
+  if (typeof rt === 'string' && rt.startsWith('/') && !rt.startsWith('//')) {
+    req.session.returnTo = rt;
+  }
+  passport.authenticate('google', {
+    scope: [
+      'profile',
+      'email',
+      'https://www.googleapis.com/auth/calendar.readonly',
+    ],
+    accessType: 'offline',    // returns a refresh_token
+    prompt:     'consent',    // force consent screen so we actually get one
+  })(req, res, next);
+});
 
 app.get('/auth/google/callback', authLimiter,
   passport.authenticate('google', { failureRedirect: '/login?error=unauthorized' }),
-  (req, res) => res.redirect('/')
+  (req, res) => {
+    const dest = req.session.returnTo || '/';
+    delete req.session.returnTo;
+    res.redirect(dest);
+  }
 );
 
 app.get('/auth/logout', (req, res, next) => {
@@ -216,7 +229,7 @@ app.get('/api/users', requireRole('super_admin'), (req, res) => {
   res.json({ users: Object.entries(users).map(([email, u]) => ({ email, ...u })) });
 });
 
-const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor'];
+const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor', 'scriptor'];
 const ADDITIONAL_ROLES = ['zendesk_auditor'];
 
 app.post('/api/users', requireRole('super_admin'), (req, res) => {
@@ -5121,6 +5134,205 @@ app.delete('/api/newsletter/:month', requireRole('super_admin'), (req, res) => {
   delete store[req.params.month];
   saveNewsletters(store);
   res.json({ ok: true });
+});
+
+// ─── The Rob-osetta Stone — handwriting → clean text ─────────────────────────
+// Deciphers a handwritten note (phone photo or PDF scan) into typed, cleaned-up
+// text. Uses Gemini vision (handles images AND PDFs natively, long context for
+// the glossary), falling back to OpenAI GPT-4o for images if GEMINI_API_KEY
+// isn't set. OpenAI cannot process PDFs — those require Gemini.
+//
+// The "glossary" is the trick that replaces training a model: it's a freeform
+// note about the writer's quirks (how they form letters/numbers), their common
+// abbreviations, and recurring names/terms. It's injected into every request so
+// the model has context. Corrections you save get appended and reused.
+const SCRIBE_STORE_FILE = path.join(__dirname, 'scriptor-store.json');
+// Model is env-overridable so you can upgrade (e.g. gemini-2.5-pro for tougher
+// handwriting) without a code change.
+const SCRIBE_MODEL = process.env.SCRIPTOR_MODEL || 'gemini-2.5-flash';
+const SCRIBE_ROLES = ['super_admin', 'scriptor'];
+
+function loadScribeStore() {
+  try { return JSON.parse(fs.readFileSync(SCRIBE_STORE_FILE, 'utf8')); }
+  catch { return { glossary: '', corrections: [], updatedAt: null }; }
+}
+function saveScribeStore(store) {
+  store.updatedAt = new Date().toISOString();
+  fs.writeFileSync(SCRIBE_STORE_FILE, JSON.stringify(store, null, 2));
+}
+
+// Accept images + PDFs, up to 20MB (phone photos can be large).
+const scribeUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+function buildScribePrompt(store) {
+  const lines = [
+    'You are transcribing a handwritten note into clean, typed text.',
+    'Transcribe exactly what is written — do not invent, summarize, or omit content.',
+    'Fix only obvious spelling/spacing slips and lay it out with sensible paragraphs,',
+    'line breaks, and punctuation so it reads naturally. Preserve lists, dates, names,',
+    'numbers, and any structure (headings, bullet points) as written.',
+    'If the page is a FORM (printed field labels with handwritten answers), output one',
+    '"Label: value" per line using the printed labels, and skip fields that are blank.',
+    'Group related fields together (e.g. all phone numbers, then the address, then login',
+    'details) and put a blank line between each group so it is easy to scan. Ignore text',
+    'that is struck through / crossed out. Put margin notes, asides, and instructions at',
+    'the end under a "Notes:" heading (one item per line); when ink colors clearly differ,',
+    'group those notes by color. Do not use Markdown symbols (#, *, -) — plain text only.',
+    'If a word is genuinely illegible, transcribe your best guess and mark it like [?word].',
+    'Return ONLY the transcribed text — no preamble, no commentary, no code fences.',
+  ];
+  if (store.glossary && store.glossary.trim()) {
+    lines.push('', 'Reference notes about THIS writer\'s handwriting (use them to resolve ambiguity):', store.glossary.trim());
+  }
+  const recent = (store.corrections || []).slice(-40);
+  if (recent.length) {
+    lines.push('', 'Known corrections from past transcriptions (misread → correct):');
+    for (const c of recent) lines.push(`- "${c.before}" → "${c.after}"`);
+  }
+  return lines.join('\n');
+}
+
+async function scribeTranscribeGemini(prompt, b64, mime, isPdf) {
+  const resp = await axios.post(
+    `https://generativelanguage.googleapis.com/v1beta/models/${SCRIBE_MODEL}:generateContent`,
+    {
+      contents: [{
+        parts: [
+          { inline_data: { mime_type: isPdf ? 'application/pdf' : mime, data: b64 } },
+          { text: prompt },
+        ],
+      }],
+      generationConfig: {
+        temperature: 0,
+        maxOutputTokens: 4096,
+      },
+    },
+    { headers: { 'X-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, timeout: 60000 }
+  );
+  const text = (resp.data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+  return { text, provider: `gemini:${SCRIBE_MODEL}` };
+}
+
+async function scribeTranscribeOpenAI(prompt, b64, mime, isPdf) {
+  if (isPdf) throw new Error('PDF transcription requires the Gemini provider (set GEMINI_API_KEY). Upload a photo/image instead, or add the Gemini key.');
+  const resp = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      model: 'gpt-4o',
+      max_tokens: 4096,
+      temperature: 0,
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: prompt },
+        { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}` } },
+      ] }],
+    },
+    { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 60000 }
+  );
+  return { text: (resp.data?.choices?.[0]?.message?.content || '').trim(), provider: 'openai:gpt-4o' };
+}
+
+// GET the glossary + saved corrections
+app.get('/api/scriptor/glossary', requireRole(...SCRIBE_ROLES), (req, res) => {
+  res.json(loadScribeStore());
+});
+
+// PUT the glossary text (freeform notes about the writer's handwriting)
+app.put('/api/scriptor/glossary', requireRole(...SCRIBE_ROLES), (req, res) => {
+  const store = loadScribeStore();
+  if (typeof req.body.glossary === 'string') store.glossary = req.body.glossary;
+  saveScribeStore(store);
+  res.json(store);
+});
+
+// POST a correction (misread → correct) — teaches the glossary over time
+app.post('/api/scriptor/correction', requireRole(...SCRIBE_ROLES), (req, res) => {
+  const { before, after } = req.body || {};
+  if (!before || !after) return res.status(400).json({ error: 'before and after are required' });
+  const store = loadScribeStore();
+  store.corrections = store.corrections || [];
+  store.corrections.push({ before: String(before).slice(0, 200), after: String(after).slice(0, 200), at: new Date().toISOString() });
+  saveScribeStore(store);
+  res.json(store);
+});
+
+// POST a file (image or PDF) → cleaned transcription
+app.post('/api/scriptor/transcribe', requireRole(...SCRIBE_ROLES), scribeUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
+  const mime = req.file.mimetype || '';
+  const isPdf = mime === 'application/pdf' || /\.pdf$/i.test(req.file.originalname || '');
+  const isImg = /^image\//.test(mime);
+  if (!isPdf && !isImg) return res.status(400).json({ error: 'Please upload an image (JPEG/PNG/HEIC) or a PDF.' });
+
+  const b64 = req.file.buffer.toString('base64');
+  const prompt = buildScribePrompt(loadScribeStore());
+  const hasGemini = !!process.env.GEMINI_API_KEY;
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+
+  try {
+    let result;
+    if (hasGemini) {
+      try {
+        result = await scribeTranscribeGemini(prompt, b64, mime, isPdf);
+      } catch (e) {
+        if (!hasOpenAI || isPdf) throw e;
+        console.warn(`[scribe] Gemini failed (${e.message}), falling back to OpenAI`);
+        result = await scribeTranscribeOpenAI(prompt, b64, mime, isPdf);
+      }
+    } else if (hasOpenAI) {
+      result = await scribeTranscribeOpenAI(prompt, b64, mime, isPdf);
+    } else {
+      return res.status(503).json({ error: 'No vision provider configured. Set GEMINI_API_KEY (recommended) or OPENAI_API_KEY on the server.' });
+    }
+    if (!result.text) return res.status(502).json({ error: 'The model returned no text. Try a clearer photo or a different provider.' });
+    res.json(result);
+  } catch (e) {
+    const status = e?.response?.status;
+    const detail = e?.response?.data?.error?.message || e.message;
+    console.error('[scribe] transcribe error:', status || '', detail);
+    res.status(502).json({ error: `Transcription failed: ${detail}` });
+  }
+});
+
+// POST transcription text → downloadable Word (.docx)
+app.post('/api/scriptor/docx', requireRole(...SCRIBE_ROLES), async (req, res) => {
+  const text = typeof req.body?.text === 'string' ? req.body.text : '';
+  if (!text.trim()) return res.status(400).json({ error: 'No text to export.' });
+  const title = (req.body?.title || 'Transcription').toString().slice(0, 120);
+
+  try {
+    // One paragraph per line; blank lines become spacer paragraphs so the
+    // layout of the original note is preserved.
+    const bodyParas = text.replace(/\r\n/g, '\n').split('\n').map(line =>
+      new Paragraph({
+        spacing: { after: 120 },
+        children: line.trim() ? [new TextRun(line)] : [],
+      })
+    );
+
+    const doc = new Document({
+      creator: 'Dialed In Dash — The Rob-osetta Stone',
+      title,
+      sections: [{
+        children: [
+          new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(title)] }),
+          new Paragraph({
+            spacing: { after: 200 },
+            children: [new TextRun({ text: `Transcribed ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, italics: true, color: '888888', size: 18 })],
+          }),
+          ...bodyParas,
+        ],
+      }],
+    });
+
+    const buffer = await Packer.toBuffer(doc);
+    const safeName = title.replace(/[^\w\-]+/g, '_').replace(/^_+|_+$/g, '') || 'transcription';
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.docx"`);
+    res.send(buffer);
+  } catch (e) {
+    console.error('[scribe] docx export error:', e.message);
+    res.status(500).json({ error: `Could not build the Word document: ${e.message}` });
+  }
 });
 
 // ─── React SPA Catch-All ─────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ const ROLES = [
   { value: 'tv_display',             label: 'TV Display' },
   { value: 'zendesk_auditor',        label: 'Farewell Report' },
   { value: 'newsletter_contributor', label: 'Newsletter Contributor' },
+  { value: 'scriptor',               label: 'The Rob-osetta Stone' },
 ];
 
 const ROLE_STYLE = {
@@ -19,6 +20,7 @@ const ROLE_STYLE = {
   tv_display:             { background: 'rgba(251,146,60,0.15)', color: '#fb923c' },
   zendesk_auditor:        { background: 'rgba(239,68,68,0.15)',  color: '#f87171' },
   newsletter_contributor: { background: 'rgba(236,72,153,0.15)', color: '#f472b6' },
+  scriptor:               { background: 'rgba(139,92,246,0.15)', color: '#c4b5fd' },
 };
 
 const ROLE_LABEL = {
@@ -30,6 +32,7 @@ const ROLE_LABEL = {
   tv_display:             'TV Display',
   zendesk_auditor:        'Farewell Report',
   newsletter_contributor: 'Newsletter Contributor',
+  scriptor:               'The Rob-osetta Stone',
 };
 
 function TutorialRow({ t, onToggle, onReset }) {

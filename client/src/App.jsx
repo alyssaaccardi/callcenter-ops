@@ -29,14 +29,25 @@ import WhatsNew from './components/WhatsNew';
 import ZendeskAuditor from './modules/ZendeskAuditor';
 import MitelLeaderboard from './modules/MitelLeaderboard';
 import RingLeader from './modules/RingLeader';
+import Scriptor from './modules/Scriptor';
+import RobStonePage, { RobStoneApp } from './pages/RobStonePage';
+
+// Single source of truth for which "experience" a user gets at the root URL.
+// scriptor-only users get the chrome-less Rob-osetta Stone app (no sidebar);
+// everyone else gets the full dashboard shell.
+function isRobOnly(user) {
+  return user?.role === 'scriptor';
+}
 
 function Dashboard() {
   const { user } = useAuth();
+  if (isRobOnly(user)) return <RobStoneApp />;
   const defaultModule =
     user?.role === 'support'                ? 'support-center'   :
     user?.role === 'tech'                   ? 'tech-center'      :
     user?.role === 'zendesk_auditor'        ? 'zendesk-auditor'  :
     user?.role === 'newsletter_contributor' ? 'ring-leader'      :
+    user?.role === 'scriptor'               ? 'scriptor'         :
     'status';
   return <DashboardInner user={user} defaultModule={defaultModule} />;
 }
@@ -52,6 +63,7 @@ function DashboardInner({ user, defaultModule }) {
   const isAuditor  = hasRole('super_admin', 'zendesk_auditor');
   const isAnalytics = hasRole('super_admin', 'call_center_ops', 'zendesk_auditor'); // gates the Analytics section (Admin Dashboard + Farewell Reporter — tied together)
   const isNewsletter = hasRole('super_admin', 'newsletter_contributor');
+  const isScribe     = hasRole('super_admin', 'scriptor');
 
   const moduleMap = {
     'admin-dashboard':  isAnalytics ? <AdminDashboard />        : null,
@@ -71,9 +83,10 @@ function DashboardInner({ user, defaultModule }) {
     'user-management':  user?.role === 'super_admin' ? <UserManagementModule /> : null,
     'zendesk-auditor':  isAnalytics ? <ZendeskAuditor /> : null,
     'ring-leader':      isNewsletter ? <RingLeader /> : null,
+    scriptor:           isScribe    ? <Scriptor /> : null,
   };
 
-  const fallback = isOps ? <StatusBoard /> : isSupport ? <SupportCenter /> : isTech ? <TechCenter /> : isNewsletter ? <RingLeader /> : <StatusBoard />;
+  const fallback = isOps ? <StatusBoard /> : isSupport ? <SupportCenter /> : isTech ? <TechCenter /> : isNewsletter ? <RingLeader /> : isScribe ? <Scriptor /> : <StatusBoard />;
 
   const isPortal = activeModule === 'app-portal';
 
@@ -116,6 +129,7 @@ export default function App() {
             <Route path="/support-dash"   element={<SupportTVPage />} />
             <Route path="/tech-dash"      element={<TechTVPage />} />
             <Route path="/admin-tv"       element={<AdminTVPage />} />
+            <Route path="/rob"            element={<RobStonePage />} />
             <Route path="/dialed-in-pulse" element={<Navigate to="/support-dash" replace />} />
             <Route path="/mobile" element={
               <ProtectedRoute><MobilePage /></ProtectedRoute>

@@ -21,6 +21,7 @@ const ALL_NAV_ITEMS = [
   { id: 'admin-dashboard',  icon: '🛡️', label: 'Admin Dashboard',                    roles: ['super_admin', 'call_center_ops', 'zendesk_auditor'], section: 'Analytics'      },
   { id: 'zendesk-auditor', icon: '🔎', label: 'The Farewell Reporter',              roles: ['super_admin', 'call_center_ops', 'zendesk_auditor'], section: 'Analytics'      },
   { id: 'ring-leader',      icon: '🛎️', label: 'The Ring Leader',  roles: ['super_admin', 'newsletter_contributor'], section: 'Newsletter'    },
+  { id: 'scriptor',         icon: '🗿', label: 'The Rob-osetta Stone', roles: ['super_admin', 'scriptor'],            section: 'Tools'         },
 ];
 
 const ROLE_LABELS = {
@@ -31,6 +32,7 @@ const ROLE_LABELS = {
   tv_display:             'TV Display',
   zendesk_auditor:        'Zendesk Auditor',
   newsletter_contributor: 'Newsletter Contributor',
+  scriptor:               'The Rob-osetta Stone',
 };
 
 const NAV_SECTION_LABEL = {
