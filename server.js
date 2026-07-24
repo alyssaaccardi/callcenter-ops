@@ -159,6 +159,11 @@ setInterval(() => {
 
 // ─── Serve React app (production build) ──────────────────────────────────────
 app.use('/assets', express.static(path.join(__dirname, 'public', 'app', 'assets')));
+// Root-level files copied by Vite into public/app/ (favicons, page images like
+// rob-osetta-stone.png) need their own static mount — public/ (line 115) does
+// not descend into public/app/, and without this they fall through to the SPA
+// catch-all which returns index.html.
+app.use(express.static(path.join(__dirname, 'public', 'app')));
 
 // ─── TV Session: Validate Token (no auth required — used by TV display pages) ─
 app.get('/api/tv-session/validate', (req, res) => {
