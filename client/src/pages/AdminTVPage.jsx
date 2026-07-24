@@ -33,10 +33,10 @@ function fmtWait(seconds) {
   return rem ? `${m}m ${rem}s` : `${m}m`;
 }
 
-function nowClock() {
+function clockAt(tz) {
   return new Date().toLocaleTimeString('en-US', {
-    hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York',
-  }) + ' EST';
+    hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz,
+  });
 }
 
 function nowDate() {
@@ -127,7 +127,11 @@ export default function AdminTVPage() {
   const token = new URLSearchParams(window.location.search).get('t') || '';
   const [tokenValid, setTokenValid] = useState(null); // null=unknown, true=ok, false=invalid
 
-  const [now, setNow]                 = useState(nowClock());
+  const [clocks, setClocks] = useState({
+    est: clockAt('America/New_York'),
+    bz:  clockAt('America/Belize'),
+    jm:  clockAt('America/Jamaica'),
+  });
   const [status, setStatus]           = useState(null);
   const [didCounts, setDidCounts]     = useState(null);
   const [hubspotDids, setHubspotDids] = useState(null);
@@ -148,7 +152,15 @@ export default function AdminTVPage() {
   const get = useCallback((url) => axios.get(withToken(url, token)), [token]);
 
   // Poll: everything auto-refreshes on its own cadence.
-  useEffect(() => { const id = setInterval(() => setNow(nowClock()), CLOCK_MS); return () => clearInterval(id); }, []);
+  useEffect(() => {
+    const tick = () => setClocks({
+      est: clockAt('America/New_York'),
+      bz:  clockAt('America/Belize'),
+      jm:  clockAt('America/Jamaica'),
+    });
+    const id = setInterval(tick, CLOCK_MS);
+    return () => clearInterval(id);
+  }, []);
   useEffect(() => {
     if (!tokenValid) return;
     const run = () => get('/api/status').then(r => setStatus(r.data)).catch(() => {});
@@ -241,8 +253,17 @@ export default function AdminTVPage() {
           <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: 0.5 }}>Admin Dashboard</div>
           <div style={{ fontSize: 14, color: 'rgba(240,244,255,0.55)' }}>{nowDate()}</div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 34, fontWeight: 800, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{now}</div>
+        <div style={{ display: 'flex', gap: 20, alignItems: 'flex-end' }}>
+          {[
+            { label: 'EST', time: clocks.est },
+            { label: 'BZ',  time: clocks.bz  },
+            { label: 'JM',  time: clocks.jm  },
+          ].map(c => (
+            <div key={c.label} style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', color: 'rgba(240,244,255,0.5)', fontWeight: 600, marginBottom: 2 }}>{c.label}</div>
+              <div style={{ fontSize: 26, fontWeight: 800, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{c.time}</div>
+            </div>
+          ))}
         </div>
       </div>
 
