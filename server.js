@@ -1334,17 +1334,37 @@ app.get('/api/interviews', tvOrRole('super_admin', 'call_center_ops', 'zendesk_a
             timeout: 8000,
           }
         );
-        const events = (r.data?.items || []).map(ev => ({
-          id:       ev.id,
-          title:    ev.summary || '(untitled)',
-          start:    ev.start?.dateTime || ev.start?.date || null,
-          end:      ev.end?.dateTime   || ev.end?.date   || null,
-          isAllDay: !ev.start?.dateTime,
-          hangout:  ev.hangoutLink || ev.conferenceData?.entryPoints?.find(e => e.entryPointType === 'video')?.uri || null,
-          htmlLink: ev.htmlLink || null,
-          location: ev.location || null,
-          status:   ev.status || null,
-        }));
+        const events = (r.data?.items || []).map(ev => {
+          // Candidates = attendees whose email is NOT on the answeringlegal.com
+          // domain (interviewers/organizers are all @answeringlegal.com).
+          const allAttendees = (ev.attendees || []).map(a => ({
+            email:       a.email || '',
+            displayName: a.displayName || '',
+            response:    a.responseStatus || '',
+            organizer:   !!a.organizer,
+            self:        !!a.self,
+          }));
+          const candidates = allAttendees.filter(a =>
+            a.email && !/@answeringlegal\.com$/i.test(a.email) && !a.organizer
+          );
+          const interviewers = allAttendees.filter(a =>
+            a.email && /@answeringlegal\.com$/i.test(a.email)
+          );
+          return {
+            id:            ev.id,
+            title:         ev.summary || '(untitled)',
+            start:         ev.start?.dateTime || ev.start?.date || null,
+            end:           ev.end?.dateTime   || ev.end?.date   || null,
+            isAllDay:      !ev.start?.dateTime,
+            hangout:       ev.hangoutLink || ev.conferenceData?.entryPoints?.find(e => e.entryPointType === 'video')?.uri || null,
+            htmlLink:      ev.htmlLink || null,
+            location:      ev.location || null,
+            status:        ev.status || null,
+            organizerEmail:ev.organizer?.email || '',
+            candidates,
+            interviewers,
+          };
+        });
         return { team: cal.key, label: cal.label, events, error: null };
       } catch (e) {
         console.warn(`[interviews:${cal.key}] failed: ${e.response?.status || e.message}`);

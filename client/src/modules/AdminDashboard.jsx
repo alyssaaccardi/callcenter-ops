@@ -627,6 +627,17 @@ export default function AdminDashboard() {
   );
 }
 
+function fmtCandidateName(c) {
+  if (c.displayName && c.displayName.trim()) return c.displayName;
+  if (!c.email) return '';
+  const local = c.email.split('@')[0];
+  return local.split(/[._-]+/).filter(Boolean).map(p => p[0].toUpperCase() + p.slice(1)).join(' ');
+}
+function candidateLine(ev) {
+  const names = (ev.candidates || []).map(fmtCandidateName).filter(Boolean);
+  return names.length ? names.join(', ') : null;
+}
+
 function fmtInterviewTime(iso, isAllDay) {
   if (!iso) return '—';
   if (isAllDay) {
@@ -659,35 +670,42 @@ function InterviewsCard({ interviews, error }) {
             {t.error && <div style={{ fontSize: 11, color: 'var(--danger)', fontStyle: 'italic' }}>{t.error}</div>}
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', marginTop: 4, marginBottom: 2 }}>Upcoming</div>
             {upcoming.length === 0 && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>None</div>}
-            {upcoming.map(ev => (
-              <a
-                key={ev.id}
-                href={ev.htmlLink || ev.hangout || '#'}
-                target="_blank"
-                rel="noreferrer"
-                className="quality-row"
-                style={{ display: 'block', padding: '4px 6px', borderTop: '1px solid var(--border)', textDecoration: 'none', color: 'inherit', fontSize: 12 }}
-              >
-                <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.title}</div>
-                <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
-              </a>
-            ))}
+            {upcoming.map(ev => {
+              const names = candidateLine(ev);
+              return (
+                <a
+                  key={ev.id}
+                  href={ev.htmlLink || ev.hangout || '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="quality-row"
+                  style={{ display: 'block', padding: '4px 6px', borderTop: '1px solid var(--border)', textDecoration: 'none', color: 'inherit', fontSize: 12 }}
+                >
+                  <div style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{names || ev.title}</div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
+                  {names && <div style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.7 }}>{ev.title}</div>}
+                </a>
+              );
+            })}
             {past.length > 0 && (
               <>
                 <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', marginTop: 6, marginBottom: 2 }}>Recent</div>
-                {past.map(ev => (
-                  <a
-                    key={ev.id}
-                    href={ev.htmlLink || '#'}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="quality-row"
-                    style={{ display: 'block', padding: '4px 6px', borderTop: '1px solid var(--border)', textDecoration: 'none', color: 'inherit', fontSize: 12, opacity: 0.75 }}
-                  >
-                    <div style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.title}</div>
-                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
-                  </a>
-                ))}
+                {past.map(ev => {
+                  const names = candidateLine(ev);
+                  return (
+                    <a
+                      key={ev.id}
+                      href={ev.htmlLink || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="quality-row"
+                      style={{ display: 'block', padding: '4px 6px', borderTop: '1px solid var(--border)', textDecoration: 'none', color: 'inherit', fontSize: 12, opacity: 0.75 }}
+                    >
+                      <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{names || ev.title}</div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
+                    </a>
+                  );
+                })}
               </>
             )}
           </div>

@@ -513,6 +513,20 @@ export default function AdminTVPage() {
   );
 }
 
+function fmtCandidateName(c) {
+  if (c.displayName && c.displayName.trim()) return c.displayName;
+  if (!c.email) return '';
+  const local = c.email.split('@')[0];
+  // "jane.doe" or "jane_doe" → "Jane Doe"
+  return local.split(/[._-]+/).filter(Boolean).map(p => p[0].toUpperCase() + p.slice(1)).join(' ');
+}
+
+function candidateLine(ev) {
+  const names = (ev.candidates || []).map(fmtCandidateName).filter(Boolean);
+  if (names.length === 0) return null;
+  return names.join(', ');
+}
+
 function fmtInterviewTime(iso, isAllDay) {
   if (!iso) return '—';
   if (isAllDay) {
@@ -561,35 +575,42 @@ function InterviewsPanel({ interviews, error }) {
               )}
               <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.5)', letterSpacing: 0.6, marginTop: 4, marginBottom: 4, textTransform: 'uppercase' }}>Upcoming</div>
               {upcoming.length === 0 && <div style={{ fontSize: 12, color: 'rgba(240,244,255,0.5)', fontStyle: 'italic' }}>None scheduled</div>}
-              {upcoming.map(ev => (
-                <a
-                  key={ev.id}
-                  href={ev.htmlLink || ev.hangout || '#'}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="tv-clickable"
-                  style={{ display: 'block', padding: '6px 8px', borderTop: '1px solid rgba(255,255,255,0.06)', textDecoration: 'none', color: 'inherit' }}
-                >
-                  <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.title}</div>
-                  <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.6)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
-                </a>
-              ))}
+              {upcoming.map(ev => {
+                const names = candidateLine(ev);
+                return (
+                  <a
+                    key={ev.id}
+                    href={ev.htmlLink || ev.hangout || '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="tv-clickable"
+                    style={{ display: 'block', padding: '6px 8px', borderTop: '1px solid rgba(255,255,255,0.06)', textDecoration: 'none', color: 'inherit' }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{names || ev.title}</div>
+                    <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.6)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
+                    {names && <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.title}</div>}
+                  </a>
+                );
+              })}
               {past.length > 0 && (
                 <>
                   <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.5)', letterSpacing: 0.6, marginTop: 8, marginBottom: 4, textTransform: 'uppercase' }}>Recent</div>
-                  {past.map(ev => (
-                    <a
-                      key={ev.id}
-                      href={ev.htmlLink || '#'}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="tv-clickable"
-                      style={{ display: 'block', padding: '6px 8px', borderTop: '1px solid rgba(255,255,255,0.06)', textDecoration: 'none', color: 'inherit', opacity: 0.75 }}
-                    >
-                      <div style={{ fontWeight: 500, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.title}</div>
-                      <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.5)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
-                    </a>
-                  ))}
+                  {past.map(ev => {
+                    const names = candidateLine(ev);
+                    return (
+                      <a
+                        key={ev.id}
+                        href={ev.htmlLink || '#'}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="tv-clickable"
+                        style={{ display: 'block', padding: '6px 8px', borderTop: '1px solid rgba(255,255,255,0.06)', textDecoration: 'none', color: 'inherit', opacity: 0.75 }}
+                      >
+                        <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{names || ev.title}</div>
+                        <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.5)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
+                      </a>
+                    );
+                  })}
                 </>
               )}
             </div>
