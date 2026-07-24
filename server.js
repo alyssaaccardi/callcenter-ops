@@ -1350,9 +1350,20 @@ app.get('/api/interviews', tvOrRole('super_admin', 'call_center_ops', 'zendesk_a
           const interviewers = allAttendees.filter(a =>
             a.email && /@answeringlegal\.com$/i.test(a.email)
           );
+          // Strip HTML tags from description, cap length.
+          const rawDesc = (ev.description || '')
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/\s+/g, ' ')
+            .trim();
+          const description = rawDesc.length > 240 ? rawDesc.slice(0, 240) + '…' : rawDesc;
           return {
             id:            ev.id,
             title:         ev.summary || '(untitled)',
+            description,
             start:         ev.start?.dateTime || ev.start?.date || null,
             end:           ev.end?.dateTime   || ev.end?.date   || null,
             isAllDay:      !ev.start?.dateTime,

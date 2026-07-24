@@ -684,6 +684,7 @@ function InterviewsCard({ interviews, error }) {
                   <div style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{names || ev.title}</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
                   {names && <div style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.7 }}>{ev.title}</div>}
+                  {!names && ev.description && <div style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.7 }}>{ev.description}</div>}
                 </a>
               );
             })}
@@ -703,6 +704,7 @@ function InterviewsCard({ interviews, error }) {
                     >
                       <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{names || ev.title}</div>
                       <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
+                      {!names && ev.description && <div style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.7 }}>{ev.description}</div>}
                     </a>
                   );
                 })}

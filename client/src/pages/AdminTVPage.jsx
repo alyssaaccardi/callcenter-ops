@@ -589,6 +589,7 @@ function InterviewsPanel({ interviews, error }) {
                     <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{names || ev.title}</div>
                     <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.6)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
                     {names && <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.title}</div>}
+                    {!names && ev.description && <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.description}</div>}
                   </a>
                 );
               })}
@@ -608,6 +609,7 @@ function InterviewsPanel({ interviews, error }) {
                       >
                         <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{names || ev.title}</div>
                         <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.5)' }}>{fmtInterviewTime(ev.start, ev.isAllDay)}</div>
+                        {!names && ev.description && <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.description}</div>}
                       </a>
                     );
                   })}
