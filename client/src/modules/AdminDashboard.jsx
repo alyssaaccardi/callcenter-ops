@@ -6,6 +6,7 @@ const CHARGEOVER_POLL_MS = 60_000;
 const MITEL_POLL_MS      = 10_000;
 const TASKS_POLL_MS      = 30_000;
 const QUALITY_POLL_MS    = 120_000;
+const AGENTS_POLL_MS     = 60_000;
 
 function usd(n) {
   const v = Number(n) || 0;
@@ -22,14 +23,65 @@ function fmtWait(seconds) {
 }
 
 function fmtHourEst(iso) {
-  return new Date(iso).toLocaleTimeString('en-US', {
+  const d = new Date(iso);
+  const today = todayEstDay();
+  const dayStr = estDayOf(iso);
+  const hourStr = d.toLocaleTimeString('en-US', {
     hour: 'numeric', hour12: true, timeZone: 'America/New_York',
   });
+  if (dayStr === today) return hourStr;
+  // Different day (yesterday for 24h view) — prefix the short date
+  const shortDate = d.toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', timeZone: 'America/New_York',
+  });
+  return `${shortDate} · ${hourStr}`;
 }
 
 function fmtTime(iso) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' });
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' }) + ' EST';
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+    timeZone: 'America/New_York',
+  }) + ' EST';
+}
+
+function estDayOf(iso) {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
+
+function todayEstDay() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
+
+// Monday.com task due dates arrive as "YYYY-MM-DD" (EST workspace) and dueTime
+// as "HH:MM" 24-hr. Render as a human-readable local label.
+function fmtDueDate(dueDate, dueTime) {
+  if (!dueDate) return '';
+  const [y, m, d] = dueDate.split('-').map(Number);
+  if (!y || !m || !d) return dueDate;
+  const dayOnly = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  const today = todayEstDay();
+  const tomorrow = (() => {
+    const t = new Date(); t.setDate(t.getDate() + 1);
+    return t.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  })();
+  let dayLabel;
+  if (dayOnly === today) dayLabel = 'Today';
+  else if (dayOnly === tomorrow) dayLabel = 'Tomorrow';
+  else dayLabel = new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  if (!dueTime) return dayLabel;
+  // dueTime is "HH:MM" 24-hr in EST → convert to 12-hr
+  const [hh, mm] = dueTime.split(':').map(Number);
+  const period = hh >= 12 ? 'PM' : 'AM';
+  const hour12 = hh % 12 === 0 ? 12 : hh % 12;
+  const time = mm ? `${hour12}:${String(mm).padStart(2,'0')} ${period}` : `${hour12} ${period}`;
+  return `${dayLabel} ${time} EST`;
 }
 
 // Two-letter tag for a system's state — green UP, red DOWN.
@@ -303,9 +355,9 @@ function SupportTasks({ tasks }) {
         : rows.slice(0, 10).map(t => (
           <div key={t.id} style={{ padding: '6px 8px', borderTop: '1px solid var(--border)', fontSize: 12 }}>
             <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
-            <div style={{ color: 'var(--muted)', fontSize: 11, display: 'flex', gap: 8 }}>
+            <div style={{ color: 'var(--muted)', fontSize: 11, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {t.accountName && <span>{t.accountName}</span>}
-              {t.dueDate && <span>· {t.dueDate}{t.dueTime ? ` ${t.dueTime}` : ''}</span>}
+              {t.dueDate && <span>· {fmtDueDate(t.dueDate, t.dueTime)}</span>}
               {t.worker && <span>· {t.worker}</span>}
             </div>
           </div>
@@ -330,6 +382,7 @@ export default function AdminDashboard() {
   const [qualityPeriod, setQualityPeriod] = useState('this-week');
   const [quality, setQuality] = useState(null);
   const [qualityLoading, setQualityLoading] = useState(false);
+  const [agentCounts, setAgentCounts] = useState(null); // { here, standby, total }
 
   const fetchOutstanding = useCallback(async () => {
     setOutstandingLoading(true);
@@ -378,11 +431,41 @@ export default function AdminDashboard() {
     return () => { cancelled = true; clearInterval(id); };
   }, [qualityPeriod]);
 
+  useEffect(() => {
+    const fetch = () => api.get('/api/monday/agents').then(r => {
+      const agents = r.data?.agents || [];
+      const here    = agents.filter(a => a.status === 'Here').length;
+      const standby = agents.filter(a => a.status === 'On Standby').length;
+      setAgentCounts({ here, standby, total: here + standby });
+    }).catch(() => {});
+    fetch();
+    const id = setInterval(fetch, AGENTS_POLL_MS);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <div style={{ padding: 20, maxWidth: 1600, margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 16, flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0 }}>Admin Dashboard</h2>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {agentCounts && (
+            <div
+              title={`${agentCounts.here} here · ${agentCounts.standby} on standby`}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                padding: '6px 12px', borderRadius: 999,
+                background: 'rgba(26,111,232,0.12)',
+                border: '1px solid rgba(26,111,232,0.35)',
+                fontSize: 13, fontWeight: 600, color: 'var(--royal)',
+              }}
+            >
+              <span>👥</span>
+              <span>{agentCounts.total} logged in</span>
+              <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>
+                ({agentCounts.here} here · {agentCounts.standby} standby)
+              </span>
+            </div>
+          )}
           <StatusChip label="Mitel Classic" state={status?.mitelClassic?.state} />
           <StatusChip label="Mobile App"    state={status?.mobileApp?.state} />
           <StatusChip label="Integrations"  state={status?.integrations?.state} />
