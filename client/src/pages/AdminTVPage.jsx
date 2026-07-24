@@ -466,37 +466,57 @@ export default function AdminTVPage() {
             )}
           </Panel>
 
-          <Panel title={`Overdue Support Tasks (${overdueTasks.length})`}>
+          <Panel
+            title="Support Tasks"
+            right={<span style={{ fontSize: 10, color: 'rgba(240,244,255,0.5)' }}>{overdueTasks.length} overdue · {upcomingTasks.length} due today</span>}
+          >
             {overdueTasks.length === 0 && upcomingTasks.length === 0 && (
-              <div style={{ color: '#4ade80', fontSize: 13, fontStyle: 'italic' }}>All clear</div>
+              <div style={{ color: '#4ade80', fontSize: 13, fontStyle: 'italic', padding: '4px 0' }}>All clear — nothing overdue and nothing due today</div>
             )}
-            {overdueTasks.slice(0, 5).map(t => (
-              <a
-                key={t.id}
-                href={t.link || '#'}
-                target="_blank"
-                rel="noreferrer"
-                className="tv-clickable"
-                style={{ display: 'block', padding: '5px 6px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: 12, textDecoration: 'none', color: 'inherit' }}
-              >
-                <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
-                <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.55)' }}>
-                  {t.accountName && <>{t.accountName} · </>}
-                  {t.worker || 'unassigned'}
-                </div>
-              </a>
-            ))}
-            {overdueTasks.length === 0 && upcomingTasks.length > 0 && (
+
+            {overdueTasks.length > 0 && (
               <>
-                <div style={{ marginTop: 2, fontSize: 10, color: 'rgba(240,244,255,0.5)', textTransform: 'uppercase', letterSpacing: 0.6 }}>Due today</div>
-                {upcomingTasks.slice(0, 5).map(t => (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f87171' }} />
+                  <div style={{ fontSize: 10, color: '#f87171', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700 }}>
+                    Overdue ({overdueTasks.length})
+                  </div>
+                </div>
+                {overdueTasks.slice(0, 4).map(t => (
                   <a
                     key={t.id}
                     href={t.link || '#'}
                     target="_blank"
                     rel="noreferrer"
                     className="tv-clickable"
-                    style={{ display: 'block', padding: '5px 6px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: 12, textDecoration: 'none', color: 'inherit' }}
+                    style={{ display: 'block', padding: '5px 6px', borderTop: '1px solid rgba(248,113,113,0.15)', fontSize: 12, textDecoration: 'none', color: 'inherit' }}
+                  >
+                    <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
+                    <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.55)' }}>
+                      {t.accountName && <>{t.accountName} · </>}
+                      {t.worker || 'unassigned'}
+                    </div>
+                  </a>
+                ))}
+              </>
+            )}
+
+            {upcomingTasks.length > 0 && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: overdueTasks.length > 0 ? 10 : 0, marginBottom: 2 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fbbf24' }} />
+                  <div style={{ fontSize: 10, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700 }}>
+                    Due Today ({upcomingTasks.length})
+                  </div>
+                </div>
+                {upcomingTasks.slice(0, 4).map(t => (
+                  <a
+                    key={t.id}
+                    href={t.link || '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="tv-clickable"
+                    style={{ display: 'block', padding: '5px 6px', borderTop: '1px solid rgba(251,191,36,0.15)', fontSize: 12, textDecoration: 'none', color: 'inherit' }}
                   >
                     <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
                     <div style={{ fontSize: 10, color: 'rgba(240,244,255,0.55)' }}>
