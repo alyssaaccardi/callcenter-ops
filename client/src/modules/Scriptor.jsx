@@ -152,26 +152,18 @@ export default function Scriptor() {
 
   return (
     <div style={{ maxWidth: 1080, margin: '0 auto', color: T.text }}>
-      {/* Header — brand mark + glossary toggle */}
+      {/* Header — text-only brand mark + glossary toggle */}
       <header style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: 20, padding: '8px 4px 28px', borderBottom: `1px solid ${T.border}`, marginBottom: 32,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <img
-            src="/rob-osetta-stone.png"
-            alt=""
-            style={{ width: 56, height: 56, borderRadius: T.radiusSm, objectFit: 'cover', flexShrink: 0 }}
-            onError={e => { e.target.style.display = 'none'; }}
-          />
-          <div>
-            <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>
-              The Rob-osetta Stone
-            </h1>
-            <p style={{ color: T.textMuted, margin: '3px 0 0', fontSize: 14, fontWeight: 400 }}>
-              Decoding Rob's handwriting since 2014.
-            </p>
-          </div>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>
+            The Rob-osetta Stone
+          </h1>
+          <p style={{ color: T.textMuted, margin: '3px 0 0', fontSize: 14, fontWeight: 400 }}>
+            Decoding Rob's handwriting since 2014.
+          </p>
         </div>
         <button
           onClick={() => setShowGlossary(v => !v)}
@@ -275,8 +267,10 @@ export default function Scriptor() {
                 src="/rob-osetta-stone.png"
                 alt=""
                 style={{
-                  width: 128, height: 128, borderRadius: T.radius, objectFit: 'cover', marginBottom: 20,
-                  opacity: dragOver ? 1 : 0.92,
+                  width: 160, height: 160, objectFit: 'contain', marginBottom: 20,
+                  // multiply blends the image's off-white background into the
+                  // white page so the stone appears to float, not sit in a box.
+                  mixBlendMode: 'multiply',
                   transition: 'all 150ms ease',
                 }}
                 onError={e => { e.target.style.display = 'none'; }}
