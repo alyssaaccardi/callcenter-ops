@@ -1,5 +1,9 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import api from '../api';
+import * as pdfjsLib from 'pdfjs-dist';
+// Vite `?url` import — resolves the worker file to a URL the browser can load.
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 // The Rob-osetta Stone — drop a handwritten note (photo or PDF) and get
 // clean, typed text back. Accuracy improves via the glossary + corrections.
@@ -304,39 +308,7 @@ export default function Scriptor() {
                 >×</button>
               </div>
               {isPdf ? (
-                <div>
-                  {/* <object> handles blob-URL PDFs more reliably than <iframe>
-                      in Chrome; the fallback children render if the browser
-                      refuses to embed it inline. */}
-                  <object
-                    data={previewUrl}
-                    type="application/pdf"
-                    style={{
-                      display: 'block', width: '100%', height: '72vh', minHeight: 480,
-                      borderRadius: T.radiusSm, background: T.surfaceAlt,
-                      border: `1px solid ${T.border}`,
-                    }}
-                  >
-                    <div style={{
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                      gap: 10, height: '72vh', minHeight: 480,
-                      background: T.surfaceAlt, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
-                      padding: 24, textAlign: 'center',
-                    }}>
-                      <div style={{ fontSize: 14, color: T.textMuted }}>
-                        Your browser can't preview this PDF inline.
-                      </div>
-                      <a href={previewUrl} target="_blank" rel="noreferrer" style={{ ...ghostBtn, textDecoration: 'none' }}>
-                        Open PDF in new tab
-                      </a>
-                    </div>
-                  </object>
-                  <div style={{ marginTop: 8, fontSize: 12, color: T.textMuted, textAlign: 'right' }}>
-                    <a href={previewUrl} target="_blank" rel="noreferrer" style={{ color: T.textMuted }}>
-                      Open PDF in new tab ↗
-                    </a>
-                  </div>
-                </div>
+                <PdfPreview file={file} previewUrl={previewUrl} />
               ) : (
                 <a href={previewUrl} target="_blank" rel="noreferrer" title="Open full size">
                   <img
@@ -482,6 +454,110 @@ const textareaStyle = {
   border: `1px solid ${T.border}`, background: T.surface, color: T.text,
   resize: 'vertical', boxSizing: 'border-box', outline: 'none',
 };
+
+// Renders a PDF's pages to stacked canvases via pdf.js. Chrome blocks embedding
+// blob-URL PDFs in <iframe>/<object>, so we render them ourselves — the same
+// approach every "PDF viewer in the browser" ends up using.
+const MAX_RENDERED_PAGES = 12;
+function PdfPreview({ file, previewUrl }) {
+  const containerRef = useRef(null);
+  const [pageCount, setPageCount] = useState(null);
+  const [rendering, setRendering] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!file) return;
+    let cancelled = false;
+    setRendering(true); setError(''); setPageCount(null);
+    (async () => {
+      try {
+        const buf = await file.arrayBuffer();
+        if (cancelled) return;
+        const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+        if (cancelled) return;
+        setPageCount(pdf.numPages);
+
+        const container = containerRef.current;
+        if (!container) return;
+        container.innerHTML = '';
+        const cssWidth = container.clientWidth || 600;
+        const dpr = window.devicePixelRatio || 1;
+        const pagesToRender = Math.min(pdf.numPages, MAX_RENDERED_PAGES);
+
+        for (let n = 1; n <= pagesToRender; n++) {
+          if (cancelled) return;
+          const page = await pdf.getPage(n);
+          const base = page.getViewport({ scale: 1 });
+          const scale = (cssWidth / base.width) * dpr;
+          const viewport = page.getViewport({ scale });
+
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          canvas.style.display = 'block';
+          canvas.style.width = '100%';
+          canvas.style.height = 'auto';
+          canvas.style.marginBottom = n < pagesToRender ? '10px' : '0';
+          canvas.style.borderRadius = String(T.radiusSm) + 'px';
+          canvas.style.background = '#ffffff';
+          canvas.style.boxShadow = '0 1px 0 rgba(0,0,0,0.04)';
+          container.appendChild(canvas);
+          await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        }
+      } catch (e) {
+        if (!cancelled) setError(e.message || 'Failed to render PDF.');
+      } finally {
+        if (!cancelled) setRendering(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [file]);
+
+  return (
+    <div>
+      <div style={{
+        position: 'relative',
+        height: '72vh', minHeight: 480, overflow: 'auto',
+        borderRadius: T.radiusSm, background: T.surfaceAlt,
+        border: '1px solid ' + T.border,
+        padding: 10,
+      }}>
+        {rendering && (
+          <div style={{
+            position: 'absolute', top: 12, left: 12, zIndex: 1,
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '5px 10px', borderRadius: 999,
+            background: T.surface, border: '1px solid ' + T.border,
+            fontSize: 12, color: T.textMuted,
+          }}>
+            <Spinner /> Rendering PDF…
+          </div>
+        )}
+        {error && (
+          <div style={{ padding: 20, textAlign: 'center', color: T.danger, fontSize: 13 }}>
+            {error}
+          </div>
+        )}
+        <div ref={containerRef} />
+      </div>
+      <div style={{
+        marginTop: 8, display: 'flex', justifyContent: 'space-between',
+        fontSize: 12, color: T.textMuted,
+      }}>
+        <span>
+          {pageCount != null && (
+            pageCount > MAX_RENDERED_PAGES
+              ? 'Showing first ' + MAX_RENDERED_PAGES + ' of ' + pageCount + ' pages'
+              : pageCount + ' page' + (pageCount === 1 ? '' : 's')
+          )}
+        </span>
+        <a href={previewUrl} target="_blank" rel="noreferrer" style={{ color: T.textMuted }}>
+          Open PDF in new tab ↗
+        </a>
+      </div>
+    </div>
+  );
+}
 
 // Simple spinner (avoids depending on the app's global .spinner class)
 function Spinner() {
