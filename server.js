@@ -9,7 +9,7 @@ const https = require('https');
 const session = require('express-session');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { passport, requireAuth, requireRole, isAuthedOrKey, listUsers, addUser, removeUser } = require('./auth');
+const { passport, requireAuth, requireRole, isAuthedOrKey, requireAnsweringLegalDomain, listUsers, addUser, removeUser } = require('./auth');
 const multer = require('multer');
 const XLSX   = require('xlsx');
 const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
@@ -307,6 +307,11 @@ app.post('/api/tv-session', requireAuth, (req, res) => {
 // ─── TV Display Routes (token validated client-side by React) ─────────────────
 app.get('/dialed-in',       (req, res) => res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
 app.get('/dialed-in-pulse', (req, res) => res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
+
+// ─── Ring Leader (open to any @answeringlegal.com Google account) ────────────
+app.get('/ring-leader', requireAnsweringLegalDomain, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'ring-leader.html'));
+});
 
 // ─── Status Store (persisted to disk) ────────────────────────────────────────
 const STATUS_FILE = path.join(__dirname, 'status-store.json');

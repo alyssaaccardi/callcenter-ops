@@ -30,7 +30,22 @@ if (process.env.GOOGLE_CLIENT_ID) {
 
     const users = loadUsers();
     const record = users[email];
-    if (!record) return done(null, false, { message: 'unauthorized' });
+    if (!record) {
+      // Guest access: any @answeringlegal.com email gets a limited session
+      // scoped to routes that explicitly opt into it (e.g. /ring-leader).
+      // requireAuth / isAuthedOrKey / requireRole all reject role === 'guest'.
+      if (email.endsWith('@answeringlegal.com')) {
+        return done(null, {
+          email,
+          name: profile.displayName || email,
+          role: 'guest',
+          additionalRoles: [],
+          picture: profile.photos?.[0]?.value || '',
+          isGuest: true,
+        });
+      }
+      return done(null, false, { message: 'unauthorized' });
+    }
 
     const picture = profile.photos?.[0]?.value || '';
     let changed = false;
@@ -50,9 +65,23 @@ if (process.env.GOOGLE_CLIENT_ID) {
   }));
 }
 
-passport.serializeUser((user, done) => done(null, user.email));
+passport.serializeUser((user, done) => {
+  if (user.isGuest) {
+    // Guests aren't in users.json, so we can't rehydrate from disk. Stash
+    // enough on the session to reconstruct the user object as-is.
+    return done(null, `guest:${JSON.stringify({ e: user.email, n: user.name, p: user.picture || '' })}`);
+  }
+  done(null, user.email);
+});
 
-passport.deserializeUser((email, done) => {
+passport.deserializeUser((data, done) => {
+  if (typeof data === 'string' && data.startsWith('guest:')) {
+    try {
+      const g = JSON.parse(data.slice(6));
+      return done(null, { email: g.e, name: g.n, role: 'guest', additionalRoles: [], picture: g.p || '', isGuest: true });
+    } catch { return done(null, false); }
+  }
+  const email = data;
   const users = loadUsers();
   const record = users[email];
   if (!record) return done(null, false);
@@ -80,7 +109,9 @@ function requireAuth(req, res, next) {
     req.user = req.user || API_KEY_USER;
     return next();
   }
-  if (req.isAuthenticated()) return next();
+  // Guests are authenticated but should not pass generic app auth — they only
+  // get in via requireAnsweringLegalDomain on explicitly opted-in routes.
+  if (req.isAuthenticated() && !req.user?.isGuest) return next();
   res.status(401).json({ error: 'Unauthorized' });
 }
 
@@ -95,7 +126,26 @@ function isAuthedOrKey(req) {
     req.user = req.user || API_KEY_USER;
     return true;
   }
-  return req.isAuthenticated();
+  return req.isAuthenticated() && !req.user?.isGuest;
+}
+
+// Domain-only gate for pages we open up to any Answering Legal employee.
+// Redirects unauthenticated users through Google OAuth (returning to the same
+// URL) and 403s any authenticated user whose email isn't @answeringlegal.com.
+function requireAnsweringLegalDomain(req, res, next) {
+  if (isDev && !process.env.GOOGLE_CLIENT_ID) {
+    req.user = req.user || DEV_USER;
+    return next();
+  }
+  if (!req.isAuthenticated()) {
+    const rt = encodeURIComponent(req.originalUrl || req.url || '/');
+    return res.redirect(`/auth/google?returnTo=${rt}`);
+  }
+  const email = (req.user?.email || '').toLowerCase();
+  if (!email.endsWith('@answeringlegal.com')) {
+    return res.status(403).send('Access restricted to Answering Legal employees.');
+  }
+  next();
 }
 
 function requireRole(...roles) {
@@ -127,4 +177,4 @@ function removeUser(email) {
   saveUsers(users);
 }
 
-module.exports = { passport, requireAuth, requireRole, isAuthedOrKey, listUsers, addUser, removeUser };
+module.exports = { passport, requireAuth, requireRole, isAuthedOrKey, requireAnsweringLegalDomain, listUsers, addUser, removeUser };
