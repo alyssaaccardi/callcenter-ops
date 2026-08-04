@@ -112,6 +112,10 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Gate the Ring Leader's image folder behind the same auth as the HTML.
+// Must sit BEFORE the generic public/ static handler so it wins the match.
+app.use('/ring-leader-assets', requireAnsweringLegalDomain, express.static(path.join(__dirname, 'public', 'ring-leader-assets')));
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── Embeddable Widget (allow iframing from any origin) ───────────────────────
@@ -308,10 +312,8 @@ app.post('/api/tv-session', requireAuth, (req, res) => {
 app.get('/dialed-in',       (req, res) => res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
 app.get('/dialed-in-pulse', (req, res) => res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
 
-// ─── Ring Leader (unlisted — URL itself acts as the shared secret) ───────────
-app.get('/ring-leader', (req, res) => {
-  // Discourage search engines from indexing the slug even if it leaks into a
-  // sitemap or referrer log. Not a security control, just hygiene.
+// ─── Ring Leader (Google login required, @answeringlegal.com only) ───────────
+app.get('/ring-leader', requireAnsweringLegalDomain, (req, res) => {
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   res.sendFile(path.join(__dirname, 'public', 'ring-leader.html'));
 });
