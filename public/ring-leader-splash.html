@@ -57,6 +57,46 @@
     color: #C79A3C;
   }
 
+  /* Seal — circular gold-rimmed emblem containing the crest, treated as a
+     duotone engraving via blend mode + filter. Reads as a wax-seal /
+     magazine masthead ornament rather than an inline illustration. */
+  .seal {
+    position: relative;
+    width: 118px;
+    height: 118px;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 40%, #1B2A4E 0%, #0F1A31 78%);
+    border: 1px solid rgba(217,163,43,0.55);
+    box-shadow:
+      0 0 0 6px rgba(217,163,43,0.06),
+      0 14px 34px rgba(0,0,0,0.5),
+      inset 0 0 24px rgba(217,163,43,0.10);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 4px 0 2px;
+  }
+  .seal::before {
+    content:"";
+    position: absolute;
+    inset: 4px;
+    border-radius: 50%;
+    border: 1px dashed rgba(217,163,43,0.28);
+    pointer-events: none;
+  }
+  .seal img {
+    width: 82%;
+    height: 82%;
+    object-fit: contain;
+    /* Duotone treatment: strip original colour, tint gold, blend into the
+       navy backdrop so the illustration reads as engraved metal instead of
+       flat clip-art. */
+    filter: grayscale(1) brightness(1.35) contrast(1.15) sepia(1) hue-rotate(-14deg) saturate(3.4);
+    mix-blend-mode: screen;
+    opacity: 0.92;
+  }
+
   /* Masthead ornament — thin hairline, small SVG fleuron, thin hairline */
   .ornament {
     display: flex;
@@ -170,6 +210,10 @@
 
 <div class="stage">
   <div class="eyebrow">Answering Legal &nbsp;·&nbsp; Monthly Leadership Slack Blast</div>
+
+  <div class="seal" aria-hidden="true">
+    <img src="/ring-leader-crest.png" alt="">
+  </div>
 
   <div class="ornament" aria-hidden="true">
     <div class="line"></div>
