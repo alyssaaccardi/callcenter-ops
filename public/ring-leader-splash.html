@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>The Ring Leader — Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&amp;family=Spectral:ital,wght@0,300;0,400;0,600&amp;family=Archivo:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #16233F;
+    color: #FBF7EC;
+    font-family: Spectral, Georgia, serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    /* Subtle radial vignette for depth */
+    background-image:
+      radial-gradient(ellipse at 50% 30%, rgba(217,163,43,0.10), transparent 55%),
+      radial-gradient(ellipse at 50% 100%, rgba(0,0,0,0.35), transparent 60%);
+  }
+
+  .card {
+    width: 100%;
+    max-width: 440px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 22px;
+  }
+
+  .eyebrow {
+    font-family: Archivo, sans-serif;
+    font-size: 10.5px;
+    letter-spacing: .32em;
+    text-transform: uppercase;
+    color: #C79A3C;
+  }
+
+  .crest {
+    width: 128px;
+    height: auto;
+    display: block;
+    filter: drop-shadow(0 6px 22px rgba(0,0,0,0.35));
+  }
+
+  h1 {
+    margin: 0;
+    font-family: 'Libre Caslon Display', Georgia, serif;
+    font-weight: 400;
+    font-size: 52px;
+    line-height: 1;
+    color: #FBF7EC;
+  }
+  h1 .gold { color: #D9A32B; }
+
+  .rule {
+    width: 44px;
+    height: 1px;
+    background: #D9A32B;
+    margin: 4px 0 0;
+  }
+
+  .lede {
+    font-size: 17px;
+    line-height: 1.55;
+    font-weight: 300;
+    color: #CBD3E2;
+    max-width: 380px;
+    text-wrap: pretty;
+  }
+  .lede strong { color: #FBF7EC; font-weight: 600; }
+
+  .google-btn {
+    margin-top: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    background: #FBF7EC;
+    color: #1B2A4E;
+    font-family: Archivo, sans-serif;
+    font-size: 14.5px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    padding: 12px 22px;
+    border: 1px solid #E7DFC9;
+    border-radius: 3px;
+    text-decoration: none;
+    transition: background-color .15s ease, transform .15s ease, box-shadow .15s ease;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.28);
+  }
+  .google-btn:hover {
+    background: #FFFFFF;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 22px rgba(0,0,0,0.36);
+  }
+  .google-btn:active { transform: translateY(0); }
+  .google-btn svg { width: 20px; height: 20px; flex: none; }
+
+  .note {
+    margin-top: 4px;
+    font-family: Archivo, sans-serif;
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: #8E9AB4;
+  }
+
+  .footer {
+    position: fixed;
+    bottom: 18px;
+    left: 0; right: 0;
+    text-align: center;
+    font-family: Archivo, sans-serif;
+    font-size: 10.5px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: #4A5975;
+  }
+
+  @media (max-width: 480px) {
+    h1 { font-size: 40px; }
+    .crest { width: 108px; }
+    .lede { font-size: 16px; }
+    .google-btn { font-size: 14px; padding: 12px 20px; }
+    .footer { position: static; margin-top: 30px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="eyebrow">Answering Legal &nbsp;·&nbsp; Monthly Leadership Slack Blast</div>
+  <img class="crest" src="/ring-leader-crest.png" alt="The Ring Leader crest">
+  <h1>The Ring <span class="gold">Leader</span></h1>
+  <div class="rule"></div>
+  <div class="lede">Sign in with your <strong>Answering Legal</strong> Google account to read this month's issue.</div>
+
+  <a class="google-btn" href="/auth/google?returnTo=/ring-leader">
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+    </svg>
+    <span>Sign in with Google</span>
+  </a>
+
+  <div class="note">@answeringlegal.com accounts only</div>
+</div>
+
+<div class="footer">The Ring Leader &nbsp;·&nbsp; Answering Legal</div>
+
+</body>
+</html>
