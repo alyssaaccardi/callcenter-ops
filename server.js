@@ -112,10 +112,6 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Gate the Ring Leader's image folder behind the same auth as the HTML.
-// Must sit BEFORE the generic public/ static handler so it wins the match.
-app.use('/ring-leader-assets', requireAnsweringLegalDomain, express.static(path.join(__dirname, 'public', 'ring-leader-assets')));
-
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── Embeddable Widget (allow iframing from any origin) ───────────────────────
@@ -312,22 +308,11 @@ app.post('/api/tv-session', requireAuth, (req, res) => {
 app.get('/dialed-in',       (req, res) => res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
 app.get('/dialed-in-pulse', (req, res) => res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
 
-// ─── Ring Leader (Google login required, @answeringlegal.com only) ───────────
-// Unauth → branded splash with "Sign in with Google" CTA (not a bare 302).
-// Non-AL authed → 403. AL authed → newsletter.
+// ─── Ring Leader (unlisted — URL itself acts as the shared secret) ───────────
 app.get('/ring-leader', (req, res) => {
+  // Discourage search engines from indexing the slug even if it leaks into a
+  // sitemap or referrer log. Not a security control, just hygiene.
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-  const isDevBypass = process.env.NODE_ENV !== 'production' && !process.env.GOOGLE_CLIENT_ID;
-  if (isDevBypass) {
-    return res.sendFile(path.join(__dirname, 'public', 'ring-leader.html'));
-  }
-  if (!req.isAuthenticated()) {
-    return res.sendFile(path.join(__dirname, 'public', 'ring-leader-splash.html'));
-  }
-  const email = (req.user?.email || '').toLowerCase();
-  if (!email.endsWith('@answeringlegal.com')) {
-    return res.status(403).send('Access restricted to Answering Legal employees.');
-  }
   res.sendFile(path.join(__dirname, 'public', 'ring-leader.html'));
 });
 
