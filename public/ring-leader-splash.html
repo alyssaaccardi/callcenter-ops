@@ -7,139 +7,185 @@
 <title>The Ring Leader — Sign in</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
-<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&amp;family=Spectral:ital,wght@0,300;0,400;0,600&amp;family=Archivo:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&amp;family=Libre+Caslon+Text:ital@0;1&amp;family=Spectral:ital,wght@0,300;0,400;0,600&amp;family=Archivo:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
-    background: #16233F;
+    background: #0F1A31;
     color: #FBF7EC;
     font-family: Spectral, Georgia, serif;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 40px 20px;
-    /* Subtle radial vignette for depth */
+    /* Layered lighting — warm gold uplight, cool navy sink, faint paper grain */
     background-image:
-      radial-gradient(ellipse at 50% 30%, rgba(217,163,43,0.10), transparent 55%),
-      radial-gradient(ellipse at 50% 100%, rgba(0,0,0,0.35), transparent 60%);
+      radial-gradient(ellipse 60% 40% at 50% 22%, rgba(217,163,43,0.16), transparent 70%),
+      radial-gradient(ellipse 90% 60% at 50% 110%, rgba(0,0,0,0.55), transparent 60%),
+      radial-gradient(circle at 0% 0%, rgba(255,255,255,0.02), transparent 40%);
+    background-color: #0F1A31;
+    position: relative;
+    overflow: hidden;
+  }
+  /* Fine noise/grain for that printed-page feel */
+  body::before {
+    content:"";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    opacity: .04;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
   }
 
-  .card {
+  .stage {
+    position: relative;
+    z-index: 1;
     width: 100%;
-    max-width: 440px;
+    max-width: 500px;
     display: flex;
     flex-direction: column;
     align-items: center;
     text-align: center;
-    gap: 22px;
+    gap: 20px;
   }
 
   .eyebrow {
     font-family: Archivo, sans-serif;
     font-size: 10.5px;
-    letter-spacing: .32em;
+    letter-spacing: .34em;
     text-transform: uppercase;
     color: #C79A3C;
   }
 
-  .crest {
-    width: 128px;
-    height: auto;
-    display: block;
-    filter: drop-shadow(0 6px 22px rgba(0,0,0,0.35));
+  /* Masthead ornament — thin hairline, small SVG fleuron, thin hairline */
+  .ornament {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    max-width: 360px;
+    margin: 4px 0 -2px;
   }
+  .ornament .line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(217,163,43,0.55) 50%, transparent);
+  }
+  .ornament svg { width: 26px; height: 12px; color: #D9A32B; flex: none; }
 
   h1 {
     margin: 0;
     font-family: 'Libre Caslon Display', Georgia, serif;
     font-weight: 400;
-    font-size: 52px;
-    line-height: 1;
+    font-size: 68px;
+    line-height: .96;
     color: #FBF7EC;
+    letter-spacing: -0.01em;
   }
-  h1 .gold { color: #D9A32B; }
+  h1 .gold {
+    color: #D9A32B;
+    font-style: italic;
+  }
 
-  .rule {
-    width: 44px;
-    height: 1px;
-    background: #D9A32B;
-    margin: 4px 0 0;
+  .issue {
+    font-family: 'Libre Caslon Text', Georgia, serif;
+    font-style: italic;
+    font-size: 15px;
+    color: #93A0BB;
+    letter-spacing: .02em;
   }
 
   .lede {
-    font-size: 17px;
+    margin-top: 10px;
+    font-size: 16.5px;
     line-height: 1.55;
     font-weight: 300;
-    color: #CBD3E2;
-    max-width: 380px;
+    color: #C6CFDF;
+    max-width: 400px;
     text-wrap: pretty;
   }
   .lede strong { color: #FBF7EC; font-weight: 600; }
 
   .google-btn {
-    margin-top: 6px;
+    margin-top: 10px;
     display: inline-flex;
     align-items: center;
     gap: 12px;
     background: #FBF7EC;
-    color: #1B2A4E;
+    color: #16233F;
     font-family: Archivo, sans-serif;
     font-size: 14.5px;
     font-weight: 600;
     letter-spacing: .02em;
-    padding: 12px 22px;
-    border: 1px solid #E7DFC9;
-    border-radius: 3px;
+    padding: 13px 24px;
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 2px;
     text-decoration: none;
     transition: background-color .15s ease, transform .15s ease, box-shadow .15s ease;
-    box-shadow: 0 6px 16px rgba(0,0,0,0.28);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
   }
   .google-btn:hover {
     background: #FFFFFF;
     transform: translateY(-1px);
-    box-shadow: 0 8px 22px rgba(0,0,0,0.36);
+    box-shadow: 0 14px 34px rgba(0,0,0,0.48);
   }
   .google-btn:active { transform: translateY(0); }
   .google-btn svg { width: 20px; height: 20px; flex: none; }
 
   .note {
-    margin-top: 4px;
+    margin-top: 2px;
     font-family: Archivo, sans-serif;
-    font-size: 11px;
-    letter-spacing: .12em;
+    font-size: 10.5px;
+    letter-spacing: .28em;
     text-transform: uppercase;
-    color: #8E9AB4;
+    color: #6D7A94;
   }
 
   .footer {
     position: fixed;
-    bottom: 18px;
+    bottom: 20px;
     left: 0; right: 0;
     text-align: center;
     font-family: Archivo, sans-serif;
-    font-size: 10.5px;
-    letter-spacing: .18em;
+    font-size: 10px;
+    letter-spacing: .28em;
     text-transform: uppercase;
-    color: #4A5975;
+    color: #3F4C68;
   }
 
-  @media (max-width: 480px) {
-    h1 { font-size: 40px; }
-    .crest { width: 108px; }
-    .lede { font-size: 16px; }
-    .google-btn { font-size: 14px; padding: 12px 20px; }
-    .footer { position: static; margin-top: 30px; }
+  @media (max-width: 520px) {
+    h1 { font-size: 46px; }
+    .eyebrow { font-size: 9.5px; letter-spacing: .28em; }
+    .lede { font-size: 15.5px; }
+    .google-btn { font-size: 14px; padding: 12px 22px; }
+    .footer { position: static; margin-top: 28px; }
+    .stage { gap: 18px; }
+  }
+  @media (max-width: 360px) {
+    h1 { font-size: 38px; }
   }
 </style>
 </head>
 <body>
 
-<div class="card">
+<div class="stage">
   <div class="eyebrow">Answering Legal &nbsp;·&nbsp; Monthly Leadership Slack Blast</div>
-  <img class="crest" src="/ring-leader-crest.png" alt="The Ring Leader crest">
+
+  <div class="ornament" aria-hidden="true">
+    <div class="line"></div>
+    <!-- Small fleuron / arrow ornament, hand-drawn feel -->
+    <svg viewBox="0 0 60 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M0 6h20" stroke="currentColor" stroke-width="0.8" stroke-linecap="round"/>
+      <path d="M40 6h20" stroke="currentColor" stroke-width="0.8" stroke-linecap="round"/>
+      <path d="M30 1.5l4 4.5-4 4.5-4-4.5 4-4.5z" fill="currentColor" fill-opacity="0.15" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round"/>
+    </svg>
+    <div class="line"></div>
+  </div>
+
   <h1>The Ring <span class="gold">Leader</span></h1>
-  <div class="rule"></div>
+
+  <div class="issue">Issue №1 &nbsp;·&nbsp; July 2026</div>
+
   <div class="lede">Sign in with your <strong>Answering Legal</strong> Google account to read this month's issue.</div>
 
   <a class="google-btn" href="/auth/google?returnTo=/ring-leader">
@@ -155,7 +201,7 @@
   <div class="note">@answeringlegal.com accounts only</div>
 </div>
 
-<div class="footer">The Ring Leader &nbsp;·&nbsp; Answering Legal</div>
+<div class="footer">The Ring Leader &nbsp;·&nbsp; Answering Legal &nbsp;·&nbsp; MMXXVI</div>
 
 </body>
 </html>
