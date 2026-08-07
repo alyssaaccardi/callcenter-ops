@@ -112,6 +112,8 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+app.get(/^\/ring-leader(\.html|-assets\/.*)?$/, (req, res) => res.status(404).send('Not found'));
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── Embeddable Widget (allow iframing from any origin) ───────────────────────
@@ -308,13 +310,7 @@ app.post('/api/tv-session', requireAuth, (req, res) => {
 app.get('/dialed-in',       (req, res) => res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
 app.get('/dialed-in-pulse', (req, res) => res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
 
-// ─── Ring Leader (unlisted — URL itself acts as the shared secret) ───────────
-app.get('/ring-leader', (req, res) => {
-  // Discourage search engines from indexing the slug even if it leaks into a
-  // sitemap or referrer log. Not a security control, just hygiene.
-  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-  res.sendFile(path.join(__dirname, 'public', 'ring-leader.html'));
-});
+app.get('/ring-leader', (req, res) => res.status(404).send('Not found'));
 
 // ─── Status Store (persisted to disk) ────────────────────────────────────────
 const STATUS_FILE = path.join(__dirname, 'status-store.json');
