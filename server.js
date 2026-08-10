@@ -5588,10 +5588,32 @@ function resolveInPrefetched(prefetched, tenantHint, coId) {
       status: cust.customer_status_str || null,
       subStatus: sub?.package_status_str || null,
       canceledAt: sub?.cancel_datetime?.slice(0, 10) || null,
+      planMinutes: sub?.custom_2 ?? null,       // Allotted minutes plan
+      overageRate: sub?.custom_1 ?? null,       // $/min over plan
+      nextInvoiceDate: sub?.next_invoice_datetime || null,
       url: cust.url_self || null,
     };
   }
   return null;
+}
+
+// Parse "1st (03/01/2026 - 03/12/2026)" or "15th (...)" → day of month integer.
+function parseCycleDay(billingCycle) {
+  if (!billingCycle) return null;
+  const m = String(billingCycle).match(/^\s*(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// Extract day-of-month from a "YYYY-MM-DD HH:MM:SS" string.
+function parseInvoiceDay(dt) {
+  if (!dt) return null;
+  const m = String(dt).match(/^\d{4}-\d{2}-(\d{2})/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function parseNumericPlan(v) {
+  const n = parseInt(String(v ?? '').replace(/[^\d-]/g, ''), 10);
+  return Number.isFinite(n) ? n : null;
 }
 
 async function runMinuteAuditorJob(jobId, rows) {
@@ -5643,7 +5665,14 @@ async function runMinuteAuditorJob(jobId, rows) {
       job.done++;
       continue;
     }
-    const result = { ...row, chargeover: null, active: null, error: null, skipped: false, flagged: false, nameMismatch: false, nameMatchScore: null };
+    const result = {
+      ...row,
+      chargeover: null, active: null, error: null, skipped: false,
+      flagged: false, flagReasons: [],
+      nameMismatch: false,   nameMatchScore: null,
+      planMismatch: false,   csvPlan: null, coPlan: null,
+      billDayMismatch: false, csvBillDay: null, coBillDay: null,
+    };
     if (!row.coCustomerId) {
       result.error = 'No COCustomerId';
     } else {
@@ -5652,17 +5681,40 @@ async function runMinuteAuditorJob(jobId, rows) {
       result.chargeover = co;
       result.active = co ? isChargeoverActive(co) : false;
       if (!co) result.error = 'Not found in ChargeOver';
-      // Only score when we actually found a CO record to compare against —
-      // "no CO record at all" is already surfaced separately as No Match.
-      if (co && row.client && co.company) {
-        const score = nameMatchScore(row.client, co.company);
-        result.nameMatchScore = Math.round(score * 100) / 100;
-        result.nameMismatch = score < NAME_MATCH_THRESHOLD;
+
+      if (co) {
+        // Name check — reuse existing fuzzy scorer (stopwords: LLC/PC/Law/Office/etc.)
+        if (row.client && co.company) {
+          const score = nameMatchScore(row.client, co.company);
+          result.nameMatchScore = Math.round(score * 100) / 100;
+          result.nameMismatch = score < NAME_MATCH_THRESHOLD;
+        }
+        // Plan check — CSV Allotted vs CO subscription custom_2
+        result.csvPlan = parseNumericPlan(row.allotted);
+        result.coPlan  = parseNumericPlan(co.planMinutes);
+        if (result.csvPlan != null && result.coPlan != null) {
+          result.planMismatch = result.csvPlan !== result.coPlan;
+        }
+        // Bill-date check — CSV cycle day (1st/15th) vs CO next-invoice day
+        result.csvBillDay = parseCycleDay(row.billingCycle);
+        result.coBillDay  = parseInvoiceDay(co.nextInvoiceDate);
+        if (result.csvBillDay != null && result.coBillDay != null) {
+          result.billDayMismatch = result.csvBillDay !== result.coBillDay;
+        }
       }
     }
-    // Flag if (a) the customer used minutes but isn't actively paying, or
-    // (b) the CO customer we linked to isn't actually the same business.
-    result.flagged = (hasUsage(row) && result.active !== true) || result.nameMismatch;
+
+    // Aggregate reasons and set the flag.
+    const usageIssue = hasUsage(row) && result.active !== true;
+    if (usageIssue) {
+      result.flagReasons.push(result.error === 'Not found in ChargeOver' || result.error === 'No COCustomerId'
+        ? 'No CO match' : 'Not paying');
+    }
+    if (result.nameMismatch)    result.flagReasons.push('Name mismatch');
+    if (result.planMismatch)    result.flagReasons.push('Plan mismatch');
+    if (result.billDayMismatch) result.flagReasons.push('Bill day mismatch');
+    result.flagged = result.flagReasons.length > 0;
+
     job.results.push(result);
     job.done++;
   }

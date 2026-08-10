@@ -9,8 +9,8 @@ const COLUMNS = [
   { key: 'coCustomerId',    label: 'CO ID',             align: 'right', type: 'text' },
   { key: 'clientType',      label: 'Tenant',            align: 'left',  type: 'text' },
   { key: 'billingCategory', label: 'CSV Category',      align: 'left',  type: 'text' },
-  { key: 'billingCycle',    label: 'Cycle',             align: 'left',  type: 'text' },
-  { key: 'allotted',        label: 'Plan (min)',        align: 'right', type: 'num'  },
+  { key: 'planCompare',     label: 'Plan (CSV/CO)',     align: 'right', type: 'text' },
+  { key: 'billDayCompare',  label: 'Bill Day (CSV/CO)', align: 'right', type: 'text' },
   { key: 'used',            label: 'Used',              align: 'right', type: 'num'  },
   { key: 'remaining',       label: '% Remain',          align: 'right', type: 'text' },
   { key: 'totalCalls',      label: 'Calls',             align: 'right', type: 'num'  },
@@ -34,6 +34,19 @@ function flattenRow(r) {
   };
 }
 
+function planCompareText(r) {
+  const csv = r.csvPlan ?? (r.allotted ? parseInt(r.allotted, 10) : null);
+  const co  = r.coPlan;
+  const csvS = csv == null || Number.isNaN(csv) ? '—' : String(csv);
+  const coS  = co  == null                       ? '—' : String(co);
+  return `${csvS} / ${coS}`;
+}
+function billDayCompareText(r) {
+  const csvS = r.csvBillDay == null ? '—' : String(r.csvBillDay);
+  const coS  = r.coBillDay  == null ? '—' : String(r.coBillDay);
+  return `${csvS} / ${coS}`;
+}
+
 function resultLabel(r) {
   if (r.skipped) return 'Skipped';
   if (r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId') return 'No Match';
@@ -46,33 +59,37 @@ function flaggedLabel(r) {
   return r.flagged ? 'FLAGGED' : '';
 }
 
-// CSV export — subscription-status focused
+// CSV export for the billing team — every field needed to reconcile a
+// discrepancy is in this row: CSV values, CO values, per-check mismatch
+// booleans, and the resolved audit verdict.
 function toCsv(rows) {
   const header = [
-    'Flagged','Flag Reason','Client (CSV)','Company (CO)','Name Match Score',
-    'COCustomerId','Tenant (CSV)','Tenant (CO)','Billing Category','Billing Cycle',
-    'Allotted (Plan)','Used','Remaining','Total Calls','Audit Result','Error','CO URL',
+    'Flagged','Flag Reasons',
+    'Client (CSV)','Company (CO)','Name Match Score','Name Mismatch',
+    'COCustomerId','Tenant (CSV)','Tenant (CO)',
+    'Billing Category','Billing Cycle (CSV)',
+    'Plan CSV (Allotted)','Plan CO (custom_2)','Plan Mismatch',
+    'Bill Day CSV','Bill Day CO','Bill Day Mismatch','CO Next Invoice',
+    'Used','Remaining','Total Calls','Overage Rate CSV','Overage Rate CO',
+    'CO Sub Status','Audit Result','Error','CO URL',
   ];
   const esc = (v) => {
     const s = v == null ? '' : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const reasons = r => {
-    if (!r.flagged) return '';
-    const rs = [];
-    if (r.active !== true && !r.skipped) rs.push(resultLabel(r) === 'No Match' ? 'No CO match' : 'Not paying');
-    if (r.nameMismatch) rs.push('Name mismatch');
-    return rs.join(' + ');
-  };
+  const yn = v => v === true ? 'Y' : v === false ? 'N' : '';
   const lines = [header.join(',')];
   for (const r of rows) {
     const co = r.chargeover || {};
     lines.push([
-      flaggedLabel(r), reasons(r), r.client, co.company || '', r.nameMatchScore ?? '',
+      flaggedLabel(r), (r.flagReasons || []).join(' + '),
+      r.client, co.company || '', r.nameMatchScore ?? '', yn(r.nameMismatch),
       r.coCustomerId, r.clientType, co.tenant || '',
       r.billingCategory, r.billingCycle,
-      r.allotted, r.used, r.remaining, r.totalCalls,
-      resultLabel(r), r.error || '', co.url || '',
+      r.csvPlan ?? r.allotted, r.coPlan ?? '', yn(r.planMismatch),
+      r.csvBillDay ?? '', r.coBillDay ?? '', yn(r.billDayMismatch), co.nextInvoiceDate || '',
+      r.used, r.remaining, r.totalCalls, r.overageRate, co.overageRate ?? '',
+      co.subStatus || '', resultLabel(r), r.error || '', co.url || '',
     ].map(esc).join(','));
   }
   return lines.join('\n');
@@ -203,8 +220,11 @@ export default function MinuteAuditor() {
     const q = search.trim().toLowerCase();
     const isNotInCO = r => r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
     return flat.filter(r => {
-      if (filterActive === 'flagged'  && !r.flagged) return false;
-      if (filterActive === 'mismatch' && !r.nameMismatch) return false;
+      if (filterActive === 'flagged'         && !r.flagged) return false;
+      if (filterActive === 'nameMismatch'    && !r.nameMismatch) return false;
+      if (filterActive === 'planMismatch'    && !r.planMismatch) return false;
+      if (filterActive === 'billDayMismatch' && !r.billDayMismatch) return false;
+      if (filterActive === 'notPaying'       && !(r.flagged && r.active !== true)) return false;
       if (filterActive === 'audited'  && r.skipped) return false;
       if (filterActive === 'active'   && (r.skipped || r.active !== true)) return false;
       if (filterActive === 'inactive' && (r.skipped || r.active !== false || isNotInCO(r))) return false;
@@ -249,11 +269,19 @@ export default function MinuteAuditor() {
   }, [filtered, sort]);
 
   const summary = useMemo(() => {
-    const s = { total: flat.length, audited: 0, flagged: 0, active: 0, inactive: 0, notfound: 0, skipped: 0, error: 0 };
+    const s = {
+      total: flat.length, audited: 0, flagged: 0, active: 0, inactive: 0,
+      notfound: 0, skipped: 0, error: 0,
+      nameMismatch: 0, planMismatch: 0, billDayMismatch: 0, notPaying: 0,
+    };
     for (const r of flat) {
       if (r.skipped) { s.skipped++; continue; }
       s.audited++;
       if (r.flagged) s.flagged++;
+      if (r.nameMismatch)    s.nameMismatch++;
+      if (r.planMismatch)    s.planMismatch++;
+      if (r.billDayMismatch) s.billDayMismatch++;
+      if (r.flagged && r.active !== true) s.notPaying++;
       if (r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId') s.notfound++;
       else if (r.error) s.error++;
       else if (r.active === true) s.active++;
@@ -389,6 +417,28 @@ export default function MinuteAuditor() {
             )}
           </div>
 
+          {summary.flagged > 0 && (
+            <div className="ma-reason-strip">
+              <span className="ma-reason-label">Flag breakdown:</span>
+              <button className={`ma-reason-pill${filterActive === 'notPaying' ? ' ma-reason-active' : ''}`}
+                      onClick={() => setFilterActive('notPaying')}>
+                Not Paying <b>{summary.notPaying}</b>
+              </button>
+              <button className={`ma-reason-pill${filterActive === 'nameMismatch' ? ' ma-reason-active' : ''}`}
+                      onClick={() => setFilterActive('nameMismatch')}>
+                Name Mismatch <b>{summary.nameMismatch}</b>
+              </button>
+              <button className={`ma-reason-pill${filterActive === 'planMismatch' ? ' ma-reason-active' : ''}`}
+                      onClick={() => setFilterActive('planMismatch')}>
+                Plan Mismatch <b>{summary.planMismatch}</b>
+              </button>
+              <button className={`ma-reason-pill${filterActive === 'billDayMismatch' ? ' ma-reason-active' : ''}`}
+                      onClick={() => setFilterActive('billDayMismatch')}>
+                Bill Day Mismatch <b>{summary.billDayMismatch}</b>
+              </button>
+            </div>
+          )}
+
           <div className="ma-filters">
             <input
               className="ma-search"
@@ -399,7 +449,10 @@ export default function MinuteAuditor() {
             />
             <select className="ma-select" value={filterActive} onChange={e => setFilterActive(e.target.value)}>
               <option value="flagged">🚨 Flagged (any reason)</option>
-              <option value="mismatch">Name Mismatch only</option>
+              <option value="nameMismatch">— Name Mismatch only</option>
+              <option value="planMismatch">— Plan Mismatch only</option>
+              <option value="billDayMismatch">— Bill Day Mismatch only</option>
+              <option value="notPaying">— Not Paying (used minutes, no active sub)</option>
               <option value="audited">Audited (excl. skipped)</option>
               <option value="active">Active only</option>
               <option value="inactive">Inactive only</option>
@@ -456,8 +509,14 @@ export default function MinuteAuditor() {
                     </td>
                     <td className="ma-td ma-td-left">{r.resolvedTenant || r.clientType || '—'}</td>
                     <td className="ma-td ma-td-left">{r.billingCategory || '—'}</td>
-                    <td className="ma-td ma-td-left ma-cycle">{r.billingCycle || '—'}</td>
-                    <td className="ma-td ma-td-right">{fmtNum(r.allotted)}</td>
+                    <td className={`ma-td ma-td-right${r.planMismatch ? ' ma-td-mismatch' : ''}`}
+                        title={r.planMismatch ? 'CSV Allotted differs from CO plan (custom_2)' : ''}>
+                      {planCompareText(r)}
+                    </td>
+                    <td className={`ma-td ma-td-right${r.billDayMismatch ? ' ma-td-mismatch' : ''}`}
+                        title={r.billDayMismatch ? 'CSV billing cycle day differs from CO next invoice day' : ''}>
+                      {billDayCompareText(r)}
+                    </td>
                     <td className="ma-td ma-td-right">{fmtNum(r.used)}</td>
                     <td className="ma-td ma-td-right">{r.remaining || '—'}</td>
                     <td className="ma-td ma-td-right">{fmtNum(r.totalCalls)}</td>

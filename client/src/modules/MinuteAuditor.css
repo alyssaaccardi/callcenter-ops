@@ -185,6 +185,41 @@ button.ma-stat { appearance: none; }
   box-shadow: 0 0 0 3px rgba(220,38,38,0.20);
 }
 
+/* Flag-reason breakdown pills */
+.ma-reason-strip {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: -4px 0 12px;
+  flex-wrap: wrap;
+}
+.ma-reason-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(60,50,120,0.5);
+  margin-right: 4px;
+}
+.ma-reason-pill {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(220,38,38,0.20);
+  background: rgba(220,38,38,0.06);
+  color: #b91c1c;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  font: inherit;
+}
+.ma-reason-pill:hover { background: rgba(220,38,38,0.14); }
+.ma-reason-pill b { margin-left: 4px; }
+.ma-reason-active {
+  background: rgba(220,38,38,0.18);
+  border-color: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220,38,38,0.15);
+}
+
 /* Filters */
 .ma-filters {
   display: flex;
@@ -260,6 +295,7 @@ button.ma-stat { appearance: none; }
 .ma-td-right  { text-align: right; font-variant-numeric: tabular-nums; }
 .ma-td-center { text-align: center; }
 .ma-td-overdue { color: #b45309; font-weight: 700; }
+.ma-td-mismatch { color: #b91c1c; font-weight: 700; background: rgba(220,38,38,0.06); }
 
 .ma-cycle { color: rgba(60,50,120,0.65); font-size: 11px; }
 
