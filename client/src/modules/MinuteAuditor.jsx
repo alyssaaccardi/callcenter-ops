@@ -49,18 +49,27 @@ function flaggedLabel(r) {
 // CSV export — subscription-status focused
 function toCsv(rows) {
   const header = [
-    'Flagged','Client','COCustomerId','Tenant (CSV)','Tenant (CO)','Billing Category','Billing Cycle',
+    'Flagged','Flag Reason','Client (CSV)','Company (CO)','Name Match Score',
+    'COCustomerId','Tenant (CSV)','Tenant (CO)','Billing Category','Billing Cycle',
     'Allotted (Plan)','Used','Remaining','Total Calls','Audit Result','Error','CO URL',
   ];
   const esc = (v) => {
     const s = v == null ? '' : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
+  const reasons = r => {
+    if (!r.flagged) return '';
+    const rs = [];
+    if (r.active !== true && !r.skipped) rs.push(resultLabel(r) === 'No Match' ? 'No CO match' : 'Not paying');
+    if (r.nameMismatch) rs.push('Name mismatch');
+    return rs.join(' + ');
+  };
   const lines = [header.join(',')];
   for (const r of rows) {
     const co = r.chargeover || {};
     lines.push([
-      flaggedLabel(r), r.client, r.coCustomerId, r.clientType, co.tenant || '',
+      flaggedLabel(r), reasons(r), r.client, co.company || '', r.nameMatchScore ?? '',
+      r.coCustomerId, r.clientType, co.tenant || '',
       r.billingCategory, r.billingCycle,
       r.allotted, r.used, r.remaining, r.totalCalls,
       resultLabel(r), r.error || '', co.url || '',
@@ -195,6 +204,7 @@ export default function MinuteAuditor() {
     const isNotInCO = r => r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
     return flat.filter(r => {
       if (filterActive === 'flagged'  && !r.flagged) return false;
+      if (filterActive === 'mismatch' && !r.nameMismatch) return false;
       if (filterActive === 'audited'  && r.skipped) return false;
       if (filterActive === 'active'   && (r.skipped || r.active !== true)) return false;
       if (filterActive === 'inactive' && (r.skipped || r.active !== false || isNotInCO(r))) return false;
@@ -388,7 +398,8 @@ export default function MinuteAuditor() {
               onChange={(e) => setSearch(e.target.value)}
             />
             <select className="ma-select" value={filterActive} onChange={e => setFilterActive(e.target.value)}>
-              <option value="flagged">🚨 Flagged (used minutes, not paying)</option>
+              <option value="flagged">🚨 Flagged (any reason)</option>
+              <option value="mismatch">Name Mismatch only</option>
               <option value="audited">Audited (excl. skipped)</option>
               <option value="active">Active only</option>
               <option value="inactive">Inactive only</option>
@@ -432,7 +443,10 @@ export default function MinuteAuditor() {
                     <td className="ma-td ma-td-left">
                       <div className="ma-client-name">{r.client || '—'}</div>
                       {r.coCompany && r.coCompany.toLowerCase() !== (r.client || '').toLowerCase() && (
-                        <div className="ma-client-alias">CO: {r.coCompany}</div>
+                        <div className={r.nameMismatch ? 'ma-client-alias ma-client-alias-mismatch' : 'ma-client-alias'}
+                             title={r.nameMismatch ? `Name mismatch (score ${r.nameMatchScore})` : ''}>
+                          CO: {r.coCompany}{r.nameMismatch && ' ⚠'}
+                        </div>
                       )}
                     </td>
                     <td className="ma-td ma-td-right">

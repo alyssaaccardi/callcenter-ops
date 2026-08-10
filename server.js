@@ -5630,14 +5630,20 @@ async function runMinuteAuditorJob(jobId, rows) {
     return Number.isFinite(calls) && calls > 0;
   };
 
+  // Threshold below which the CSV client name and CO company are considered
+  // different accounts (bad linkage). nameMatchScore returns 1.0 for exact,
+  // 0.95 for substring, else a token-overlap ratio; 0.7 catches clear
+  // mismatches while forgiving punctuation/entity-suffix drift.
+  const NAME_MATCH_THRESHOLD = 0.7;
+
   for (const row of rows) {
     const cat = String(row.billingCategory || '').toUpperCase();
     if (MINUTE_AUDITOR_SKIP_CATEGORIES.has(cat)) {
-      job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true, flagged: false });
+      job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true, flagged: false, nameMismatch: false, nameMatchScore: null });
       job.done++;
       continue;
     }
-    const result = { ...row, chargeover: null, active: null, error: null, skipped: false, flagged: false };
+    const result = { ...row, chargeover: null, active: null, error: null, skipped: false, flagged: false, nameMismatch: false, nameMatchScore: null };
     if (!row.coCustomerId) {
       result.error = 'No COCustomerId';
     } else {
@@ -5646,10 +5652,17 @@ async function runMinuteAuditorJob(jobId, rows) {
       result.chargeover = co;
       result.active = co ? isChargeoverActive(co) : false;
       if (!co) result.error = 'Not found in ChargeOver';
+      // Only score when we actually found a CO record to compare against —
+      // "no CO record at all" is already surfaced separately as No Match.
+      if (co && row.client && co.company) {
+        const score = nameMatchScore(row.client, co.company);
+        result.nameMatchScore = Math.round(score * 100) / 100;
+        result.nameMismatch = score < NAME_MATCH_THRESHOLD;
+      }
     }
-    // The core audit signal: customer had usage but isn't paying (either
-    // subscription isn't active, or we can't find them in CO at all).
-    result.flagged = hasUsage(row) && result.active !== true;
+    // Flag if (a) the customer used minutes but isn't actively paying, or
+    // (b) the CO customer we linked to isn't actually the same business.
+    result.flagged = (hasUsage(row) && result.active !== true) || result.nameMismatch;
     job.results.push(result);
     job.done++;
   }

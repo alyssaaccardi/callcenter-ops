@@ -274,6 +274,7 @@ button.ma-stat { appearance: none; }
 
 .ma-client-name { font-weight: 600; }
 .ma-client-alias { font-size: 10px; color: rgba(60,50,120,0.55); margin-top: 1px; }
+.ma-client-alias-mismatch { color: #b91c1c; font-weight: 700; }
 
 .ma-link {
   color: var(--purple, #7c3aed);
