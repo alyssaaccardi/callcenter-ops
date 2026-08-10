@@ -16,8 +16,8 @@ const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
 const Anthropic = require('@anthropic-ai/sdk');
 const mitelLeaderboard = require('./mitel-leaderboard');
 
-https.globalAgent.setMaxListeners(50);
-require('events').EventEmitter.defaultMaxListeners = 50;
+https.globalAgent.setMaxListeners(200);
+require('events').EventEmitter.defaultMaxListeners = 100;
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -5527,60 +5527,116 @@ function isChargeoverActive(co) {
 // expected to have a live paid subscription in ChargeOver.
 const MINUTE_AUDITOR_SKIP_CATEGORIES = new Set(['INTERNAL', 'TRIAL', 'FREE']);
 
+// Fetch every customer (or every package) for a tenant with paginated /list.
+// One-shot bulk fetch replaces per-row API calls — a 2500-row audit that
+// used to make 5000+ requests now makes ~30, and side-steps CO's rate limit.
+async function chargeoverListAll(tenant, endpoint, extraParams = {}, progressCb) {
+  const PAGE = 200;
+  const out = [];
+  let offset = 0;
+  while (true) {
+    const page = await chargeoverGet(tenant, endpoint, { ...extraParams, limit: PAGE, offset });
+    if (!Array.isArray(page) || page.length === 0) break;
+    for (const item of page) out.push(item);
+    if (progressCb) progressCb(out.length);
+    if (page.length < PAGE) break;
+    offset += page.length;
+    // Small breather to keep CO happy
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return out;
+}
+
+async function prefetchTenantData(tenant, progressCb) {
+  if (!CHARGEOVER_TENANTS[tenant]?.auth) return null;
+  const customers = await chargeoverListAll(tenant, '/customer', {}, n => progressCb?.(`${tenant} customers`, n));
+  const packages  = await chargeoverListAll(tenant, '/package',  {}, n => progressCb?.(`${tenant} packages`,  n));
+  const customerById = new Map();
+  for (const c of customers) customerById.set(String(c.customer_id), c);
+  const packagesByCustomer = new Map();
+  for (const p of packages) {
+    const key = String(p.customer_id);
+    const list = packagesByCustomer.get(key) || [];
+    list.push(p);
+    packagesByCustomer.set(key, list);
+  }
+  return { customerById, packagesByCustomer, counts: { customers: customers.length, packages: packages.length } };
+}
+
+function resolveInPrefetched(prefetched, tenantHint, coId) {
+  const id = String(coId).trim();
+  if (!id) return null;
+  const tenants = tenantHint && ['AL', 'RS'].includes(tenantHint) ? [tenantHint] : ['AL', 'RS'];
+  for (const t of tenants) {
+    const data = prefetched[t];
+    if (!data) continue;
+    const cust = data.customerById.get(id);
+    if (!cust) continue;
+    const subs = data.packagesByCustomer.get(id) || [];
+    const activeSub   = subs.find(s => s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
+    const canceledSub = subs.find(s => s.package_status_str === 'canceled-manual');
+    const sub = activeSub || canceledSub || subs[0] || null;
+    return {
+      tenant: t,
+      customerId: cust.customer_id,
+      company: cust.company || null,
+      email: cust.superuser_email || cust.email || null,
+      status: cust.customer_status_str || null,
+      subStatus: sub?.package_status_str || null,
+      canceledAt: sub?.cancel_datetime?.slice(0, 10) || null,
+      url: cust.url_self || null,
+    };
+  }
+  return null;
+}
+
 async function runMinuteAuditorJob(jobId, rows) {
   const job = minuteAuditorJobs.get(jobId);
   if (!job) return;
-  const CONCURRENCY = 2;
-  // Same COCustomerId can appear in both the 1st and 15th billing cycles —
-  // dedupe lookups so we only hit ChargeOver once per (tenant-hint, id) pair.
-  const lookupCache = new Map();
-  const inflight  = new Map();
 
-  async function cachedLookup(tenantHint, coId) {
-    const key = `${tenantHint || 'X'}:${coId}`;
-    if (lookupCache.has(key)) return lookupCache.get(key);
-    if (inflight.has(key)) return inflight.get(key);
-    const p = lookupChargeoverById(tenantHint, coId).then(co => {
-      lookupCache.set(key, co);
-      inflight.delete(key);
-      return co;
-    }, err => {
-      inflight.delete(key);
-      throw err;
-    });
-    inflight.set(key, p);
-    return p;
+  // ── Phase 1: bulk prefetch every customer + package from AL and RS ──
+  job.phase = 'prefetching';
+  job.prefetch = {};
+  const prefetched = { AL: null, RS: null };
+  try {
+    const updateProgress = (label, n) => { job.prefetch[label] = n; };
+    const [al, rs] = await Promise.all([
+      prefetchTenantData('AL', updateProgress),
+      prefetchTenantData('RS', updateProgress),
+    ]);
+    prefetched.AL = al;
+    prefetched.RS = rs;
+  } catch (e) {
+    console.error('[minute-auditor] prefetch failed:', e.message);
+    job.status = 'error';
+    job.error = 'ChargeOver prefetch failed: ' + e.message;
+    job.finishedAt = Date.now();
+    return;
   }
 
-  async function processRow(row) {
+  // ── Phase 2: resolve every row against the in-memory maps ──
+  job.phase = 'matching';
+  for (const row of rows) {
     const cat = String(row.billingCategory || '').toUpperCase();
     if (MINUTE_AUDITOR_SKIP_CATEGORIES.has(cat)) {
       job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true });
       job.done++;
-      return;
+      continue;
     }
     const result = { ...row, chargeover: null, active: null, error: null, skipped: false };
     if (!row.coCustomerId) {
       result.error = 'No COCustomerId';
       job.results.push(result);
       job.done++;
-      return;
+      continue;
     }
     const tenantHint = ['AL', 'RS'].includes(row.clientType) ? row.clientType : null;
-    try {
-      const co = await cachedLookup(tenantHint, row.coCustomerId);
-      result.chargeover = co;
-      result.active = co ? isChargeoverActive(co) : false;
-      if (!co) result.error = 'Not found in ChargeOver';
-    } catch (e) {
-      result.error = e.message || 'Lookup failed';
-    }
+    const co = resolveInPrefetched(prefetched, tenantHint, row.coCustomerId);
+    result.chargeover = co;
+    result.active = co ? isChargeoverActive(co) : false;
+    if (!co) result.error = 'Not found in ChargeOver';
     job.results.push(result);
     job.done++;
-  }
-
-  for (let i = 0; i < rows.length; i += CONCURRENCY) {
-    await Promise.all(rows.slice(i, i + CONCURRENCY).map(processRow));
   }
   job.status = 'done';
   job.finishedAt = Date.now();
@@ -5649,9 +5705,9 @@ app.get('/api/minute-auditor/stream/:jobId', requireRole(...MINUTE_AUDITOR_ROLES
       res.write(`data: ${JSON.stringify({ type: 'result', result: current.results[sent], done: current.done, total: current.total })}\n\n`);
       sent++;
     }
-    res.write(`data: ${JSON.stringify({ type: 'progress', done: current.done, total: current.total, status: current.status })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'progress', done: current.done, total: current.total, status: current.status, phase: current.phase || null, prefetch: current.prefetch || null })}\n\n`);
     if (current.status === 'done' || current.status === 'error') {
-      res.write(`data: ${JSON.stringify({ type: 'done', done: current.done, total: current.total, status: current.status, error: current.error || null })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'done', done: current.done, total: current.total, status: current.status, phase: current.phase || null, prefetch: current.prefetch || null, error: current.error || null })}\n\n`);
       clearInterval(interval);
       res.end();
     }

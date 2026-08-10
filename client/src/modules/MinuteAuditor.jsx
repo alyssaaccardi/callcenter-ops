@@ -35,7 +35,7 @@ function flattenRow(r) {
 
 function resultLabel(r) {
   if (r.skipped) return 'Skipped';
-  if (r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId') return 'Not in CO';
+  if (r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId') return 'No Match';
   if (r.active === true)  return 'Active';
   if (r.active === false) return 'Inactive';
   return '';
@@ -69,7 +69,7 @@ export default function MinuteAuditor() {
   const [view, setView] = useState('upload'); // upload | running | results
   const [file, setFile] = useState(null);
   const [dragOver, setDragOver] = useState(false);
-  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [progress, setProgress] = useState({ done: 0, total: 0, phase: null, prefetch: null });
   const [results, setResults] = useState([]);
   const [error, setError] = useState('');
   const [sort, setSort] = useState({ key: 'client', dir: 'asc' });
@@ -98,7 +98,7 @@ export default function MinuteAuditor() {
   }, []);
 
   const startStream = useCallback(async (jId, total) => {
-    setProgress({ done: 0, total });
+    setProgress({ done: 0, total, phase: 'prefetching', prefetch: null });
     setResults([]);
     try {
       const resp = await fetch(`/api/minute-auditor/stream/${jId}`, {
@@ -123,11 +123,11 @@ export default function MinuteAuditor() {
             const msg = JSON.parse(line.slice(5).trim());
             if (msg.type === 'result' && msg.result) {
               setResults(prev => [...prev, msg.result]);
-              setProgress({ done: msg.done, total: msg.total });
+              setProgress({ done: msg.done, total: msg.total, phase: msg.phase || 'matching', prefetch: msg.prefetch || null });
             } else if (msg.type === 'progress') {
-              setProgress({ done: msg.done, total: msg.total });
+              setProgress({ done: msg.done, total: msg.total, phase: msg.phase, prefetch: msg.prefetch });
             } else if (msg.type === 'done') {
-              setProgress({ done: msg.done, total: msg.total });
+              setProgress({ done: msg.done, total: msg.total, phase: msg.phase, prefetch: msg.prefetch });
               setView('results');
               return;
             }
@@ -296,13 +296,29 @@ export default function MinuteAuditor() {
 
       {view === 'running' && (
         <div className="ma-running-panel">
-          <div className="ma-progress-label">
-            Checking ChargeOver… <b>{progress.done}</b> / {progress.total}
-          </div>
-          <div className="ma-progress-bar">
-            <div className="ma-progress-fill" style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }} />
-          </div>
-          <div className="ma-progress-hint">Streaming results as each row completes.</div>
+          {progress.phase === 'prefetching' ? (
+            <>
+              <div className="ma-progress-label">Loading ChargeOver customer & subscription data…</div>
+              <div className="ma-progress-bar ma-progress-indeterminate">
+                <div className="ma-progress-fill" />
+              </div>
+              <div className="ma-progress-hint">
+                {progress.prefetch && Object.keys(progress.prefetch).length > 0
+                  ? Object.entries(progress.prefetch).map(([k, v]) => `${k}: ${v}`).join(' · ')
+                  : 'One-time snapshot per audit — replaces thousands of API calls with a few.'}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="ma-progress-label">
+                Matching rows against ChargeOver… <b>{progress.done}</b> / {progress.total}
+              </div>
+              <div className="ma-progress-bar">
+                <div className="ma-progress-fill" style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }} />
+              </div>
+              <div className="ma-progress-hint">Streaming results as each row is resolved.</div>
+            </>
+          )}
         </div>
       )}
 
@@ -333,9 +349,9 @@ export default function MinuteAuditor() {
             <button
               className={`ma-stat ma-stat-amber${filterActive === 'notfound' ? ' ma-stat-selected' : ''}`}
               onClick={() => setFilterActive('notfound')}
-              title="Could not be located in ChargeOver"
+              title="No COCustomerId in CSV, or the ID didn't match anyone in AL or RS ChargeOver"
             >
-              <div className="ma-stat-num">{summary.notfound}</div><div className="ma-stat-label">Not in CO</div>
+              <div className="ma-stat-num">{summary.notfound}</div><div className="ma-stat-label">No Match</div>
             </button>
             {summary.skipped > 0 && (
               <button
@@ -365,7 +381,7 @@ export default function MinuteAuditor() {
               <option value="audited">Audited (excl. skipped)</option>
               <option value="active">Active only</option>
               <option value="inactive">Inactive only</option>
-              <option value="notfound">Not found in CO</option>
+              <option value="notfound">No Match (missing/invalid CO ID)</option>
               <option value="skipped">Skipped only (INTERNAL/TRIAL/FREE)</option>
               <option value="all">All rows (incl. skipped)</option>
             </select>
@@ -421,7 +437,7 @@ export default function MinuteAuditor() {
                       {r.skipped
                         ? <span className="ma-badge ma-badge-gray" title="Excluded from audit by billing category">Skipped</span>
                         : r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId'
-                          ? <span className="ma-badge ma-badge-gray" title={r.error}>Not in CO</span>
+                          ? <span className="ma-badge ma-badge-amber" title={r.error === 'No COCustomerId' ? 'CSV row has no COCustomerId — auto no-match' : 'COCustomerId not found in AL or RS ChargeOver'}>No Match</span>
                           : r.active === true
                             ? <span className="ma-badge ma-badge-green">Active</span>
                             : r.active === false

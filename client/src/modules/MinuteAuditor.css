@@ -110,6 +110,19 @@
   background: linear-gradient(90deg, #7c3aed 0%, #a855f7 100%);
   transition: width 0.3s ease;
 }
+.ma-progress-indeterminate {
+  position: relative;
+  overflow: hidden;
+}
+.ma-progress-indeterminate .ma-progress-fill {
+  position: absolute;
+  width: 40%;
+  animation: ma-indeterminate 1.4s ease-in-out infinite;
+}
+@keyframes ma-indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
 .ma-progress-hint { font-size: 11px; color: rgba(60,50,120,0.55); }
 
 /* Summary */
@@ -260,6 +273,7 @@ button.ma-stat { appearance: none; }
 }
 .ma-badge-green { background: rgba(16,185,129,0.15); color: #059669; }
 .ma-badge-red   { background: rgba(220,38,38,0.15); color: #b91c1c; }
+.ma-badge-amber { background: rgba(245,158,11,0.15); color: #b45309; }
 .ma-badge-gray  { background: rgba(107,114,128,0.15); color: #4b5563; }
 
 .ma-empty { text-align: center; padding: 40px; color: rgba(60,50,120,0.5); font-style: italic; }
