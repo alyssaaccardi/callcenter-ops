@@ -4,17 +4,17 @@ import api from '../api';
 import './MinuteAuditor.css';
 
 const COLUMNS = [
-  { key: 'flaggedBadge',    label: 'Flag',              align: 'center', type: 'badge' },
-  { key: 'client',          label: 'Client',            align: 'left',  type: 'text' },
-  { key: 'coCustomerId',    label: 'CO ID',             align: 'right', type: 'text' },
-  { key: 'clientType',      label: 'Tenant',            align: 'left',  type: 'text' },
-  { key: 'billingCategory', label: 'CSV Category',      align: 'left',  type: 'text' },
-  { key: 'planCompare',     label: 'Plan (CSV/CO)',     align: 'right', type: 'text' },
-  { key: 'billDayCompare',  label: 'Bill Day (CSV/CO)', align: 'right', type: 'text' },
-  { key: 'used',            label: 'Used',              align: 'right', type: 'num'  },
-  { key: 'remaining',       label: '% Remain',          align: 'right', type: 'text' },
-  { key: 'totalCalls',      label: 'Calls',             align: 'right', type: 'num'  },
-  { key: 'activeBadge',     label: 'CO Status',         align: 'center', type: 'badge' },
+  { key: 'flaggedBadge',    label: 'Flag',                            align: 'center', type: 'badge' },
+  { key: 'client',          label: 'Client',                          align: 'left',  type: 'text' },
+  { key: 'coCustomerId',    label: 'ChargeOver ID',                   align: 'right', type: 'text' },
+  { key: 'clientType',      label: 'Tenant',                          align: 'left',  type: 'text' },
+  { key: 'billingCategory', label: 'The Answer Category',             align: 'left',  type: 'text' },
+  { key: 'planCompare',     label: 'Plan (Answer / ChargeOver)',      align: 'right', type: 'text' },
+  { key: 'billDayCompare',  label: 'Bill Day (Answer / ChargeOver)',  align: 'right', type: 'text' },
+  { key: 'used',            label: 'Used',                            align: 'right', type: 'num'  },
+  { key: 'remaining',       label: '% Remain',                        align: 'right', type: 'text' },
+  { key: 'totalCalls',      label: 'Calls',                           align: 'right', type: 'num'  },
+  { key: 'activeBadge',     label: 'ChargeOver Status',               align: 'center', type: 'badge' },
 ];
 
 function fmtNum(v) {
@@ -64,13 +64,14 @@ function flaggedLabel(r) {
 function toCsv(rows) {
   const header = [
     'Flagged','Flag Reasons',
-    'Client (CSV)','Company (CO)','Name Match Score','Name Mismatch',
-    'COCustomerId','Tenant (CSV)','Tenant (CO)',
-    'Billing Category','Billing Cycle (CSV)',
-    'Plan CSV (Allotted)','Plan CO (custom_2)','Plan Mismatch',
-    'Bill Day CSV','Bill Day CO','Bill Day Mismatch','CO Next Invoice',
-    'Used','Remaining','Total Calls','Overage Rate CSV','Overage Rate CO',
-    'CO Sub Status','Audit Result','Error','CO URL',
+    'Client (The Answer)','Company (ChargeOver)','Name Match Score','Name Mismatch',
+    'ChargeOver Customer ID','Tenant (The Answer)','Tenant (ChargeOver)',
+    'Billing Category (The Answer)','Billing Cycle (The Answer)',
+    'Plan — The Answer (Allotted)','Plan — ChargeOver (custom_2)','Plan Mismatch',
+    'Bill Day — The Answer','Bill Day — ChargeOver','Bill Day Mismatch','ChargeOver Next Invoice',
+    'Used (The Answer)','% Remaining (The Answer)','Total Calls (The Answer)',
+    'Overage Rate — The Answer','Overage Rate — ChargeOver',
+    'ChargeOver Sub Status','Audit Result','Error','ChargeOver URL',
   ];
   const esc = (v) => {
     const s = v == null ? '' : String(v);
@@ -309,7 +310,7 @@ export default function MinuteAuditor() {
       <div className="ma-header">
         <div>
           <h1 className="ma-title">Minute Usage Auditor</h1>
-          <div className="ma-subtitle">If a customer used minutes but doesn't have an active ChargeOver subscription, they're flagged. INTERNAL, TRIAL, and FREE are skipped.</div>
+          <div className="ma-subtitle">Compares customer records in <b>The Answer</b> against subscriptions in <b>ChargeOver</b>. If a customer used minutes without an active ChargeOver subscription — or if the name, plan, or bill day differ between the two systems — they're flagged. INTERNAL, TRIAL, and FREE categories are skipped.</div>
         </div>
         {view === 'results' && (
           <div className="ma-header-actions">
@@ -330,7 +331,7 @@ export default function MinuteAuditor() {
             onDrop={onDrop}
           >
             <div className="ma-drop-icon">📄</div>
-            <div className="ma-drop-title">{file ? file.name : 'Drop a Percentage_YYYY-MM-DD.csv here'}</div>
+            <div className="ma-drop-title">{file ? file.name : 'Drop a The Answer minute-usage CSV here'}</div>
             <div className="ma-drop-hint">…or click to browse. INTERNAL, TRIAL, and FREE customers are automatically excluded from the audit.</div>
             <input type="file" accept=".csv,text/csv" className="ma-drop-input" onChange={(e) => onFile(e.target.files?.[0])} />
           </div>
@@ -358,7 +359,7 @@ export default function MinuteAuditor() {
           ) : (
             <>
               <div className="ma-progress-label">
-                Matching rows against ChargeOver… <b>{progress.done}</b> / {progress.total}
+                Matching The Answer rows against ChargeOver… <b>{progress.done}</b> / {progress.total}
               </div>
               <div className="ma-progress-bar">
                 <div className="ma-progress-fill" style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }} />
@@ -437,7 +438,7 @@ export default function MinuteAuditor() {
             <input
               className="ma-search"
               type="text"
-              placeholder="Search client, CO ID, category…"
+              placeholder="Search client, ChargeOver ID, category…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -445,21 +446,21 @@ export default function MinuteAuditor() {
               <optgroup label="Flagged">
                 <option value="flagged">🚨 All flagged</option>
                 <option value="notPaying">Not paying</option>
-                <option value="nameMismatch">Name mismatch</option>
-                <option value="planMismatch">Plan mismatch</option>
-                <option value="billDayMismatch">Bill day mismatch</option>
+                <option value="nameMismatch">Name mismatch (Answer vs ChargeOver)</option>
+                <option value="planMismatch">Plan mismatch (Answer vs ChargeOver)</option>
+                <option value="billDayMismatch">Bill day mismatch (Answer vs ChargeOver)</option>
               </optgroup>
               <optgroup label="Context">
                 <option value="audited">All audited</option>
-                <option value="active">Active only</option>
-                <option value="inactive">Inactive only</option>
-                <option value="notfound">No CO match only</option>
+                <option value="active">Active in ChargeOver only</option>
+                <option value="inactive">Inactive in ChargeOver only</option>
+                <option value="notfound">Not found in ChargeOver only</option>
                 <option value="skipped">Skipped only</option>
                 <option value="all">Everything (incl. skipped)</option>
               </optgroup>
             </select>
             <select className="ma-select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
-              <option value="all">All CSV categories</option>
+              <option value="all">All The Answer categories</option>
               {categories.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             <select className="ma-select" value={filterTenant} onChange={e => setFilterTenant(e.target.value)}>
@@ -467,6 +468,14 @@ export default function MinuteAuditor() {
               {tenants.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
             <div className="ma-filter-count">Showing <b>{sorted.length}</b> of {flat.length}</div>
+          </div>
+
+          <div className="ma-legend">
+            <span className="ma-legend-src ma-legend-answer">📄 The Answer</span>
+            <span className="ma-legend-txt">= the uploaded minute-usage CSV</span>
+            <span className="ma-legend-sep">·</span>
+            <span className="ma-legend-src ma-legend-co">💳 ChargeOver</span>
+            <span className="ma-legend-txt">= billing system (subscription of record)</span>
           </div>
 
           <div className="ma-table-wrap">
@@ -494,8 +503,8 @@ export default function MinuteAuditor() {
                     <td className="ma-td ma-td-left">
                       {r.nameMismatch ? (
                         <div className="ma-client-mismatch" title={`Name match score: ${r.nameMatchScore}`}>
-                          <div className="ma-cmp-csv"><b>CSV:</b> {r.client || '—'}</div>
-                          <div className="ma-cmp-co"><b>CO:</b> {r.coCompany || '—'} ⚠</div>
+                          <div className="ma-cmp-csv"><b>Answer:</b> {r.client || '—'}</div>
+                          <div className="ma-cmp-co"><b>ChargeOver:</b> {r.coCompany || '—'} ⚠</div>
                         </div>
                       ) : (
                         <div className="ma-client-name">{r.client || '—'}</div>
@@ -509,20 +518,20 @@ export default function MinuteAuditor() {
                     <td className="ma-td ma-td-left">{r.resolvedTenant || r.clientType || '—'}</td>
                     <td className="ma-td ma-td-left">{r.billingCategory || '—'}</td>
                     <td className={`ma-td ma-td-right${r.planMismatch ? ' ma-td-mismatch' : ''}`}
-                        title={r.planMismatch ? `CSV Allotted ${r.csvPlan} differs from CO plan ${r.coPlan}` : ''}>
+                        title={r.planMismatch ? `The Answer Allotted ${r.csvPlan} differs from ChargeOver plan ${r.coPlan}` : ''}>
                       {(() => {
                         const c = compareCell(r.csvPlan ?? parseInt(r.allotted || '', 10), r.coPlan, r.planMismatch);
                         return c.secondary
-                          ? <><div className="ma-cmp-csv">CSV {c.primary}</div><div className="ma-cmp-co">CO {c.secondary}</div></>
+                          ? <><div className="ma-cmp-csv"><b>Answer</b> {c.primary}</div><div className="ma-cmp-co"><b>ChargeOver</b> {c.secondary}</div></>
                           : <span>{c.primary}</span>;
                       })()}
                     </td>
                     <td className={`ma-td ma-td-right${r.billDayMismatch ? ' ma-td-mismatch' : ''}`}
-                        title={r.billDayMismatch ? `CSV cycle day ${r.csvBillDay} differs from CO next-invoice day ${r.coBillDay}` : ''}>
+                        title={r.billDayMismatch ? `The Answer cycle day ${r.csvBillDay} differs from ChargeOver next-invoice day ${r.coBillDay}` : ''}>
                       {(() => {
                         const c = compareCell(r.csvBillDay, r.coBillDay, r.billDayMismatch);
                         return c.secondary
-                          ? <><div className="ma-cmp-csv">CSV {c.primary}</div><div className="ma-cmp-co">CO {c.secondary}</div></>
+                          ? <><div className="ma-cmp-csv"><b>Answer</b> {c.primary}</div><div className="ma-cmp-co"><b>ChargeOver</b> {c.secondary}</div></>
                           : <span>{c.primary}</span>;
                       })()}
                     </td>
