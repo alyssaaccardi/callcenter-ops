@@ -127,6 +127,20 @@
   min-width: 100px;
   text-align: center;
   backdrop-filter: blur(8px);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: all 0.12s ease;
+}
+button.ma-stat { appearance: none; }
+.ma-stat:hover {
+  border-color: rgba(168,85,247,0.35);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(124,58,237,0.10);
+}
+.ma-stat-selected {
+  border-color: var(--purple, #7c3aed);
+  box-shadow: 0 0 0 3px rgba(168,85,247,0.15);
 }
 .ma-stat-num { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
 .ma-stat-label {
@@ -222,7 +236,8 @@
 .ma-row-paid    { background: rgba(16,185,129,0.03); }
 .ma-row-unpaid  { background: rgba(220,38,38,0.05); }
 .ma-row-neutral { background: transparent; }
-.ma-row-paid:hover, .ma-row-unpaid:hover, .ma-row-neutral:hover { background: rgba(168,85,247,0.06); }
+.ma-row-skipped { background: rgba(107,114,128,0.04); color: rgba(60,50,120,0.65); }
+.ma-row-paid:hover, .ma-row-unpaid:hover, .ma-row-neutral:hover, .ma-row-skipped:hover { background: rgba(168,85,247,0.06); }
 
 .ma-client-name { font-weight: 600; }
 .ma-client-alias { font-size: 10px; color: rgba(60,50,120,0.55); margin-top: 1px; }

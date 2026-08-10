@@ -5518,7 +5518,13 @@ async function runMinuteAuditorJob(jobId, rows) {
   const CONCURRENCY = 4;
 
   async function processRow(row) {
-    const result = { ...row, chargeover: null, active: null, error: null };
+    const cat = String(row.billingCategory || '').toUpperCase();
+    if (MINUTE_AUDITOR_SKIP_CATEGORIES.has(cat)) {
+      job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true });
+      job.done++;
+      return;
+    }
+    const result = { ...row, chargeover: null, active: null, error: null, skipped: false };
     if (!row.coCustomerId) {
       result.error = 'No COCustomerId';
       job.results.push(result);
@@ -5560,9 +5566,8 @@ app.post('/api/minute-auditor/upload', requireRole(...MINUTE_AUDITOR_ROLES), min
     return res.status(400).json({ error: 'Failed to parse CSV: ' + e.message });
   }
   const parsedCount = rows.length;
-  rows = rows.filter(r => !MINUTE_AUDITOR_SKIP_CATEGORIES.has(String(r.billingCategory || '').toUpperCase()));
-  const skippedCount = parsedCount - rows.length;
-  if (rows.length === 0) return res.status(400).json({ error: 'No auditable rows found (all rows were INTERNAL/TRIAL/FREE or empty)' });
+  const skippedCount = rows.filter(r => MINUTE_AUDITOR_SKIP_CATEGORIES.has(String(r.billingCategory || '').toUpperCase())).length;
+  if (rows.length === 0) return res.status(400).json({ error: 'No data rows found in CSV' });
 
   const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   minuteAuditorJobs.set(jobId, {
