@@ -116,15 +116,35 @@ export default function MinuteAuditor() {
     onFile(e.dataTransfer.files?.[0]);
   }, []);
 
+  // Fetch the authoritative results snapshot after the stream ends. The
+  // SSE stream can be cut short by proxies (Cloudflare kills long-running
+  // streams around the 100s mark) — since skipped rows and other late
+  // rows land near the end of the stream, we always reconcile from the
+  // /results endpoint before flipping to the results view.
+  const reconcileResults = useCallback(async (jId) => {
+    try {
+      const resp = await api.get(`/api/minute-auditor/results/${jId}`);
+      const full = resp.data?.results;
+      if (Array.isArray(full) && full.length > 0) {
+        setResults(full);
+        setProgress(p => ({ ...p, done: resp.data.done ?? p.done, total: resp.data.total ?? p.total }));
+      }
+    } catch (e) {
+      // Non-fatal — we still have whatever the stream gave us.
+      console.warn('[minute-auditor] reconcile failed:', e.message);
+    }
+  }, []);
+
   const startStream = useCallback(async (jId, total) => {
     setProgress({ done: 0, total, phase: 'prefetching', prefetch: null });
     setResults([]);
+    let doneReceived = false;
     try {
       const resp = await fetch(`/api/minute-auditor/stream/${jId}`, {
         credentials: 'include',
         headers: { Accept: 'text/event-stream' },
       });
-      if (!resp.ok) { setError(`Stream error: ${resp.status}`); setView('results'); return; }
+      if (!resp.ok) { setError(`Stream error: ${resp.status}`); await reconcileResults(jId); setView('results'); return; }
       const reader = resp.body.getReader();
       readerRef.current = reader;
       const decoder = new TextDecoder();
@@ -147,16 +167,44 @@ export default function MinuteAuditor() {
               setProgress({ done: msg.done, total: msg.total, phase: msg.phase, prefetch: msg.prefetch });
             } else if (msg.type === 'done') {
               setProgress({ done: msg.done, total: msg.total, phase: msg.phase, prefetch: msg.prefetch });
+              doneReceived = true;
+              await reconcileResults(jId);
               setView('results');
               return;
             }
           } catch { /* skip malformed event */ }
         }
       }
+      // Stream ended without a 'done' message → likely a proxy timeout.
+      // Poll the job until it completes, then reconcile.
+      if (!doneReceived) await pollUntilComplete(jId);
+      await reconcileResults(jId);
       setView('results');
     } catch (e) {
-      setError('Stream disconnected: ' + e.message);
+      setError('Stream disconnected — pulling final results…');
+      if (!doneReceived) await pollUntilComplete(jId);
+      await reconcileResults(jId);
+      setError('');
       setView('results');
+    }
+  }, [reconcileResults]);
+
+  // When the stream is severed early, poll the job status endpoint until
+  // the server marks it done. Bounded at 5 minutes to avoid indefinite waits.
+  const pollUntilComplete = useCallback(async (jId) => {
+    const started = Date.now();
+    while (Date.now() - started < 5 * 60 * 1000) {
+      try {
+        const resp = await api.get(`/api/minute-auditor/results/${jId}`);
+        const status = resp.data?.status;
+        if (status === 'done' || status === 'error') {
+          setProgress(p => ({ ...p, done: resp.data.done ?? p.done, total: resp.data.total ?? p.total }));
+          return;
+        }
+        // Show live progress from the polled snapshot
+        setProgress(p => ({ ...p, done: resp.data.done ?? p.done, total: resp.data.total ?? p.total, phase: resp.data.phase || p.phase }));
+      } catch { /* keep polling */ }
+      await new Promise(r => setTimeout(r, 2000));
     }
   }, []);
 
