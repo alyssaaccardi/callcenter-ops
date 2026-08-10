@@ -34,17 +34,16 @@ function flattenRow(r) {
   };
 }
 
-function planCompareText(r) {
-  const csv = r.csvPlan ?? (r.allotted ? parseInt(r.allotted, 10) : null);
-  const co  = r.coPlan;
-  const csvS = csv == null || Number.isNaN(csv) ? '—' : String(csv);
-  const coS  = co  == null                       ? '—' : String(co);
-  return `${csvS} / ${coS}`;
-}
-function billDayCompareText(r) {
-  const csvS = r.csvBillDay == null ? '—' : String(r.csvBillDay);
-  const coS  = r.coBillDay  == null ? '—' : String(r.coBillDay);
-  return `${csvS} / ${coS}`;
+// Return a { primary, secondary } pair used to render a compare cell.
+// When both values match: primary = value, secondary = null (single-line, calm).
+// When they differ:      primary = CSV value, secondary = CO value (two-line, red).
+// When only one exists:  primary = that value, secondary = null.
+function compareCell(csvVal, coVal, mismatched) {
+  const csvS = csvVal == null || Number.isNaN(csvVal) ? null : String(csvVal);
+  const coS  = coVal  == null || Number.isNaN(coVal)  ? null : String(coVal);
+  if (csvS && coS && mismatched) return { primary: csvS, secondary: coS };
+  if (csvS && coS)               return { primary: csvS, secondary: null };
+  return { primary: csvS || coS || '—', secondary: null };
 }
 
 function resultLabel(r) {
@@ -372,72 +371,67 @@ export default function MinuteAuditor() {
 
       {view === 'results' && (
         <>
-          <div className="ma-summary">
-            <button
-              className={`ma-stat ma-stat-flagged${filterActive === 'flagged' ? ' ma-stat-selected' : ''}`}
-              onClick={() => setFilterActive('flagged')}
-              title="Customers who USED minutes but have no active subscription in ChargeOver — need immediate follow-up"
-            >
-              <div className="ma-stat-num">🚨 {summary.flagged}</div><div className="ma-stat-label">Flagged</div>
-            </button>
-            <button
-              className={`ma-stat${filterActive === 'audited' ? ' ma-stat-selected' : ''}`}
-              onClick={() => setFilterActive('audited')}
-              title="All customers we audited (excludes INTERNAL/TRIAL/FREE)"
-            >
-              <div className="ma-stat-num">{summary.audited}</div><div className="ma-stat-label">Audited</div>
-            </button>
-            <button
-              className={`ma-stat ma-stat-red${filterActive === 'inactive' ? ' ma-stat-selected' : ''}`}
-              onClick={() => setFilterActive('inactive')}
-              title="Found in ChargeOver but no active subscription"
-            >
-              <div className="ma-stat-num">{summary.inactive}</div><div className="ma-stat-label">Inactive</div>
-            </button>
-            <button
-              className={`ma-stat ma-stat-amber${filterActive === 'notfound' ? ' ma-stat-selected' : ''}`}
-              onClick={() => setFilterActive('notfound')}
-              title="No COCustomerId in CSV, or the ID didn't match anyone in AL or RS ChargeOver"
-            >
-              <div className="ma-stat-num">{summary.notfound}</div><div className="ma-stat-label">No Match</div>
-            </button>
-            {summary.skipped > 0 && (
+          <div className="ma-overview">
+            {/* Primary card: everything actionable lives here */}
+            <div className={`ma-flag-card${filterActive === 'flagged' ? ' ma-flag-card-selected' : ''}`}>
               <button
-                className={`ma-stat${filterActive === 'skipped' ? ' ma-stat-selected' : ''}`}
-                onClick={() => setFilterActive('skipped')}
-                title="INTERNAL, TRIAL, and FREE — excluded from ChargeOver audit"
+                className="ma-flag-headline"
+                onClick={() => setFilterActive('flagged')}
+                title="Show all flagged customers"
               >
-                <div className="ma-stat-num">{summary.skipped}</div><div className="ma-stat-label">Skipped</div>
+                <div className="ma-flag-count">🚨 {summary.flagged}</div>
+                <div className="ma-flag-label">Flagged<br/><span className="ma-flag-sublabel">need review</span></div>
               </button>
-            )}
-            {summary.error > 0 && (
-              <div className="ma-stat ma-stat-amber" title="Rows that errored during lookup">
-                <div className="ma-stat-num">{summary.error}</div><div className="ma-stat-label">Errors</div>
+              <div className="ma-flag-reasons">
+                <button className={`ma-reason${filterActive === 'notPaying' ? ' ma-reason-active' : ''}`}
+                        onClick={() => setFilterActive('notPaying')}
+                        title="Customer used minutes but has no active CO subscription">
+                  <span className="ma-reason-num">{summary.notPaying}</span>
+                  <span className="ma-reason-txt">Not Paying</span>
+                </button>
+                <button className={`ma-reason${filterActive === 'nameMismatch' ? ' ma-reason-active' : ''}`}
+                        onClick={() => setFilterActive('nameMismatch')}
+                        title="CSV client name differs from CO company name">
+                  <span className="ma-reason-num">{summary.nameMismatch}</span>
+                  <span className="ma-reason-txt">Name Mismatch</span>
+                </button>
+                <button className={`ma-reason${filterActive === 'planMismatch' ? ' ma-reason-active' : ''}`}
+                        onClick={() => setFilterActive('planMismatch')}
+                        title="CSV Allotted minutes differ from the CO subscription plan">
+                  <span className="ma-reason-num">{summary.planMismatch}</span>
+                  <span className="ma-reason-txt">Plan Mismatch</span>
+                </button>
+                <button className={`ma-reason${filterActive === 'billDayMismatch' ? ' ma-reason-active' : ''}`}
+                        onClick={() => setFilterActive('billDayMismatch')}
+                        title="CSV billing cycle day differs from CO next invoice day">
+                  <span className="ma-reason-num">{summary.billDayMismatch}</span>
+                  <span className="ma-reason-txt">Bill Day Mismatch</span>
+                </button>
               </div>
-            )}
-          </div>
-
-          {summary.flagged > 0 && (
-            <div className="ma-reason-strip">
-              <span className="ma-reason-label">Flag breakdown:</span>
-              <button className={`ma-reason-pill${filterActive === 'notPaying' ? ' ma-reason-active' : ''}`}
-                      onClick={() => setFilterActive('notPaying')}>
-                Not Paying <b>{summary.notPaying}</b>
-              </button>
-              <button className={`ma-reason-pill${filterActive === 'nameMismatch' ? ' ma-reason-active' : ''}`}
-                      onClick={() => setFilterActive('nameMismatch')}>
-                Name Mismatch <b>{summary.nameMismatch}</b>
-              </button>
-              <button className={`ma-reason-pill${filterActive === 'planMismatch' ? ' ma-reason-active' : ''}`}
-                      onClick={() => setFilterActive('planMismatch')}>
-                Plan Mismatch <b>{summary.planMismatch}</b>
-              </button>
-              <button className={`ma-reason-pill${filterActive === 'billDayMismatch' ? ' ma-reason-active' : ''}`}
-                      onClick={() => setFilterActive('billDayMismatch')}>
-                Bill Day Mismatch <b>{summary.billDayMismatch}</b>
-              </button>
             </div>
-          )}
+
+            {/* Context tiles */}
+            <div className="ma-context">
+              <button
+                className={`ma-context-tile${filterActive === 'audited' ? ' ma-context-selected' : ''}`}
+                onClick={() => setFilterActive('audited')}
+                title="Every customer we checked against ChargeOver"
+              >
+                <div className="ma-context-num">{summary.audited}</div>
+                <div className="ma-context-label">Audited</div>
+              </button>
+              {summary.skipped > 0 && (
+                <button
+                  className={`ma-context-tile${filterActive === 'skipped' ? ' ma-context-selected' : ''}`}
+                  onClick={() => setFilterActive('skipped')}
+                  title="INTERNAL / TRIAL / FREE — not audited"
+                >
+                  <div className="ma-context-num">{summary.skipped}</div>
+                  <div className="ma-context-label">Skipped</div>
+                </button>
+              )}
+            </div>
+          </div>
 
           <div className="ma-filters">
             <input
@@ -448,17 +442,21 @@ export default function MinuteAuditor() {
               onChange={(e) => setSearch(e.target.value)}
             />
             <select className="ma-select" value={filterActive} onChange={e => setFilterActive(e.target.value)}>
-              <option value="flagged">🚨 Flagged (any reason)</option>
-              <option value="nameMismatch">— Name Mismatch only</option>
-              <option value="planMismatch">— Plan Mismatch only</option>
-              <option value="billDayMismatch">— Bill Day Mismatch only</option>
-              <option value="notPaying">— Not Paying (used minutes, no active sub)</option>
-              <option value="audited">Audited (excl. skipped)</option>
-              <option value="active">Active only</option>
-              <option value="inactive">Inactive only</option>
-              <option value="notfound">No Match (missing/invalid CO ID)</option>
-              <option value="skipped">Skipped only (INTERNAL/TRIAL/FREE)</option>
-              <option value="all">All rows (incl. skipped)</option>
+              <optgroup label="Flagged">
+                <option value="flagged">🚨 All flagged</option>
+                <option value="notPaying">Not paying</option>
+                <option value="nameMismatch">Name mismatch</option>
+                <option value="planMismatch">Plan mismatch</option>
+                <option value="billDayMismatch">Bill day mismatch</option>
+              </optgroup>
+              <optgroup label="Context">
+                <option value="audited">All audited</option>
+                <option value="active">Active only</option>
+                <option value="inactive">Inactive only</option>
+                <option value="notfound">No CO match only</option>
+                <option value="skipped">Skipped only</option>
+                <option value="all">Everything (incl. skipped)</option>
+              </optgroup>
             </select>
             <select className="ma-select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
               <option value="all">All CSV categories</option>
@@ -468,7 +466,7 @@ export default function MinuteAuditor() {
               <option value="all">All tenants</option>
               {tenants.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
-            <div className="ma-filter-count">{sorted.length} of {flat.length}</div>
+            <div className="ma-filter-count">Showing <b>{sorted.length}</b> of {flat.length}</div>
           </div>
 
           <div className="ma-table-wrap">
@@ -494,12 +492,13 @@ export default function MinuteAuditor() {
                       {r.flagged && <span className="ma-flag-icon" title="Used minutes but not paying">🚨</span>}
                     </td>
                     <td className="ma-td ma-td-left">
-                      <div className="ma-client-name">{r.client || '—'}</div>
-                      {r.coCompany && r.coCompany.toLowerCase() !== (r.client || '').toLowerCase() && (
-                        <div className={r.nameMismatch ? 'ma-client-alias ma-client-alias-mismatch' : 'ma-client-alias'}
-                             title={r.nameMismatch ? `Name mismatch (score ${r.nameMatchScore})` : ''}>
-                          CO: {r.coCompany}{r.nameMismatch && ' ⚠'}
+                      {r.nameMismatch ? (
+                        <div className="ma-client-mismatch" title={`Name match score: ${r.nameMatchScore}`}>
+                          <div className="ma-cmp-csv"><b>CSV:</b> {r.client || '—'}</div>
+                          <div className="ma-cmp-co"><b>CO:</b> {r.coCompany || '—'} ⚠</div>
                         </div>
+                      ) : (
+                        <div className="ma-client-name">{r.client || '—'}</div>
                       )}
                     </td>
                     <td className="ma-td ma-td-right">
@@ -510,12 +509,22 @@ export default function MinuteAuditor() {
                     <td className="ma-td ma-td-left">{r.resolvedTenant || r.clientType || '—'}</td>
                     <td className="ma-td ma-td-left">{r.billingCategory || '—'}</td>
                     <td className={`ma-td ma-td-right${r.planMismatch ? ' ma-td-mismatch' : ''}`}
-                        title={r.planMismatch ? 'CSV Allotted differs from CO plan (custom_2)' : ''}>
-                      {planCompareText(r)}
+                        title={r.planMismatch ? `CSV Allotted ${r.csvPlan} differs from CO plan ${r.coPlan}` : ''}>
+                      {(() => {
+                        const c = compareCell(r.csvPlan ?? parseInt(r.allotted || '', 10), r.coPlan, r.planMismatch);
+                        return c.secondary
+                          ? <><div className="ma-cmp-csv">CSV {c.primary}</div><div className="ma-cmp-co">CO {c.secondary}</div></>
+                          : <span>{c.primary}</span>;
+                      })()}
                     </td>
                     <td className={`ma-td ma-td-right${r.billDayMismatch ? ' ma-td-mismatch' : ''}`}
-                        title={r.billDayMismatch ? 'CSV billing cycle day differs from CO next invoice day' : ''}>
-                      {billDayCompareText(r)}
+                        title={r.billDayMismatch ? `CSV cycle day ${r.csvBillDay} differs from CO next-invoice day ${r.coBillDay}` : ''}>
+                      {(() => {
+                        const c = compareCell(r.csvBillDay, r.coBillDay, r.billDayMismatch);
+                        return c.secondary
+                          ? <><div className="ma-cmp-csv">CSV {c.primary}</div><div className="ma-cmp-co">CO {c.secondary}</div></>
+                          : <span>{c.primary}</span>;
+                      })()}
                     </td>
                     <td className="ma-td ma-td-right">{fmtNum(r.used)}</td>
                     <td className="ma-td ma-td-right">{r.remaining || '—'}</td>
