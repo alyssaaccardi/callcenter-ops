@@ -5620,25 +5620,36 @@ async function runMinuteAuditorJob(jobId, rows) {
 
   // ── Phase 2: resolve every row against the in-memory maps ──
   job.phase = 'matching';
+  // "Has usage" signal — prefer explicit minutes-used column, fall back to
+  // total-calls (some Percentage CSV exports omit Used but always include
+  // Total Calls). Either signal > 0 means the customer used the service.
+  const hasUsage = row => {
+    const used = parseFloat(String(row.used || '').replace(/,/g, ''));
+    if (Number.isFinite(used) && used > 0) return true;
+    const calls = parseInt(String(row.totalCalls || '').replace(/,/g, ''), 10);
+    return Number.isFinite(calls) && calls > 0;
+  };
+
   for (const row of rows) {
     const cat = String(row.billingCategory || '').toUpperCase();
     if (MINUTE_AUDITOR_SKIP_CATEGORIES.has(cat)) {
-      job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true });
+      job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true, flagged: false });
       job.done++;
       continue;
     }
-    const result = { ...row, chargeover: null, active: null, error: null, skipped: false };
+    const result = { ...row, chargeover: null, active: null, error: null, skipped: false, flagged: false };
     if (!row.coCustomerId) {
       result.error = 'No COCustomerId';
-      job.results.push(result);
-      job.done++;
-      continue;
+    } else {
+      const tenantHint = ['AL', 'RS'].includes(row.clientType) ? row.clientType : null;
+      const co = resolveInPrefetched(prefetched, tenantHint, row.coCustomerId);
+      result.chargeover = co;
+      result.active = co ? isChargeoverActive(co) : false;
+      if (!co) result.error = 'Not found in ChargeOver';
     }
-    const tenantHint = ['AL', 'RS'].includes(row.clientType) ? row.clientType : null;
-    const co = resolveInPrefetched(prefetched, tenantHint, row.coCustomerId);
-    result.chargeover = co;
-    result.active = co ? isChargeoverActive(co) : false;
-    if (!co) result.error = 'Not found in ChargeOver';
+    // The core audit signal: customer had usage but isn't paying (either
+    // subscription isn't active, or we can't find them in CO at all).
+    result.flagged = hasUsage(row) && result.active !== true;
     job.results.push(result);
     job.done++;
   }

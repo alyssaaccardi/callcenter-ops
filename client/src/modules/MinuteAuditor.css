@@ -168,6 +168,23 @@ button.ma-stat { appearance: none; }
 .ma-stat-red   .ma-stat-num { color: #dc2626; }
 .ma-stat-amber .ma-stat-num { color: #b45309; }
 
+/* Flagged tile — the actionable "customers using minutes but not paying" */
+.ma-stat-flagged {
+  background: linear-gradient(135deg, rgba(220,38,38,0.10) 0%, rgba(239,68,68,0.06) 100%);
+  border-color: rgba(220,38,38,0.30);
+  min-width: 130px;
+}
+.ma-stat-flagged .ma-stat-num { color: #b91c1c; }
+.ma-stat-flagged .ma-stat-label { color: rgba(153,27,27,0.80); }
+.ma-stat-flagged:hover {
+  border-color: rgba(220,38,38,0.55);
+  box-shadow: 0 4px 12px rgba(220,38,38,0.18);
+}
+.ma-stat-flagged.ma-stat-selected {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220,38,38,0.20);
+}
+
 /* Filters */
 .ma-filters {
   display: flex;
@@ -250,7 +267,10 @@ button.ma-stat { appearance: none; }
 .ma-row-unpaid  { background: rgba(220,38,38,0.05); }
 .ma-row-neutral { background: transparent; }
 .ma-row-skipped { background: rgba(107,114,128,0.04); color: rgba(60,50,120,0.65); }
+.ma-row-flagged { background: rgba(220,38,38,0.10); border-left: 3px solid #dc2626; }
 .ma-row-paid:hover, .ma-row-unpaid:hover, .ma-row-neutral:hover, .ma-row-skipped:hover { background: rgba(168,85,247,0.06); }
+.ma-row-flagged:hover { background: rgba(220,38,38,0.16); }
+.ma-flag-icon { font-size: 14px; }
 
 .ma-client-name { font-weight: 600; }
 .ma-client-alias { font-size: 10px; color: rgba(60,50,120,0.55); margin-top: 1px; }

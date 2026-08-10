@@ -4,16 +4,17 @@ import api from '../api';
 import './MinuteAuditor.css';
 
 const COLUMNS = [
+  { key: 'flaggedBadge',    label: 'Flag',              align: 'center', type: 'badge' },
   { key: 'client',          label: 'Client',            align: 'left',  type: 'text' },
   { key: 'coCustomerId',    label: 'CO ID',             align: 'right', type: 'text' },
   { key: 'clientType',      label: 'Tenant',            align: 'left',  type: 'text' },
   { key: 'billingCategory', label: 'CSV Category',      align: 'left',  type: 'text' },
   { key: 'billingCycle',    label: 'Cycle',             align: 'left',  type: 'text' },
-  { key: 'allotted',        label: 'Allotted',          align: 'right', type: 'num'  },
+  { key: 'allotted',        label: 'Plan (min)',        align: 'right', type: 'num'  },
   { key: 'used',            label: 'Used',              align: 'right', type: 'num'  },
   { key: 'remaining',       label: '% Remain',          align: 'right', type: 'text' },
   { key: 'totalCalls',      label: 'Calls',             align: 'right', type: 'num'  },
-  { key: 'activeBadge',     label: 'Active Sub?',       align: 'center', type: 'badge' },
+  { key: 'activeBadge',     label: 'CO Status',         align: 'center', type: 'badge' },
 ];
 
 function fmtNum(v) {
@@ -41,11 +42,15 @@ function resultLabel(r) {
   return '';
 }
 
+function flaggedLabel(r) {
+  return r.flagged ? 'FLAGGED' : '';
+}
+
 // CSV export — subscription-status focused
 function toCsv(rows) {
   const header = [
-    'Client','COCustomerId','Tenant (CSV)','Tenant (CO)','Billing Category','Billing Cycle',
-    'Allotted','Used','Remaining','Total Calls','Audit Result','Error','CO URL',
+    'Flagged','Client','COCustomerId','Tenant (CSV)','Tenant (CO)','Billing Category','Billing Cycle',
+    'Allotted (Plan)','Used','Remaining','Total Calls','Audit Result','Error','CO URL',
   ];
   const esc = (v) => {
     const s = v == null ? '' : String(v);
@@ -55,7 +60,7 @@ function toCsv(rows) {
   for (const r of rows) {
     const co = r.chargeover || {};
     lines.push([
-      r.client, r.coCustomerId, r.clientType, co.tenant || '',
+      flaggedLabel(r), r.client, r.coCustomerId, r.clientType, co.tenant || '',
       r.billingCategory, r.billingCycle,
       r.allotted, r.used, r.remaining, r.totalCalls,
       resultLabel(r), r.error || '', co.url || '',
@@ -73,8 +78,8 @@ export default function MinuteAuditor() {
   const [results, setResults] = useState([]);
   const [error, setError] = useState('');
   const [sort, setSort] = useState({ key: 'client', dir: 'asc' });
-  // audited (default: non-skipped) | active | inactive | notfound | skipped | all
-  const [filterActive, setFilterActive] = useState('audited');
+  // flagged (default) | audited | active | inactive | notfound | skipped | all
+  const [filterActive, setFilterActive] = useState('flagged');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterTenant, setFilterTenant] = useState('all');
   const [search, setSearch] = useState('');
@@ -165,7 +170,7 @@ export default function MinuteAuditor() {
     setResults([]);
     setError('');
     setSort({ key: 'client', dir: 'asc' });
-    setFilterActive('audited');
+    setFilterActive('flagged');
     setFilterCategory('all');
     setFilterTenant('all');
     setSearch('');
@@ -189,6 +194,7 @@ export default function MinuteAuditor() {
     const q = search.trim().toLowerCase();
     const isNotInCO = r => r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
     return flat.filter(r => {
+      if (filterActive === 'flagged'  && !r.flagged) return false;
       if (filterActive === 'audited'  && r.skipped) return false;
       if (filterActive === 'active'   && (r.skipped || r.active !== true)) return false;
       if (filterActive === 'inactive' && (r.skipped || r.active !== false || isNotInCO(r))) return false;
@@ -215,6 +221,9 @@ export default function MinuteAuditor() {
       if (sort.key === 'activeBadge') {
         av = a.active === true ? 2 : a.active === false ? 1 : 0;
         bv = b.active === true ? 2 : b.active === false ? 1 : 0;
+      } else if (sort.key === 'flaggedBadge') {
+        av = a.flagged ? 1 : 0;
+        bv = b.flagged ? 1 : 0;
       } else if (col.type === 'num' || col.type === 'money') {
         av = Number(av); bv = Number(bv);
         if (!Number.isFinite(av)) av = -Infinity;
@@ -230,10 +239,11 @@ export default function MinuteAuditor() {
   }, [filtered, sort]);
 
   const summary = useMemo(() => {
-    const s = { total: flat.length, audited: 0, active: 0, inactive: 0, notfound: 0, skipped: 0, error: 0 };
+    const s = { total: flat.length, audited: 0, flagged: 0, active: 0, inactive: 0, notfound: 0, skipped: 0, error: 0 };
     for (const r of flat) {
       if (r.skipped) { s.skipped++; continue; }
       s.audited++;
+      if (r.flagged) s.flagged++;
       if (r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId') s.notfound++;
       else if (r.error) s.error++;
       else if (r.active === true) s.active++;
@@ -262,7 +272,7 @@ export default function MinuteAuditor() {
       <div className="ma-header">
         <div>
           <h1 className="ma-title">Minute Usage Auditor</h1>
-          <div className="ma-subtitle">Confirm customers with minute usage have an active ChargeOver subscription. INTERNAL, TRIAL, and FREE rows are skipped.</div>
+          <div className="ma-subtitle">If a customer used minutes but doesn't have an active ChargeOver subscription, they're flagged. INTERNAL, TRIAL, and FREE are skipped.</div>
         </div>
         {view === 'results' && (
           <div className="ma-header-actions">
@@ -326,6 +336,13 @@ export default function MinuteAuditor() {
         <>
           <div className="ma-summary">
             <button
+              className={`ma-stat ma-stat-flagged${filterActive === 'flagged' ? ' ma-stat-selected' : ''}`}
+              onClick={() => setFilterActive('flagged')}
+              title="Customers who USED minutes but have no active subscription in ChargeOver — need immediate follow-up"
+            >
+              <div className="ma-stat-num">🚨 {summary.flagged}</div><div className="ma-stat-label">Flagged</div>
+            </button>
+            <button
               className={`ma-stat${filterActive === 'audited' ? ' ma-stat-selected' : ''}`}
               onClick={() => setFilterActive('audited')}
               title="All customers we audited (excludes INTERNAL/TRIAL/FREE)"
@@ -371,6 +388,7 @@ export default function MinuteAuditor() {
               onChange={(e) => setSearch(e.target.value)}
             />
             <select className="ma-select" value={filterActive} onChange={e => setFilterActive(e.target.value)}>
+              <option value="flagged">🚨 Flagged (used minutes, not paying)</option>
               <option value="audited">Audited (excl. skipped)</option>
               <option value="active">Active only</option>
               <option value="inactive">Inactive only</option>
@@ -407,7 +425,10 @@ export default function MinuteAuditor() {
               </thead>
               <tbody>
                 {sorted.map((r, i) => (
-                  <tr key={i} className={r.skipped ? 'ma-row-skipped' : r.active === false ? 'ma-row-unpaid' : r.active === true ? 'ma-row-paid' : 'ma-row-neutral'}>
+                  <tr key={i} className={r.flagged ? 'ma-row-flagged' : r.skipped ? 'ma-row-skipped' : r.active === false ? 'ma-row-unpaid' : r.active === true ? 'ma-row-paid' : 'ma-row-neutral'}>
+                    <td className="ma-td ma-td-center">
+                      {r.flagged && <span className="ma-flag-icon" title="Used minutes but not paying">🚨</span>}
+                    </td>
                     <td className="ma-td ma-td-left">
                       <div className="ma-client-name">{r.client || '—'}</div>
                       {r.coCompany && r.coCompany.toLowerCase() !== (r.client || '').toLowerCase() && (
