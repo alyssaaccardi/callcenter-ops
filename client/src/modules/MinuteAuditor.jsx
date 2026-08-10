@@ -333,13 +333,6 @@ export default function MinuteAuditor() {
               <div className="ma-stat-num">{summary.audited}</div><div className="ma-stat-label">Audited</div>
             </button>
             <button
-              className={`ma-stat ma-stat-green${filterActive === 'active' ? ' ma-stat-selected' : ''}`}
-              onClick={() => setFilterActive('active')}
-              title="Active subscription in ChargeOver"
-            >
-              <div className="ma-stat-num">{summary.active}</div><div className="ma-stat-label">Active Sub</div>
-            </button>
-            <button
               className={`ma-stat ma-stat-red${filterActive === 'inactive' ? ' ma-stat-selected' : ''}`}
               onClick={() => setFilterActive('inactive')}
               title="Found in ChargeOver but no active subscription"

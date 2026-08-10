@@ -5516,9 +5516,13 @@ function parsePercentageCsv(text) {
 // has an active subscription (current or overdue — overdue is still a live
 // subscription, they just haven't paid the latest invoice). Anything else
 // (canceled/suspended/none) = inactive.
+//
+// Note: CO uses hyphenated status strings like 'active-current',
+// 'active-overdue', 'canceled-manual', 'suspended-manual', so both checks
+// use startsWith('active') rather than exact equality.
 function isChargeoverActive(co) {
   if (!co) return false;
-  const custActive = String(co.status || '').toLowerCase() === 'active';
+  const custActive = String(co.status || '').toLowerCase().startsWith('active');
   const subActive  = String(co.subStatus || '').toLowerCase().startsWith('active');
   return custActive && subActive;
 }
