@@ -5497,15 +5497,20 @@ function parsePercentageCsv(text) {
   return rows;
 }
 
-// A CO account is "paid" when the customer is active AND has an active
-// subscription (current or overdue — overdue still means they owe us money on
-// a live package, distinct from canceled). Anything else = unpaid.
-function isChargeoverPaid(co) {
+// A CO customer counts as "active" when the customer record is active AND
+// has an active subscription (current or overdue — overdue is still a live
+// subscription, they just haven't paid the latest invoice). Anything else
+// (canceled/suspended/none) = inactive.
+function isChargeoverActive(co) {
   if (!co) return false;
   const custActive = String(co.status || '').toLowerCase() === 'active';
   const subActive  = String(co.subStatus || '').toLowerCase().startsWith('active');
   return custActive && subActive;
 }
+
+// Billing categories excluded from the audit — these customers aren't
+// expected to have a live paid subscription in ChargeOver.
+const MINUTE_AUDITOR_SKIP_CATEGORIES = new Set(['INTERNAL', 'TRIAL', 'FREE']);
 
 async function runMinuteAuditorJob(jobId, rows) {
   const job = minuteAuditorJobs.get(jobId);
@@ -5513,7 +5518,7 @@ async function runMinuteAuditorJob(jobId, rows) {
   const CONCURRENCY = 4;
 
   async function processRow(row) {
-    const result = { ...row, chargeover: null, paid: null, error: null };
+    const result = { ...row, chargeover: null, active: null, error: null };
     if (!row.coCustomerId) {
       result.error = 'No COCustomerId';
       job.results.push(result);
@@ -5524,7 +5529,7 @@ async function runMinuteAuditorJob(jobId, rows) {
     try {
       const co = await lookupChargeoverById(tenantHint, row.coCustomerId);
       result.chargeover = co;
-      result.paid = co ? isChargeoverPaid(co) : false;
+      result.active = co ? isChargeoverActive(co) : false;
       if (!co) result.error = 'Not found in ChargeOver';
     } catch (e) {
       result.error = e.message || 'Lookup failed';
@@ -5554,7 +5559,10 @@ app.post('/api/minute-auditor/upload', requireRole(...MINUTE_AUDITOR_ROLES), min
   } catch (e) {
     return res.status(400).json({ error: 'Failed to parse CSV: ' + e.message });
   }
-  if (rows.length === 0) return res.status(400).json({ error: 'No data rows found in CSV' });
+  const parsedCount = rows.length;
+  rows = rows.filter(r => !MINUTE_AUDITOR_SKIP_CATEGORIES.has(String(r.billingCategory || '').toUpperCase()));
+  const skippedCount = parsedCount - rows.length;
+  if (rows.length === 0) return res.status(400).json({ error: 'No auditable rows found (all rows were INTERNAL/TRIAL/FREE or empty)' });
 
   const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   minuteAuditorJobs.set(jobId, {
@@ -5562,6 +5570,8 @@ app.post('/api/minute-auditor/upload', requireRole(...MINUTE_AUDITOR_ROLES), min
     results: [],
     total: rows.length,
     done: 0,
+    parsedCount,
+    skippedCount,
     startedAt: Date.now(),
     finishedAt: null,
     filename: req.file.originalname || 'upload.csv',
@@ -5578,7 +5588,7 @@ app.post('/api/minute-auditor/upload', requireRole(...MINUTE_AUDITOR_ROLES), min
     if ((j.finishedAt || j.startedAt) < cutoff) minuteAuditorJobs.delete(id);
   }
 
-  res.json({ jobId, total: rows.length });
+  res.json({ jobId, total: rows.length, parsedCount, skippedCount });
 });
 
 app.get('/api/minute-auditor/stream/:jobId', requireRole(...MINUTE_AUDITOR_ROLES), (req, res) => {

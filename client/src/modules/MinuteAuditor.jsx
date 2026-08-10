@@ -13,12 +13,7 @@ const COLUMNS = [
   { key: 'used',            label: 'Used',              align: 'right', type: 'num'  },
   { key: 'remaining',       label: '% Remain',          align: 'right', type: 'text' },
   { key: 'totalCalls',      label: 'Calls',             align: 'right', type: 'num'  },
-  { key: 'coStatus',        label: 'CO Status',         align: 'left',  type: 'text' },
-  { key: 'coSubStatus',     label: 'CO Sub',            align: 'left',  type: 'text' },
-  { key: 'daysOverdue',     label: 'Days Ovd',          align: 'right', type: 'num'  },
-  { key: 'balance',         label: 'Balance',           align: 'right', type: 'money'},
-  { key: 'mrr',             label: 'MRR',               align: 'right', type: 'money'},
-  { key: 'paidBadge',       label: 'Paid?',             align: 'center', type: 'badge' },
+  { key: 'activeBadge',     label: 'Active Sub?',       align: 'center', type: 'badge' },
 ];
 
 function fmtNum(v) {
@@ -26,35 +21,23 @@ function fmtNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n.toLocaleString() : String(v);
 }
-function fmtMoney(v) {
-  if (v == null || v === '') return '—';
-  const n = Number(v);
-  if (!Number.isFinite(n)) return String(v);
-  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-}
 
 // Flatten job row → cell values keyed by column
 function flattenRow(r) {
   const co = r.chargeover || {};
   return {
     ...r,
-    coStatus:    co.status || '',
-    coSubStatus: co.subStatus || '',
-    daysOverdue: co.daysOverdue ?? '',
-    balance:     co.balance ?? '',
-    mrr:         co.mrr ?? '',
     coCompany:   co.company || '',
     coUrl:       co.url || '',
     resolvedTenant: co.tenant || r.clientType || '',
   };
 }
 
-// CSV export — enriched with CO columns
+// CSV export — subscription-status focused
 function toCsv(rows) {
   const header = [
     'Client','COCustomerId','Tenant (CSV)','Tenant (CO)','Billing Category','Billing Cycle',
-    'Allotted','Used','Remaining','Total Calls','Emails','SMS Pages',
-    'CO Status','CO Sub Status','Days Overdue','Balance','MRR','Paid','Error','CO URL',
+    'Allotted','Used','Remaining','Total Calls','Active Subscription','Error','CO URL',
   ];
   const esc = (v) => {
     const s = v == null ? '' : String(v);
@@ -66,9 +49,8 @@ function toCsv(rows) {
     lines.push([
       r.client, r.coCustomerId, r.clientType, co.tenant || '',
       r.billingCategory, r.billingCycle,
-      r.allotted, r.used, r.remaining, r.totalCalls, r.emails, r.smsPages,
-      co.status || '', co.subStatus || '', co.daysOverdue ?? '', co.balance ?? '', co.mrr ?? '',
-      r.paid === true ? 'Paid' : r.paid === false ? 'Unpaid' : '',
+      r.allotted, r.used, r.remaining, r.totalCalls,
+      r.active === true ? 'Active' : r.active === false ? 'Inactive' : '',
       r.error || '', co.url || '',
     ].map(esc).join(','));
   }
@@ -84,7 +66,8 @@ export default function MinuteAuditor() {
   const [results, setResults] = useState([]);
   const [error, setError] = useState('');
   const [sort, setSort] = useState({ key: 'client', dir: 'asc' });
-  const [filterPaid, setFilterPaid] = useState('all'); // all | paid | unpaid | notfound
+  const [filterActive, setFilterActive] = useState('all'); // all | active | inactive | notfound
+  const [skippedCount, setSkippedCount] = useState(0);
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterTenant, setFilterTenant] = useState('all');
   const [search, setSearch] = useState('');
@@ -160,7 +143,8 @@ export default function MinuteAuditor() {
       const resp = await api.post('/api/minute-auditor/upload', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      const { jobId, total } = resp.data;
+      const { jobId, total, skippedCount: skipped = 0 } = resp.data;
+      setSkippedCount(skipped);
       setView('running');
       startStream(jobId, total);
     } catch (e) {
@@ -175,10 +159,11 @@ export default function MinuteAuditor() {
     setResults([]);
     setError('');
     setSort({ key: 'client', dir: 'asc' });
-    setFilterPaid('all');
+    setFilterActive('all');
     setFilterCategory('all');
     setFilterTenant('all');
     setSearch('');
+    setSkippedCount(0);
   };
 
   const flat = useMemo(() => results.map(flattenRow), [results]);
@@ -198,9 +183,9 @@ export default function MinuteAuditor() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return flat.filter(r => {
-      if (filterPaid === 'paid'     && r.paid !== true) return false;
-      if (filterPaid === 'unpaid'   && (r.paid !== false || r.error === 'Not found in ChargeOver')) return false;
-      if (filterPaid === 'notfound' && r.error !== 'Not found in ChargeOver' && r.error !== 'No COCustomerId') return false;
+      if (filterActive === 'active'   && r.active !== true) return false;
+      if (filterActive === 'inactive' && (r.active !== false || r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId')) return false;
+      if (filterActive === 'notfound' && r.error !== 'Not found in ChargeOver' && r.error !== 'No COCustomerId') return false;
       if (filterCategory !== 'all' && r.billingCategory !== filterCategory) return false;
       if (filterTenant   !== 'all' && r.clientType     !== filterTenant)     return false;
       if (q) {
@@ -209,7 +194,7 @@ export default function MinuteAuditor() {
       }
       return true;
     });
-  }, [flat, filterPaid, filterCategory, filterTenant, search]);
+  }, [flat, filterActive, filterCategory, filterTenant, search]);
 
   const sorted = useMemo(() => {
     const col = COLUMNS.find(c => c.key === sort.key);
@@ -218,9 +203,9 @@ export default function MinuteAuditor() {
     return [...filtered].sort((a, b) => {
       let av = a[sort.key];
       let bv = b[sort.key];
-      if (sort.key === 'paidBadge') {
-        av = a.paid === true ? 2 : a.paid === false ? 1 : 0;
-        bv = b.paid === true ? 2 : b.paid === false ? 1 : 0;
+      if (sort.key === 'activeBadge') {
+        av = a.active === true ? 2 : a.active === false ? 1 : 0;
+        bv = b.active === true ? 2 : b.active === false ? 1 : 0;
       } else if (col.type === 'num' || col.type === 'money') {
         av = Number(av); bv = Number(bv);
         if (!Number.isFinite(av)) av = -Infinity;
@@ -236,12 +221,12 @@ export default function MinuteAuditor() {
   }, [filtered, sort]);
 
   const summary = useMemo(() => {
-    const s = { total: flat.length, paid: 0, unpaid: 0, notfound: 0, error: 0 };
+    const s = { total: flat.length, active: 0, inactive: 0, notfound: 0, error: 0 };
     for (const r of flat) {
       if (r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId') s.notfound++;
       else if (r.error) s.error++;
-      else if (r.paid === true) s.paid++;
-      else if (r.paid === false) s.unpaid++;
+      else if (r.active === true) s.active++;
+      else if (r.active === false) s.inactive++;
     }
     return s;
   }, [flat]);
@@ -265,8 +250,8 @@ export default function MinuteAuditor() {
     <div className="ma-root">
       <div className="ma-header">
         <div>
-          <h1 className="ma-title">Minute Usage vs. Paid Auditor</h1>
-          <div className="ma-subtitle">Verify that customers in your minute-usage export match ChargeOver paid status.</div>
+          <h1 className="ma-title">Minute Usage Auditor</h1>
+          <div className="ma-subtitle">Confirm customers with minute usage have an active ChargeOver subscription. INTERNAL, TRIAL, and FREE rows are skipped.</div>
         </div>
         {view === 'results' && (
           <div className="ma-header-actions">
@@ -288,7 +273,7 @@ export default function MinuteAuditor() {
           >
             <div className="ma-drop-icon">📄</div>
             <div className="ma-drop-title">{file ? file.name : 'Drop a Percentage_YYYY-MM-DD.csv here'}</div>
-            <div className="ma-drop-hint">…or click to browse. Multi-section files (STANDARD / TRIAL / PENDING CANCELLATION / etc.) parse automatically.</div>
+            <div className="ma-drop-hint">…or click to browse. INTERNAL, TRIAL, and FREE customers are automatically excluded from the audit.</div>
             <input type="file" accept=".csv,text/csv" className="ma-drop-input" onChange={(e) => onFile(e.target.files?.[0])} />
           </div>
           <div className="ma-actions">
@@ -313,10 +298,11 @@ export default function MinuteAuditor() {
       {view === 'results' && (
         <>
           <div className="ma-summary">
-            <div className="ma-stat"><div className="ma-stat-num">{summary.total}</div><div className="ma-stat-label">Rows</div></div>
-            <div className="ma-stat ma-stat-green"><div className="ma-stat-num">{summary.paid}</div><div className="ma-stat-label">Paid</div></div>
-            <div className="ma-stat ma-stat-red"><div className="ma-stat-num">{summary.unpaid}</div><div className="ma-stat-label">Unpaid</div></div>
+            <div className="ma-stat"><div className="ma-stat-num">{summary.total}</div><div className="ma-stat-label">Audited</div></div>
+            <div className="ma-stat ma-stat-green"><div className="ma-stat-num">{summary.active}</div><div className="ma-stat-label">Active Sub</div></div>
+            <div className="ma-stat ma-stat-red"><div className="ma-stat-num">{summary.inactive}</div><div className="ma-stat-label">Inactive</div></div>
             <div className="ma-stat ma-stat-amber"><div className="ma-stat-num">{summary.notfound}</div><div className="ma-stat-label">Not in CO</div></div>
+            {skippedCount > 0 && <div className="ma-stat"><div className="ma-stat-num">{skippedCount}</div><div className="ma-stat-label">Skipped</div></div>}
             {summary.error > 0 && <div className="ma-stat ma-stat-amber"><div className="ma-stat-num">{summary.error}</div><div className="ma-stat-label">Errors</div></div>}
           </div>
 
@@ -328,10 +314,10 @@ export default function MinuteAuditor() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <select className="ma-select" value={filterPaid} onChange={e => setFilterPaid(e.target.value)}>
+            <select className="ma-select" value={filterActive} onChange={e => setFilterActive(e.target.value)}>
               <option value="all">All statuses</option>
-              <option value="paid">Paid only</option>
-              <option value="unpaid">Unpaid only</option>
+              <option value="active">Active only</option>
+              <option value="inactive">Inactive only</option>
               <option value="notfound">Not found in CO</option>
             </select>
             <select className="ma-select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
@@ -363,7 +349,7 @@ export default function MinuteAuditor() {
               </thead>
               <tbody>
                 {sorted.map((r, i) => (
-                  <tr key={i} className={r.paid === false ? 'ma-row-unpaid' : r.paid === true ? 'ma-row-paid' : 'ma-row-neutral'}>
+                  <tr key={i} className={r.active === false ? 'ma-row-unpaid' : r.active === true ? 'ma-row-paid' : 'ma-row-neutral'}>
                     <td className="ma-td ma-td-left">
                       <div className="ma-client-name">{r.client || '—'}</div>
                       {r.coCompany && r.coCompany.toLowerCase() !== (r.client || '').toLowerCase() && (
@@ -382,20 +368,13 @@ export default function MinuteAuditor() {
                     <td className="ma-td ma-td-right">{fmtNum(r.used)}</td>
                     <td className="ma-td ma-td-right">{r.remaining || '—'}</td>
                     <td className="ma-td ma-td-right">{fmtNum(r.totalCalls)}</td>
-                    <td className="ma-td ma-td-left">{r.coStatus || '—'}</td>
-                    <td className="ma-td ma-td-left">{r.coSubStatus || '—'}</td>
-                    <td className={`ma-td ma-td-right${Number(r.daysOverdue) > 0 ? ' ma-td-overdue' : ''}`}>
-                      {r.daysOverdue === '' ? '—' : fmtNum(r.daysOverdue)}
-                    </td>
-                    <td className="ma-td ma-td-right">{fmtMoney(r.balance)}</td>
-                    <td className="ma-td ma-td-right">{fmtMoney(r.mrr)}</td>
                     <td className="ma-td ma-td-center">
                       {r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId'
                         ? <span className="ma-badge ma-badge-gray" title={r.error}>Not in CO</span>
-                        : r.paid === true
-                          ? <span className="ma-badge ma-badge-green">Paid</span>
-                          : r.paid === false
-                            ? <span className="ma-badge ma-badge-red" title={r.error || ''}>Unpaid</span>
+                        : r.active === true
+                          ? <span className="ma-badge ma-badge-green">Active</span>
+                          : r.active === false
+                            ? <span className="ma-badge ma-badge-red" title={r.error || ''}>Inactive</span>
                             : <span className="ma-badge ma-badge-gray" title={r.error || ''}>?</span>}
                     </td>
                   </tr>
