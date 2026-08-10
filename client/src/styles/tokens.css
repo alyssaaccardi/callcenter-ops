@@ -1,0 +1,179 @@
+/* Dialed In Dash — design tokens (Foundations v1)
+   Single source of truth for color, type, space, radius, elevation, motion.
+   Import at the top of index.css. Old variable names are kept as deprecated
+   aliases at the bottom so existing module CSS keeps working. */
+
+:root {
+  /* ---- Brand ---------------------------------------------------------- */
+  --royal-050: #EAF2FE;
+  --royal-100: #C3DCFB;
+  --royal-500: #2C7FF0;
+  --royal-600: #1A6FE8;   /* primary action, links, active nav */
+  --royal-700: #1559C4;   /* hover / pressed */
+  --violet-050: #F3EDFE;
+  --violet-100: #DDD0FB;
+  --violet-600: #7C3AED;  /* accent only: roles, charts, brand mark */
+  --violet-700: #5B21B6;
+
+  /* ---- State ---------------------------------------------------------- */
+  --ok-050: #E8F8EE;  --ok-100: #B7E7C9;  --ok-500: #22C55E;  --ok-600: #17914A;  --ok-700: #0F7A3D;
+  --warn-050: #FEF4E4; --warn-100: #F7DFAE; --warn-500: #F59E0B; --warn-600: #B4700A; --warn-700: #94590A;
+  --crit-050: #FDECEC; --crit-100: #F6C6C6; --crit-500: #EF4444; --crit-600: #C42525; --crit-700: #A31D1D;
+
+  /* ---- Neutral ramp (cool, derived from the original navy) ------------- */
+  --ink-900: #0B1220;
+  --ink-800: #131C2E;
+  --ink-700: #1E2A42;
+  --ink-600: #2C3A56;
+  --ink-500: #4A5872;
+  --ink-400: #6B7A96;
+  --ink-300: #9AA7BF;
+  --ink-200: #C7D0E0;
+  --ink-100: #E3E8F1;
+  --ink-050: #F2F5FA;
+  --ink-000: #FFFFFF;
+
+  /* ---- Semantic surface / text (what components actually reference) ---- */
+  --bg: var(--ink-050);
+  --surface: var(--ink-000);
+  --surface-sunken: #F8FAFD;
+  --surface-raised: var(--ink-000);
+  --border: var(--ink-100);
+  --border-strong: var(--ink-200);
+  --text: var(--ink-800);
+  --text-strong: var(--ink-900);
+  --text-muted: var(--ink-400);
+  --text-subtle: var(--ink-300);
+  --text-inverse: var(--ink-000);
+  --focus-ring: rgba(26, 111, 232, 0.28);
+
+  /* ---- Type ----------------------------------------------------------- */
+  --font-display: 'Barlow Condensed', 'Barlow', sans-serif;
+  --font-sans: 'Barlow', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --fs-display: 52px;  --lh-display: 1.0;
+  --fs-h1: 32px;       --lh-h1: 1.05;
+  --fs-h2: 24px;       --lh-h2: 1.1;
+  --fs-h3: 18px;       --lh-h3: 1.25;
+  --fs-body: 15px;     --lh-body: 1.5;
+  --fs-ui: 14px;       --lh-ui: 1.45;
+  --fs-sm: 13px;       --lh-sm: 1.45;
+  --fs-label: 12px;    --lh-label: 1.4;
+  --fs-micro: 11px;    --lh-micro: 1.3;
+
+  --fw-regular: 400; --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
+  --track-tight: -0.01em; --track-micro: 0.1em;
+
+  /* ---- Space (4px base) ----------------------------------------------- */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;  --sp-5: 20px;
+  --sp-6: 24px; --sp-8: 32px; --sp-12: 48px; --sp-16: 64px;
+
+  /* ---- Radius --------------------------------------------------------- */
+  --r-sm: 4px; --r-md: 8px; --r-lg: 12px; --r-xl: 16px; --r-full: 999px;
+
+  /* ---- Elevation ------------------------------------------------------ */
+  --elev-1: 0 1px 2px rgba(11,18,32,.06), 0 1px 1px rgba(11,18,32,.04);
+  --elev-2: 0 2px 4px rgba(11,18,32,.06), 0 4px 12px rgba(11,18,32,.06);
+  --elev-3: 0 8px 24px rgba(11,18,32,.10);
+  --elev-4: 0 24px 56px rgba(11,18,32,.16);
+
+  /* ---- Motion --------------------------------------------------------- */
+  --dur-fast: 120ms; --dur-base: 180ms; --dur-slow: 260ms;
+  --ease: cubic-bezier(.2,.6,.3,1);
+
+  /* ---- Layout --------------------------------------------------------- */
+  --sidebar-w: 240px;
+  --sidebar-w-collapsed: 96px;
+  --topbar-h: 60px;
+}
+
+body.dark {
+  --bg: #070D18;
+  --surface: #131C2E;
+  --surface-sunken: #0B1220;
+  --surface-raised: #1B263C;
+  --border: #22304A;
+  --border-strong: #2C3A56;
+  --text: #E3E8F1;
+  --text-strong: #FFFFFF;
+  --text-muted: #9AA7BF;
+  --text-subtle: #7D8CA8;
+  --text-inverse: #0B1220;
+  --focus-ring: rgba(44, 127, 240, 0.40);
+
+  --royal-050: rgba(44,127,240,.14);
+  --royal-100: rgba(44,127,240,.28);
+  --royal-600: #2C7FF0;
+  --royal-700: #1A6FE8;
+  --violet-050: rgba(124,58,237,.16);
+  --violet-100: rgba(124,58,237,.30);
+  --violet-700: #C4A8FB;
+
+  --ok-050: rgba(34,197,94,.14);  --ok-100: rgba(34,197,94,.28);  --ok-700: #5BE39A;
+  --warn-050: rgba(245,158,11,.14); --warn-100: rgba(245,158,11,.28); --warn-700: #FFB84D;
+  --crit-050: rgba(239,68,68,.14); --crit-100: rgba(239,68,68,.28); --crit-700: #FF8F8F;
+
+  --elev-1: 0 1px 2px rgba(0,0,0,.40);
+  --elev-2: 0 4px 12px rgba(0,0,0,.44);
+  --elev-3: 0 8px 24px rgba(0,0,0,.50);
+  --elev-4: 0 24px 56px rgba(0,0,0,.60);
+}
+
+/* ---- Base ------------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  transition: background var(--dur-base) var(--ease), color var(--dur-base) var(--ease);
+}
+
+h1, h2, h3 { font-family: var(--font-display); font-weight: var(--fw-semibold); margin: 0; color: var(--text-strong); }
+h1 { font-size: var(--fs-h1); line-height: var(--lh-h1); }
+h2 { font-size: var(--fs-h2); line-height: var(--lh-h2); }
+h3 { font-family: var(--font-sans); font-size: var(--fs-h3); line-height: var(--lh-h3); }
+p  { margin: 0; text-wrap: pretty; }
+
+a { color: var(--royal-600); text-decoration: none; }
+a:hover { color: var(--royal-700); text-decoration: underline; }
+
+:focus-visible { outline: 2px solid var(--royal-600); outline-offset: 2px; border-radius: var(--r-sm); }
+
+/* Tabular figures everywhere numbers matter */
+.num, .font-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---- DEPRECATED aliases ----------------------------------------------
+   Kept so existing module CSS keeps compiling. Delete a line once no
+   module references it (grep before removing).                        */
+:root {
+  --navy: var(--ink-900);
+  --navy-dk: #070D18;
+  --navy-lt: var(--ink-700);
+  --royal: var(--royal-600);
+  --royal-dk: var(--royal-700);
+  --purple: var(--violet-600);
+  --purple-lt: #A855F7;
+  --pink: var(--violet-600);        /* pink retired -> accent */
+  --teal: var(--ok-600);            /* teal retired -> ok */
+  --teal-dk: var(--ok-700);
+  --green: var(--ok-500);
+  --success: var(--ok-500);
+  --amber: var(--warn-500);
+  --warn: var(--warn-500);
+  --red: var(--crit-500);
+  --red-dk: var(--crit-600);
+  --danger: var(--crit-500);
+  --danger-dk: var(--crit-600);
+  --white: var(--ink-000);
+  --muted: var(--text-muted);
+  --text-lt: var(--text-muted);
+  --sans: var(--font-sans);
+  --mono: var(--font-mono);
+  --sidebar: var(--sidebar-w);
+}

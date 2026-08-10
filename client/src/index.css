@@ -1,53 +1,22 @@
-/* ── Design tokens ── */
-:root {
-  --navy:    #0e1828;
-  --navy-dk: #070d18;
-  --navy-lt: #162035;
-  --royal:   #1a6fe8;
-  --royal-dk:#1559c4;
-  --teal:    #00c9b1;
-  --teal-dk: #00a894;
-  --green:   #22c55e;
-  --red:     #ef4444;
-  --red-dk:  #dc2626;
-  --amber:   #f59e0b;
-  --white:   #f0f4ff;
-  --muted:   #8b7fa8;
-  --success: #22c55e;
-  --warn:    #f59e0b;
-  --danger:  #ef4444;
-  --danger-dk:#dc2626;
-  --purple:    #7c3aed;
-  --purple-lt: #a855f7;
-  --pink:      #ec4899;
-  --sans:    'Barlow Condensed', sans-serif;
-  --mono:    'IBM Plex Mono', monospace;
-  --sidebar: 240px;
-  --surface: rgba(255,255,255,0.72);
-  --text:    #1a1a3e;
-  --text-lt: rgba(26,26,62,0.55);
-  --border:  rgba(168,85,247,0.15);
-  --bg: transparent;
-}
+/* ── Design tokens ────────────────────────────────────────────────────
+   Source of truth: client/src/styles/tokens.css (Foundations v1).
+   The imported file redefines --navy, --royal, --purple, --surface,
+   --text, --border, --sidebar, etc. as deprecated aliases so this
+   file's legacy selectors below keep resolving. Remove those aliases
+   as modules convert to the new tokens. */
+@import './styles/tokens.css';
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { margin: 0; padding: 0; }
 
 html, body, #root { height: 100%; }
 
+/* Body font-family + colors come from tokens.css. Kept here: the
+   legacy 14px base while old module CSS still assumes it, and
+   full-viewport min-height. */
 body {
-  font-family: var(--sans);
-  background: linear-gradient(135deg, #e8eaf6 0%, #f3e8ff 30%, #fce4f0 60%, #e0f7f4 100%);
-  background-attachment: fixed;
-  color: #1a1a3e;
   font-size: 14px;
   line-height: 1.5;
   min-height: 100vh;
-}
-
-body.dark {
-  background: linear-gradient(135deg, #070d18 0%, #0a0f1e 100%);
-  background-attachment: fixed;
-  color: #f0f4ff;
 }
 
 ::-webkit-scrollbar { width: 5px; height: 5px; }
