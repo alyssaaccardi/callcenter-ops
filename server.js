@@ -3145,15 +3145,30 @@ const CHARGEOVER_TENANTS = {
   },
 };
 
-async function chargeoverGet(tenant, endpoint, params = {}) {
+async function chargeoverGet(tenant, endpoint, params = {}, attempt = 0) {
   const cfg = CHARGEOVER_TENANTS[tenant];
   if (!cfg?.url || !cfg?.auth) throw new Error(`ChargeOver tenant "${tenant}" not configured`);
-  const resp = await axios.get(`${cfg.url}${endpoint}`, {
-    params,
-    headers: { Authorization: `Basic ${cfg.auth}` },
-    timeout: 8000,
-  });
-  return resp.data?.response ?? null;
+  try {
+    const resp = await axios.get(`${cfg.url}${endpoint}`, {
+      params,
+      headers: { Authorization: `Basic ${cfg.auth}` },
+      timeout: 10000,
+    });
+    return resp.data?.response ?? null;
+  } catch (e) {
+    const status = e.response?.status;
+    const netErr = ['ECONNRESET','ETIMEDOUT','ECONNABORTED','EAI_AGAIN'].includes(e.code);
+    const retryable = status === 429 || (status >= 500 && status < 600) || netErr;
+    if (retryable && attempt < 4) {
+      const retryAfter = parseInt(e.response?.headers?.['retry-after'], 10);
+      const delay = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(retryAfter * 1000, 30000)
+        : 750 * Math.pow(2, attempt); // 750ms, 1.5s, 3s, 6s
+      await new Promise(r => setTimeout(r, delay));
+      return chargeoverGet(tenant, endpoint, params, attempt + 1);
+    }
+    throw e;
+  }
 }
 
 // ChargeOver custom_3 values → AUDITOR_CATEGORIES (case-insensitive keys).
@@ -5515,7 +5530,27 @@ const MINUTE_AUDITOR_SKIP_CATEGORIES = new Set(['INTERNAL', 'TRIAL', 'FREE']);
 async function runMinuteAuditorJob(jobId, rows) {
   const job = minuteAuditorJobs.get(jobId);
   if (!job) return;
-  const CONCURRENCY = 4;
+  const CONCURRENCY = 2;
+  // Same COCustomerId can appear in both the 1st and 15th billing cycles —
+  // dedupe lookups so we only hit ChargeOver once per (tenant-hint, id) pair.
+  const lookupCache = new Map();
+  const inflight  = new Map();
+
+  async function cachedLookup(tenantHint, coId) {
+    const key = `${tenantHint || 'X'}:${coId}`;
+    if (lookupCache.has(key)) return lookupCache.get(key);
+    if (inflight.has(key)) return inflight.get(key);
+    const p = lookupChargeoverById(tenantHint, coId).then(co => {
+      lookupCache.set(key, co);
+      inflight.delete(key);
+      return co;
+    }, err => {
+      inflight.delete(key);
+      throw err;
+    });
+    inflight.set(key, p);
+    return p;
+  }
 
   async function processRow(row) {
     const cat = String(row.billingCategory || '').toUpperCase();
@@ -5533,7 +5568,7 @@ async function runMinuteAuditorJob(jobId, rows) {
     }
     const tenantHint = ['AL', 'RS'].includes(row.clientType) ? row.clientType : null;
     try {
-      const co = await lookupChargeoverById(tenantHint, row.coCustomerId);
+      const co = await cachedLookup(tenantHint, row.coCustomerId);
       result.chargeover = co;
       result.active = co ? isChargeoverActive(co) : false;
       if (!co) result.error = 'Not found in ChargeOver';
