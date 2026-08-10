@@ -20,6 +20,7 @@ const ALL_NAV_ITEMS = [
   { id: 'user-management',  icon: '👥', label: 'User Management',  roles: ['super_admin'],                          section: 'Administration' },
   { id: 'admin-dashboard',  icon: '🛡️', label: 'Admin Dashboard',                    roles: ['super_admin', 'call_center_ops', 'zendesk_auditor'], section: 'Analytics'      },
   { id: 'zendesk-auditor', icon: '🔎', label: 'The Farewell Reporter',              roles: ['super_admin', 'call_center_ops', 'zendesk_auditor'], section: 'Analytics'      },
+  { id: 'minute-auditor',  icon: '💰', label: 'Minute Usage Auditor',                roles: ['super_admin', 'call_center_ops', 'minute_auditor'],  section: 'Billing'        },
   { id: 'ring-leader',      icon: '🛎️', label: 'The Ring Leader',  roles: ['super_admin', 'newsletter_contributor'], section: 'Newsletter'    },
   { id: 'scriptor',         icon: '🗿', label: 'The Rob-osetta Stone', roles: ['super_admin', 'scriptor'],            section: 'Tools'         },
 ];
@@ -31,6 +32,7 @@ const ROLE_LABELS = {
   tech:                   'Tech Team',
   tv_display:             'TV Display',
   zendesk_auditor:        'Zendesk Auditor',
+  minute_auditor:         'Minute Usage Auditor',
   newsletter_contributor: 'Newsletter Contributor',
   scriptor:               'The Rob-osetta Stone',
 };

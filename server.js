@@ -3340,6 +3340,58 @@ async function enrichWithChargeover({ email, domain, company, tenant }) {
   return results[0];
 }
 
+// Direct lookup by ChargeOver customer_id. Returns the same shape as
+// lookupChargeoverCustomer(). If tenant is null/unknown, tries AL then RS
+// and returns whichever hit first.
+async function lookupChargeoverById(tenant, customerId) {
+  const id = String(customerId || '').trim();
+  if (!id) return null;
+  const tenants = tenant && ['AL', 'RS'].includes(tenant) ? [tenant] : ['AL', 'RS'];
+  for (const t of tenants) {
+    if (!CHARGEOVER_TENANTS[t]?.auth) continue;
+    try {
+      const customers = await chargeoverGet(t, '/customer', {
+        where: `customer_id:EQUALS:${id}`,
+        limit: 1,
+      }) || [];
+      if (customers.length === 0) continue;
+      const cust = customers[0];
+      let subs = [];
+      try {
+        subs = await chargeoverGet(t, '/package', {
+          where: `customer_id:EQUALS:${cust.customer_id}`,
+          order: 'cancel_datetime:desc',
+          limit: 5,
+        }) || [];
+      } catch (e) { /* leave subs empty */ }
+      const canceledSub = subs.find(s => s.package_status_str === 'canceled-manual');
+      const activeSub   = subs.find(s => s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
+      const sub = activeSub || canceledSub || subs[0] || null;
+      return {
+        tenant: t,
+        customerId: cust.customer_id,
+        company: cust.company || null,
+        email: cust.superuser_email || cust.email || null,
+        status: cust.customer_status_str || null,
+        admin: cust.admin_name || null,
+        mrr: cust.mrr ?? null,
+        arr: cust.arr ?? null,
+        balance: cust.balance ?? null,
+        canceledAt: sub?.cancel_datetime?.slice(0, 10) || null,
+        planTier: sub?.custom_2 || null,
+        overageRate: sub?.custom_1 || null,
+        daysOverdue: sub?.days_overdue ?? 0,
+        amountOverdue: sub?.amount_overdue ?? 0,
+        subStatus: sub?.package_status_str || null,
+        url: cust.url_self || null,
+      };
+    } catch (e) {
+      console.warn(`[chargeover:${t}] id-lookup ${id} failed: ${e.message}`);
+    }
+  }
+  return null;
+}
+
 function computeAuditAgreement(chargeoverCategory, aiCategory) {
   if (chargeoverCategory && aiCategory) {
     return chargeoverCategory === aiCategory ? 'agree' : 'disagree';
@@ -5342,6 +5394,227 @@ app.post('/api/scriptor/docx', requireRole(...SCRIBE_ROLES), async (req, res) =>
     console.error('[scribe] docx export error:', e.message);
     res.status(500).json({ error: `Could not build the Word document: ${e.message}` });
   }
+});
+
+// ─── Minute Usage vs. Paid Auditor ───────────────────────────────────────────
+// Ingest a "Percentage_YYYY-MM-DD.csv" export (multi-section by billing cycle
+// and billing category), enrich each row via ChargeOver by COCustomerId, and
+// return a paid/unpaid verdict. Client Type column (AL/RS) hints the tenant;
+// blank/unknown rows fall back to trying both.
+const MINUTE_AUDITOR_ROLES = ['super_admin', 'call_center_ops', 'minute_auditor'];
+const minuteAuditorUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const minuteAuditorJobs = new Map();
+
+// Parse one CSV line respecting double quotes ("" = escaped quote inside quoted field)
+function parseCsvLine(line) {
+  const out = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = false;
+      } else cur += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',') { out.push(cur); cur = ''; }
+      else cur += ch;
+    }
+  }
+  out.push(cur);
+  return out.map(s => s.trim());
+}
+
+// Parse the multi-section Percentage CSV. Emits one flat array of row objects,
+// each carrying the billing cycle + billing category context it was found in.
+function parsePercentageCsv(text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const rows = [];
+  let currentCycle = '';
+  let currentSection = '';
+  let headerFields = null;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { headerFields = null; continue; }
+
+    // Section title, e.g.: "Clients - Minutes Overage Percentage 0% allotted for 03/13/2026 - STANDARD "
+    // Trailing token can include digits (PAID LAST 30) and slashes (CLOSED/RETIRED)
+    const secMatch = line.match(/^"?Clients - Minutes Overage Percentage[^"]*-\s*([A-Z][A-Z0-9\s/]*?)\s*"?$/);
+    if (secMatch) {
+      currentSection = secMatch[1].trim();
+      headerFields = null;
+      continue;
+    }
+
+    // Billing cycle, e.g.: "Billing Cycle 1st - Date Range: 03/01/2026 - 03/12/2026"
+    const cycleMatch = line.match(/^"?Billing Cycle\s+([^-]+?)\s*-\s*Date Range:\s*([^"]+?)"?$/);
+    if (cycleMatch) {
+      currentCycle = `${cycleMatch[1].trim()} (${cycleMatch[2].trim()})`;
+      headerFields = null;
+      continue;
+    }
+
+    const fields = parseCsvLine(line);
+
+    // Header row detection: first cell is "Client" and includes "ClientId"
+    if (fields[0] === 'Client' && fields.some(f => f === 'ClientId' || f === 'COCustomerId')) {
+      headerFields = fields;
+      continue;
+    }
+
+    if (!headerFields) continue;
+    if (fields.every(f => !f)) continue;
+
+    const rec = {};
+    for (let i = 0; i < headerFields.length; i++) {
+      rec[headerFields[i]] = fields[i] ?? '';
+    }
+    // Skip entirely empty rows (Client blank AND ClientId blank)
+    if (!String(rec.Client || '').trim() && !String(rec.ClientId || '').trim()) continue;
+
+    rows.push({
+      billingCycle: currentCycle,
+      csvSection: currentSection,
+      client: String(rec.Client || '').trim(),
+      clientId: String(rec.ClientId || '').trim(),
+      allotted: String(rec.Alloted || rec.Allotted || '').trim(),
+      used: String(rec.Used || '').trim(),
+      remaining: String(rec.Remaining || '').trim(),
+      clientType: String(rec['Client Type'] || '').trim().toUpperCase(),
+      overageRate: String(rec['Overage Rate per Minute'] || '').trim(),
+      totalCalls: String(rec['Total Calls'] || '').trim(),
+      emails: String(rec['Total # of Emails Sent'] || '').trim(),
+      smsPages: String(rec['Total # of SMS Pages'] || '').trim(),
+      overageProtection: String(rec['Overage Protection'] || '').trim(),
+      billingCategory: String(rec['Billing Category'] || '').trim(),
+      coCustomerId: String(rec.COCustomerId || '').trim(),
+      dateCreated: String(rec['Date Created'] || '').trim(),
+    });
+  }
+  return rows;
+}
+
+// A CO account is "paid" when the customer is active AND has an active
+// subscription (current or overdue — overdue still means they owe us money on
+// a live package, distinct from canceled). Anything else = unpaid.
+function isChargeoverPaid(co) {
+  if (!co) return false;
+  const custActive = String(co.status || '').toLowerCase() === 'active';
+  const subActive  = String(co.subStatus || '').toLowerCase().startsWith('active');
+  return custActive && subActive;
+}
+
+async function runMinuteAuditorJob(jobId, rows) {
+  const job = minuteAuditorJobs.get(jobId);
+  if (!job) return;
+  const CONCURRENCY = 4;
+
+  async function processRow(row) {
+    const result = { ...row, chargeover: null, paid: null, error: null };
+    if (!row.coCustomerId) {
+      result.error = 'No COCustomerId';
+      job.results.push(result);
+      job.done++;
+      return;
+    }
+    const tenantHint = ['AL', 'RS'].includes(row.clientType) ? row.clientType : null;
+    try {
+      const co = await lookupChargeoverById(tenantHint, row.coCustomerId);
+      result.chargeover = co;
+      result.paid = co ? isChargeoverPaid(co) : false;
+      if (!co) result.error = 'Not found in ChargeOver';
+    } catch (e) {
+      result.error = e.message || 'Lookup failed';
+    }
+    job.results.push(result);
+    job.done++;
+  }
+
+  for (let i = 0; i < rows.length; i += CONCURRENCY) {
+    await Promise.all(rows.slice(i, i + CONCURRENCY).map(processRow));
+  }
+  job.status = 'done';
+  job.finishedAt = Date.now();
+}
+
+app.post('/api/minute-auditor/upload', requireRole(...MINUTE_AUDITOR_ROLES), minuteAuditorUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  let text;
+  try {
+    text = req.file.buffer.toString('utf8');
+  } catch (e) {
+    return res.status(400).json({ error: 'Could not read file as text' });
+  }
+  let rows;
+  try {
+    rows = parsePercentageCsv(text);
+  } catch (e) {
+    return res.status(400).json({ error: 'Failed to parse CSV: ' + e.message });
+  }
+  if (rows.length === 0) return res.status(400).json({ error: 'No data rows found in CSV' });
+
+  const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  minuteAuditorJobs.set(jobId, {
+    status: 'running',
+    results: [],
+    total: rows.length,
+    done: 0,
+    startedAt: Date.now(),
+    finishedAt: null,
+    filename: req.file.originalname || 'upload.csv',
+  });
+
+  runMinuteAuditorJob(jobId, rows).catch(err => {
+    const job = minuteAuditorJobs.get(jobId);
+    if (job) { job.status = 'error'; job.error = err.message; }
+  });
+
+  // Prune jobs older than 2h to avoid unbounded memory growth
+  const cutoff = Date.now() - 2 * 60 * 60 * 1000;
+  for (const [id, j] of minuteAuditorJobs.entries()) {
+    if ((j.finishedAt || j.startedAt) < cutoff) minuteAuditorJobs.delete(id);
+  }
+
+  res.json({ jobId, total: rows.length });
+});
+
+app.get('/api/minute-auditor/stream/:jobId', requireRole(...MINUTE_AUDITOR_ROLES), (req, res) => {
+  const { jobId } = req.params;
+  const job = minuteAuditorJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  let sent = 0;
+  const interval = setInterval(() => {
+    const current = minuteAuditorJobs.get(jobId);
+    if (!current) { clearInterval(interval); res.end(); return; }
+    while (sent < current.results.length) {
+      res.write(`data: ${JSON.stringify({ type: 'result', result: current.results[sent], done: current.done, total: current.total })}\n\n`);
+      sent++;
+    }
+    res.write(`data: ${JSON.stringify({ type: 'progress', done: current.done, total: current.total, status: current.status })}\n\n`);
+    if (current.status === 'done' || current.status === 'error') {
+      res.write(`data: ${JSON.stringify({ type: 'done', done: current.done, total: current.total, status: current.status, error: current.error || null })}\n\n`);
+      clearInterval(interval);
+      res.end();
+    }
+  }, 700);
+
+  req.on('close', () => clearInterval(interval));
+});
+
+app.get('/api/minute-auditor/results/:jobId', requireRole(...MINUTE_AUDITOR_ROLES), (req, res) => {
+  const { jobId } = req.params;
+  const job = minuteAuditorJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job);
 });
 
 // ─── React SPA Catch-All ─────────────────────────────────────────────────────

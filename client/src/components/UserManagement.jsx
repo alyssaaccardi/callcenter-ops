@@ -8,6 +8,7 @@ const ROLES = [
   { value: 'tech',                   label: 'Tech Team' },
   { value: 'tv_display',             label: 'TV Display' },
   { value: 'zendesk_auditor',        label: 'Farewell Report' },
+  { value: 'minute_auditor',         label: 'Minute Usage Auditor' },
   { value: 'newsletter_contributor', label: 'Newsletter Contributor' },
   { value: 'scriptor',               label: 'The Rob-osetta Stone' },
 ];
@@ -19,6 +20,7 @@ const ROLE_STYLE = {
   tech:                   { background: 'rgba(16,185,129,0.15)', color: '#34d399' },
   tv_display:             { background: 'rgba(251,146,60,0.15)', color: '#fb923c' },
   zendesk_auditor:        { background: 'rgba(239,68,68,0.15)',  color: '#f87171' },
+  minute_auditor:         { background: 'rgba(168,85,247,0.15)', color: '#c4b5fd' },
   newsletter_contributor: { background: 'rgba(236,72,153,0.15)', color: '#f472b6' },
   scriptor:               { background: 'rgba(139,92,246,0.15)', color: '#c4b5fd' },
 };
@@ -31,6 +33,7 @@ const ROLE_LABEL = {
   tech:                   'Tech Team',
   tv_display:             'TV Display',
   zendesk_auditor:        'Farewell Report',
+  minute_auditor:         'Minute Usage Auditor',
   newsletter_contributor: 'Newsletter Contributor',
   scriptor:               'The Rob-osetta Stone',
 };
