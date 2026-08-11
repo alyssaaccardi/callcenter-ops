@@ -12,42 +12,42 @@ function fmtNum(v) {
   return Number.isFinite(n) ? n.toLocaleString() : String(v);
 }
 
-// Precedence: no-sub > plan > bill day > name. One categorical reason
-// per flagged row for the "Reason" column and the reason-breakdown bar.
+// The two mismatches this audit actually cares about — plan and bill day.
+// Everything else is secondary. Precedence: plan > bill day > no-sub > name.
 function computeReason(r) {
   if (r.skipped) return 'Skipped';
   if (!r.flagged) return 'Matched';
-  const notInCO = r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
-  if (notInCO || r.active !== true) return 'No subscription';
   if (r.planMismatch)    return 'Plan mismatch';
   if (r.billDayMismatch) return 'Bill day mismatch';
+  const notInCO = r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
+  if (notInCO || r.active !== true) return 'No subscription';
   if (r.nameMismatch)    return 'Name mismatch';
   return 'Flagged';
 }
 
 function describeReason(r) {
-  if (r.reason === 'Matched')          return 'Usage recorded and ChargeOver has an active subscription. Nothing to do.';
-  if (r.reason === 'No subscription')  return `Usage recorded in Answer but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
+  if (r.reason === 'Matched')          return 'Answer and ChargeOver agree on plan and bill day.';
   if (r.reason === 'Plan mismatch')    return `Answer allotted ${r.csvPlan ?? '?'} min; ChargeOver plan is ${r.coPlan ?? '?'} min.`;
   if (r.reason === 'Bill day mismatch')return `Answer bills on day ${r.csvBillDay ?? '?'}; ChargeOver next invoice is day ${r.coBillDay ?? '?'}.`;
+  if (r.reason === 'No subscription')  return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
   if (r.reason === 'Name mismatch')    return `Answer client "${r.client}" doesn't match ChargeOver company "${r.coCompany}".`;
   return r.error || '';
 }
 
 const REASON_TONE = {
   'Matched':           'ok',
-  'No subscription':   'crit',
-  'Plan mismatch':     'warn',
-  'Bill day mismatch': 'warn',
-  'Name mismatch':     'warn',
+  'Plan mismatch':     'crit',
+  'Bill day mismatch': 'crit',
+  'No subscription':   'warn',
+  'Name mismatch':     'neutral',
   'Skipped':           'neutral',
 };
 
 const REASON_OPTIONS = [
   { value: 'all',                 label: 'All reasons' },
-  { value: 'No subscription',     label: 'No subscription' },
   { value: 'Plan mismatch',       label: 'Plan mismatch' },
   { value: 'Bill day mismatch',   label: 'Bill day mismatch' },
+  { value: 'No subscription',     label: 'No subscription' },
   { value: 'Name mismatch',       label: 'Name mismatch' },
 ];
 
@@ -55,12 +55,13 @@ const REASON_OPTIONS = [
 
 function toCsv(rows) {
   const header = [
-    'Flagged','Reason','Client (Answer)','Company (ChargeOver)','Name Match Score',
+    'Flagged','Reason',
+    'Client (Answer)','Company (ChargeOver)','Name Match Score',
+    'Plan Answer (Allotted)','Plan ChargeOver','Plan Mismatch',
+    'Bill Day Answer','Bill Day ChargeOver','Bill Day Mismatch','ChargeOver Next Invoice',
     'ChargeOver Customer ID','Tenant (Answer)','Tenant (ChargeOver)',
     'Billing Category (Answer)','Billing Cycle (Answer)',
-    'Answer used','ChargeOver plan (allotted)','Gap (min)','Plan Mismatch',
-    'Bill Day Answer','Bill Day ChargeOver','Bill Day Mismatch','ChargeOver Next Invoice',
-    'Total Calls','Overage Rate Answer','Overage Rate ChargeOver',
+    'Used (Answer)','Total Calls (Answer)',
     'ChargeOver Sub Status','Error','ChargeOver URL',
   ];
   const esc = v => {
@@ -74,11 +75,11 @@ function toCsv(rows) {
     lines.push([
       r.flagged ? 'FLAGGED' : '', r.reason,
       r.client, co.company || '', r.nameMatchScore ?? '',
+      r.csvPlan ?? r.allotted, r.coPlan ?? '', yn(r.planMismatch),
+      r.csvBillDay ?? '', r.coBillDay ?? '', yn(r.billDayMismatch), co.nextInvoiceDate || '',
       r.coCustomerId, r.clientType, co.tenant || '',
       r.billingCategory, r.billingCycle,
-      r.answer, r.billed ?? '', r.gap ?? '', yn(r.planMismatch),
-      r.csvBillDay ?? '', r.coBillDay ?? '', yn(r.billDayMismatch), co.nextInvoiceDate || '',
-      r.totalCalls, r.overageRate, co.overageRate ?? '',
+      r.used, r.totalCalls,
       co.subStatus || '', r.error || '', co.url || '',
     ].map(esc).join(','));
   }
@@ -101,7 +102,7 @@ export default function MinuteAuditor() {
   const [density, setDensity] = useState('compact');
   const [showAllCols, setShowAllCols] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
-  const [sort, setSort] = useState({ key: 'gap', dir: 'desc' });
+  const [sort, setSort] = useState({ key: 'client', dir: 'asc' });
   const readerRef = useRef(null);
 
   useEffect(() => () => { try { readerRef.current?.cancel(); } catch { /* ok */ } }, []);
@@ -235,7 +236,7 @@ export default function MinuteAuditor() {
     setSearch('');
     setReasonFilter('all');
     setExpandedId(null);
-    setSort({ key: 'gap', dir: 'desc' });
+    setSort({ key: 'client', dir: 'asc' });
   };
 
   /* Flatten job rows with computed reason + gap. */
@@ -293,12 +294,9 @@ export default function MinuteAuditor() {
   const sorted = useMemo(() => {
     const dir = sort.dir === 'asc' ? 1 : -1;
     return [...filtered].sort((a, b) => {
-      let av, bv;
-      if (sort.key === 'gap')       { av = Math.abs(a.gap || 0);   bv = Math.abs(b.gap || 0);   return (av - bv) * dir; }
-      if (sort.key === 'answer')    { av = a.answer || 0;          bv = b.answer || 0;          return (av - bv) * dir; }
-      if (sort.key === 'billed')    { av = a.billed || 0;          bv = b.billed || 0;          return (av - bv) * dir; }
-      av = (a.client || '').toLowerCase();
-      bv = (b.client || '').toLowerCase();
+      if (sort.key === 'answer') { return ((a.answer || 0) - (b.answer || 0)) * dir; }
+      const av = (a.client || '').toLowerCase();
+      const bv = (b.client || '').toLowerCase();
       return av.localeCompare(bv) * dir;
     });
   }, [filtered, sort]);
@@ -418,15 +416,15 @@ export default function MinuteAuditor() {
             <div>
               <div className="ma-attn-eyebrow ma-attn-eyebrow--sub">Why they flagged</div>
               <div className="ma-reason-bar">
-                {summary.reasonNoSub    > 0 && <div style={{ flex: summary.reasonNoSub,    background: 'var(--crit-600)' }} title={`No subscription (${summary.reasonNoSub})`} />}
-                {summary.reasonPlan     > 0 && <div style={{ flex: summary.reasonPlan,     background: 'var(--warn-500)' }} title={`Plan mismatch (${summary.reasonPlan})`} />}
-                {summary.reasonBillDay  > 0 && <div style={{ flex: summary.reasonBillDay,  background: 'var(--warn-600)' }} title={`Bill day mismatch (${summary.reasonBillDay})`} />}
-                {summary.reasonName     > 0 && <div style={{ flex: summary.reasonName,     background: 'var(--ink-300)' }} title={`Name mismatch (${summary.reasonName})`} />}
+                {summary.reasonPlan    > 0 && <div style={{ flex: summary.reasonPlan,    background: 'var(--crit-600)' }} title={`Plan mismatch (${summary.reasonPlan})`} />}
+                {summary.reasonBillDay > 0 && <div style={{ flex: summary.reasonBillDay, background: 'var(--crit-500)' }} title={`Bill day mismatch (${summary.reasonBillDay})`} />}
+                {summary.reasonNoSub   > 0 && <div style={{ flex: summary.reasonNoSub,   background: 'var(--warn-500)' }} title={`No subscription (${summary.reasonNoSub})`} />}
+                {summary.reasonName    > 0 && <div style={{ flex: summary.reasonName,    background: 'var(--ink-300)' }} title={`Name mismatch (${summary.reasonName})`} />}
               </div>
               <div className="ma-reason-legend">
-                <LegendChip color="var(--crit-600)" label="No subscription"   n={summary.reasonNoSub} />
-                <LegendChip color="var(--warn-500)" label="Plan mismatch"     n={summary.reasonPlan} />
-                <LegendChip color="var(--warn-600)" label="Bill day mismatch" n={summary.reasonBillDay} />
+                <LegendChip color="var(--crit-600)" label="Plan mismatch"     n={summary.reasonPlan} />
+                <LegendChip color="var(--crit-500)" label="Bill day mismatch" n={summary.reasonBillDay} />
+                <LegendChip color="var(--warn-500)" label="No subscription"   n={summary.reasonNoSub} />
                 <LegendChip color="var(--ink-300)" label="Name mismatch"      n={summary.reasonName} />
               </div>
             </div>
@@ -477,22 +475,16 @@ export default function MinuteAuditor() {
                   Account
                   {sort.key === 'client' && <span className="ui-table__arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
                 </th>
+                <th data-align="center">Plan (Answer / CO)</th>
+                <th data-align="center">Bill day (Answer / CO)</th>
+                <th>Reason</th>
                 <th data-align="right" onClick={() => clickSort('answer')} data-sortable data-active={sort.key === 'answer' || undefined}>
-                  Answer used
+                  Used
                   {sort.key === 'answer' && <span className="ui-table__arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
                 </th>
-                <th data-align="right" onClick={() => clickSort('billed')} data-sortable data-active={sort.key === 'billed' || undefined}>
-                  ChargeOver plan
-                  {sort.key === 'billed' && <span className="ui-table__arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
-                </th>
-                <th data-align="right" onClick={() => clickSort('gap')} data-sortable data-active={sort.key === 'gap' || undefined}>
-                  Gap
-                  {sort.key === 'gap' && <span className="ui-table__arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
-                </th>
-                <th>Reason</th>
                 {showAllCols && <th>Category</th>}
                 {showAllCols && <th>Cycle</th>}
-                {showAllCols && <th>Calls</th>}
+                {showAllCols && <th data-align="right">Calls</th>}
               </tr>
             </thead>
             <tbody>
@@ -575,24 +567,11 @@ function ReasonPill({ reason }) {
   return <Badge tone={tone} dot={tone !== 'neutral'}>{reason}</Badge>;
 }
 
-function GapCell({ gap, reason }) {
-  const abs = Math.abs(gap || 0);
-  const pct = Math.min(100, Math.round(abs / 1500 * 100));
-  const color = reason === 'No subscription' ? 'var(--crit-600)'
-              : reason === 'Matched'         ? 'var(--text-subtle)'
-                                             : 'var(--warn-600)';
-  return (
-    <div className="ma-gap">
-      <div className="ma-gap-track"><div className="ma-gap-fill" style={{ width: `${Math.max(pct, 4)}%`, background: color }} /></div>
-      <span className="ma-gap-val" style={{ color }}>{gap === 0 ? '±0' : (gap > 0 ? '+' : '') + fmtNum(gap)}</span>
-    </div>
-  );
-}
 
 function TableRow({ r, expanded, onToggle, colCount, showAllCols }) {
-  const rowState = r.reason === 'No subscription' ? 'crit'
-                 : r.flagged                      ? 'warn'
-                                                  : undefined;
+  const rowState = (r.planMismatch || r.billDayMismatch) ? 'crit'
+                 : r.flagged                             ? 'warn'
+                                                         : undefined;
   return (
     <>
       <tr onClick={onToggle} className="ma-row" data-state={rowState}>
@@ -606,12 +585,10 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols }) {
             }
           </div>
         </td>
-        <td data-align="right" data-num>{fmtNum(r.answer)}</td>
-        <td data-align="right" data-num style={r.billed == null ? { color: 'var(--crit-700)' } : undefined}>
-          {r.billed == null ? 'no active sub' : fmtNum(r.billed)}
-        </td>
-        <td data-align="right"><GapCell gap={r.gap} reason={r.reason} /></td>
+        <td data-align="center"><CompareCell csv={r.csvPlan} co={r.coPlan} unit=" min" mismatch={r.planMismatch} /></td>
+        <td data-align="center"><CompareCell csv={r.csvBillDay} co={r.coBillDay} unit="" ordinal mismatch={r.billDayMismatch} /></td>
         <td><ReasonPill reason={r.reason} /></td>
+        <td data-align="right" data-num>{fmtNum(r.answer)}</td>
         {showAllCols && <td>{r.billingCategory || '—'}</td>}
         {showAllCols && <td>{r.billingCycle || '—'}</td>}
         {showAllCols && <td data-align="right" data-num>{fmtNum(r.totalCalls)}</td>}
@@ -620,18 +597,21 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols }) {
         <tr className="ma-detail">
           <td colSpan={colCount}>
             <div className="ma-detail-grid">
-              <DetailField label="ChargeOver plan"
+              <DetailField label="Plan (Answer)"
+                value={r.csvPlan != null ? `${r.csvPlan} min` : '—'}
+                sub={r.planMismatch ? 'differs from CO' : null} />
+              <DetailField label="Plan (ChargeOver)"
                 value={r.coPlan != null ? `${r.coPlan} min` : '—'}
-                sub={r.csvPlan != null && r.csvPlan !== r.coPlan ? `Answer allotted ${r.csvPlan} min` : null} />
-              <DetailField label="Subscription"
+                sub={r.chargeover?.subStatus || 'no active subscription'} />
+              <DetailField label="Bill day (Answer)"
+                value={r.csvBillDay != null ? ordinal(r.csvBillDay) : '—'}
+                sub={r.billingCycle || null} />
+              <DetailField label="Bill day (ChargeOver)"
+                value={r.coBillDay != null ? ordinal(r.coBillDay) : '—'}
+                sub={r.chargeover?.nextInvoiceDate ? `next invoice ${r.chargeover.nextInvoiceDate}` : null} />
+              <DetailField label="ChargeOver customer"
                 value={r.coCustomerId || '—'} mono
-                sub={r.chargeover?.subStatus || '—'} />
-              <DetailField label="Overage rate"
-                value={r.chargeover?.overageRate != null ? `$${r.chargeover.overageRate}` : '—'}
-                sub="per minute over plan" mono />
-              <DetailField label="Bill day (Answer / CO)"
-                value={`${r.csvBillDay ?? '—'} / ${r.coBillDay ?? '—'}`}
-                sub={r.billDayMismatch ? 'Cycle day disagrees' : null} />
+                sub={r.resolvedTenant || null} />
               <DetailField label="What happened" value={describeReason(r)} full />
               <div className="ma-detail-actions">
                 {r.coUrl && (
@@ -646,6 +626,32 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols }) {
       )}
     </>
   );
+}
+
+// Side-by-side Answer / CO comparison cell. Matched = single value.
+// Mismatched = two lines, both bold, ChargeOver side in critical red.
+function CompareCell({ csv, co, unit = '', ordinal: asOrd = false, mismatch }) {
+  const fmt = v => v == null ? '—' : (asOrd ? ordinal(v) : v + unit);
+  const csvS = fmt(csv);
+  const coS  = fmt(co);
+  if (csvS === '—' && coS === '—') return <span className="ma-cmp-none">—</span>;
+  if (!mismatch) return <span className="ma-cmp-match">{csvS === '—' ? coS : csvS}</span>;
+  return (
+    <div className="ma-cmp">
+      <div className="ma-cmp-answer"><b>Answer</b> {csvS}</div>
+      <div className="ma-cmp-co"><b>CO</b> {coS}</div>
+    </div>
+  );
+}
+
+function ordinal(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return String(n);
+  const j = num % 10, k = num % 100;
+  if (j === 1 && k !== 11) return num + 'st';
+  if (j === 2 && k !== 12) return num + 'nd';
+  if (j === 3 && k !== 13) return num + 'rd';
+  return num + 'th';
 }
 
 function DetailField({ label, value, sub, mono, full }) {
