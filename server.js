@@ -5529,7 +5529,7 @@ function isChargeoverActive(co) {
 
 // Billing categories excluded from the audit — these customers aren't
 // expected to have a live paid subscription in ChargeOver.
-const MINUTE_AUDITOR_SKIP_CATEGORIES = new Set(['INTERNAL', 'TRIAL', 'FREE']);
+const MINUTE_AUDITOR_SKIP_CATEGORIES = new Set(['INTERNAL', 'FREE']);
 
 // Fetch every customer (or every package) for a tenant with paginated /list.
 // One-shot bulk fetch replaces per-row API calls — a 2500-row audit that

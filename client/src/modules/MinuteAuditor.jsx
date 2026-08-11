@@ -358,7 +358,7 @@ export default function MinuteAuditor() {
           >
             <div className="ma-drop-icon" aria-hidden="true">📄</div>
             <div className="ma-drop-title">{file ? file.name : 'Drop an Answer minute-usage CSV here'}</div>
-            <div className="ma-drop-hint">…or click to browse. INTERNAL, TRIAL, and FREE customers are automatically excluded.</div>
+            <div className="ma-drop-hint">…or click to browse. INTERNAL and FREE customers are automatically excluded.</div>
             <input type="file" accept=".csv,text/csv" className="ma-drop-input"
               onChange={(e) => onFile(e.target.files?.[0])} />
           </div>
@@ -407,7 +407,7 @@ export default function MinuteAuditor() {
             <div className="ma-eyebrow">Billing · Minute usage auditor</div>
             <h1 className="ma-page-title">Minute usage audit</h1>
             <div className="ma-page-sub">
-              {summary.audited} accounts audited{summary.skipped > 0 ? ` · ${summary.skipped} excluded (INTERNAL / TRIAL / FREE)` : ''}
+              {summary.audited} accounts audited{summary.skipped > 0 ? ` · ${summary.skipped} excluded (INTERNAL / FREE)` : ''}
             </div>
           </div>
         </div>
@@ -465,7 +465,7 @@ export default function MinuteAuditor() {
             <Tile eyebrow="Legacy" sub="created before 2020"
               value={String(summary.legacy)} hint={summary.hubspotMatched > 0 ? `${summary.hubspotMatched} matched` : undefined} />
           )}
-          <Tile eyebrow="Skipped" sub="INTERNAL / TRIAL / FREE"
+          <Tile eyebrow="Skipped" sub="INTERNAL / FREE"
             value={String(summary.skipped)} />
         </div>
       </div>
