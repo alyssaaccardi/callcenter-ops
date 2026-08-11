@@ -5590,6 +5590,11 @@ function resolveInPrefetched(prefetched, tenantHint, coId) {
       canceledAt: sub?.cancel_datetime?.slice(0, 10) || null,
       planMinutes: sub?.custom_2 ?? null,       // Allotted minutes plan
       overageRate: sub?.custom_1 ?? null,       // $/min over plan
+      // Bill day comes from `holduntil_datetime` — the subscription's billing
+      // anchor. It doesn't shift with prorations or missed invoices the way
+      // `next_invoice_datetime` can, so it's the canonical "what day does
+      // this subscription bill?" Fallback to next_invoice_datetime if unset.
+      billAnchorDate:  sub?.holduntil_datetime || sub?.next_invoice_datetime || null,
       nextInvoiceDate: sub?.next_invoice_datetime || null,
       // Sales-rep + linkage fields used by the HubSpot cross-check.
       superuserName: [cust.superuser_first_name, cust.superuser_last_name].filter(Boolean).join(' ') || null,
@@ -5827,7 +5832,7 @@ async function runMinuteAuditorJob(jobId, rows) {
   for (const row of rows) {
     const cat = String(row.billingCategory || '').toUpperCase();
     if (MINUTE_AUDITOR_SKIP_CATEGORIES.has(cat)) {
-      job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true, flagged: false, nameMismatch: false, nameMatchScore: null, isLegacy: false, legacyReason: null, hubspotDealFound: false });
+      job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true, flagged: false, nameMismatch: false, nameMatchScore: null, isLegacy: false, legacyReason: null, hubspotDealFound: false, zeroUsageActiveSub: false });
       job.done++;
       continue;
     }
@@ -5838,6 +5843,7 @@ async function runMinuteAuditorJob(jobId, rows) {
       nameMismatch: false,    nameMatchScore: null,
       planMismatch: false,    csvPlan: null, coPlan: null,
       billDayMismatch: false, csvBillDay: null, coBillDay: null,
+      zeroUsageActiveSub: false,
       // HubSpot cross-check fields
       hubspotDealFound: false, hubspotDealId: null, hubspotDealName: null, hubspotDealCompany: null,
       hubspotSalesRep: null, hubspotMatchedBy: null,
@@ -5866,9 +5872,10 @@ async function runMinuteAuditorJob(jobId, rows) {
         if (result.csvPlan != null && result.coPlan != null) {
           result.planMismatch = result.csvPlan !== result.coPlan;
         }
-        // Bill-date check — CSV cycle day (1st/15th) vs CO next-invoice day
+        // Bill-date check — CSV cycle day (1st / 15th) vs the CO subscription
+        // bill anchor day (from holduntil_datetime).
         result.csvBillDay = parseCycleDay(row.billingCycle);
-        result.coBillDay  = parseInvoiceDay(co.nextInvoiceDate);
+        result.coBillDay  = parseInvoiceDay(co.billAnchorDate);
         if (result.csvBillDay != null && result.coBillDay != null) {
           result.billDayMismatch = result.csvBillDay !== result.coBillDay;
         }
@@ -5959,6 +5966,12 @@ async function runMinuteAuditorJob(jobId, rows) {
       }
     }
 
+    // The zero-usage rule: a customer with 0 minutes AND 0 calls on the CSV
+    // shouldn't have an active ChargeOver subscription. They're either
+    // deactivated in Answer with the CO sub not caught up, or they onboarded
+    // and never went live — either way it's a billing issue worth surfacing.
+    result.zeroUsageActiveSub = !hasUsage(row) && result.active === true;
+
     // Aggregate reasons and set the flag. Legacy suppresses name + sales-rep
     // mismatches (both are CRM-drift issues, not billing issues).
     const usageIssue = hasUsage(row) && result.active !== true;
@@ -5966,8 +5979,9 @@ async function runMinuteAuditorJob(jobId, rows) {
       result.flagReasons.push(result.error === 'Not found in ChargeOver' || result.error === 'No COCustomerId'
         ? 'No CO match' : 'Not paying');
     }
-    if (result.planMismatch)    result.flagReasons.push('Plan mismatch');
-    if (result.billDayMismatch) result.flagReasons.push('Bill day mismatch');
+    if (result.zeroUsageActiveSub) result.flagReasons.push('Zero usage');
+    if (result.planMismatch)       result.flagReasons.push('Plan mismatch');
+    if (result.billDayMismatch)    result.flagReasons.push('Bill day mismatch');
     if (result.nameMismatch    && !result.isLegacy) result.flagReasons.push('Name mismatch');
     // HubSpot never flags a row. The cross-check lives entirely in the HubSpot
     // tab as its own read on the data (3-way account-name agreement + sales

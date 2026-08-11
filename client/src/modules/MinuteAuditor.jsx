@@ -24,6 +24,7 @@ function computeReason(r) {
   // Real billing issues always take precedence over CRM drift.
   if (r.planMismatch)    return 'Plan mismatch';
   if (r.billDayMismatch) return 'Bill day mismatch';
+  if (r.zeroUsageActiveSub) return 'Zero usage';
   const notInCO = r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
   if (notInCO || r.active !== true) return 'No subscription';
   // Legacy customers with only CRM-drift issues get the "Legacy" label.
@@ -38,6 +39,7 @@ function describeReason(r) {
   if (r.reason === 'Plan mismatch')      return `Answer allotted ${r.csvPlan ?? '?'} min; ChargeOver plan is ${r.coPlan ?? '?'} min.`;
   if (r.reason === 'Bill day mismatch')  return `Answer bills on day ${r.csvBillDay ?? '?'}; ChargeOver next invoice is day ${r.coBillDay ?? '?'}.`;
   if (r.reason === 'No subscription')    return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
+  if (r.reason === 'Zero usage')         return `Zero minutes and zero calls this cycle in Answer, but the ChargeOver subscription is still active — the customer likely deactivated in Answer or never went live, and CO wasn't caught up.`;
   if (r.reason === 'Name mismatch')      return `Answer client "${r.client}" doesn't match ChargeOver company "${r.coCompany}".`;
   if (r.reason === 'Legacy')             return `Grandfathered — ${r.legacyReason || 'created before the cutoff'}. Name-drift flags suppressed; billing flags stay live.`;
   return r.error || '';
@@ -47,6 +49,7 @@ const REASON_TONE = {
   'Matched':             'ok',
   'Plan mismatch':       'crit',
   'Bill day mismatch':   'crit',
+  'Zero usage':          'crit',
   'No subscription':     'warn',
   'Name mismatch':       'neutral',
   'Legacy':              'neutral',
@@ -57,6 +60,7 @@ const REASON_OPTIONS = [
   { value: 'all',                  label: 'All reasons' },
   { value: 'Plan mismatch',        label: 'Plan mismatch' },
   { value: 'Bill day mismatch',    label: 'Bill day mismatch' },
+  { value: 'Zero usage',           label: 'Zero usage, active sub' },
   { value: 'No subscription',      label: 'No subscription' },
   { value: 'Name mismatch',        label: 'Name mismatch' },
   { value: 'Legacy',               label: 'Legacy (grandfathered)' },
@@ -277,7 +281,7 @@ export default function MinuteAuditor() {
     const s = {
       total: flat.length, audited: 0, flagged: 0, matched: 0, skipped: 0, legacy: 0,
       hubspotMatched: 0,
-      reasonPlan: 0, reasonBillDay: 0, reasonNoSub: 0, reasonName: 0,
+      reasonPlan: 0, reasonBillDay: 0, reasonZeroUsage: 0, reasonNoSub: 0, reasonName: 0,
       hubspotNameAgree: 0, hubspotNameDisagree: 0,
     };
     for (const r of flat) {
@@ -293,6 +297,7 @@ export default function MinuteAuditor() {
         s.flagged++;
         if      (r.reason === 'Plan mismatch')       s.reasonPlan++;
         else if (r.reason === 'Bill day mismatch')   s.reasonBillDay++;
+        else if (r.reason === 'Zero usage')          s.reasonZeroUsage++;
         else if (r.reason === 'No subscription')     s.reasonNoSub++;
         else if (r.reason === 'Name mismatch')       s.reasonName++;
       } else if (r.active === true) {
@@ -345,7 +350,7 @@ export default function MinuteAuditor() {
   };
 
   const clearFilters = () => { setSearch(''); setReasonFilter('all'); setTab('attention'); };
-  const colCount = 6 + (showAllCols ? 3 : 0);
+  const colCount = 7 + (showAllCols ? 2 : 0);
 
   /* ─── Render ─── */
 
@@ -444,16 +449,18 @@ export default function MinuteAuditor() {
             <div>
               <div className="ma-attn-eyebrow ma-attn-eyebrow--sub">Why they flagged</div>
               <div className="ma-reason-bar">
-                {summary.reasonPlan     > 0 && <div style={{ flex: summary.reasonPlan,     background: 'var(--crit-600)' }} title={`Plan mismatch (${summary.reasonPlan})`} />}
-                {summary.reasonBillDay  > 0 && <div style={{ flex: summary.reasonBillDay,  background: 'var(--crit-500)' }} title={`Bill day mismatch (${summary.reasonBillDay})`} />}
-                {summary.reasonNoSub    > 0 && <div style={{ flex: summary.reasonNoSub,    background: 'var(--warn-500)' }} title={`No subscription (${summary.reasonNoSub})`} />}
-                {summary.reasonName     > 0 && <div style={{ flex: summary.reasonName,     background: 'var(--ink-300)' }} title={`Name mismatch (${summary.reasonName})`} />}
+                {summary.reasonPlan       > 0 && <div style={{ flex: summary.reasonPlan,       background: 'var(--crit-600)' }} title={`Plan mismatch (${summary.reasonPlan})`} />}
+                {summary.reasonBillDay    > 0 && <div style={{ flex: summary.reasonBillDay,    background: 'var(--crit-500)' }} title={`Bill day mismatch (${summary.reasonBillDay})`} />}
+                {summary.reasonZeroUsage  > 0 && <div style={{ flex: summary.reasonZeroUsage,  background: 'var(--crit-700)' }} title={`Zero usage, active sub (${summary.reasonZeroUsage})`} />}
+                {summary.reasonNoSub      > 0 && <div style={{ flex: summary.reasonNoSub,      background: 'var(--warn-500)' }} title={`No subscription (${summary.reasonNoSub})`} />}
+                {summary.reasonName       > 0 && <div style={{ flex: summary.reasonName,       background: 'var(--ink-300)' }} title={`Name mismatch (${summary.reasonName})`} />}
               </div>
               <div className="ma-reason-legend">
-                <LegendChip color="var(--crit-600)" label="Plan mismatch"      n={summary.reasonPlan} />
-                <LegendChip color="var(--crit-500)" label="Bill day mismatch"  n={summary.reasonBillDay} />
-                <LegendChip color="var(--warn-500)" label="No subscription"    n={summary.reasonNoSub} />
-                <LegendChip color="var(--ink-300)" label="Name mismatch"       n={summary.reasonName} />
+                <LegendChip color="var(--crit-600)" label="Plan mismatch"          n={summary.reasonPlan} />
+                <LegendChip color="var(--crit-500)" label="Bill day mismatch"      n={summary.reasonBillDay} />
+                <LegendChip color="var(--crit-700)" label="Zero usage, active sub" n={summary.reasonZeroUsage} />
+                <LegendChip color="var(--warn-500)" label="No subscription"        n={summary.reasonNoSub} />
+                <LegendChip color="var(--ink-300)" label="Name mismatch"           n={summary.reasonName} />
               </div>
             </div>
           )}
@@ -522,6 +529,7 @@ export default function MinuteAuditor() {
                   </>
                 ) : (
                   <>
+                    <th>Category</th>
                     <th data-align="center">Plan (Answer / CO)</th>
                     <th data-align="center">Bill day (Answer / CO)</th>
                     <th>Reason</th>
@@ -529,7 +537,6 @@ export default function MinuteAuditor() {
                       Used
                       {sort.key === 'answer' && <span className="ui-table__arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
                     </th>
-                    {showAllCols && <th>Category</th>}
                     {showAllCols && <th>Cycle</th>}
                     {showAllCols && <th data-align="right">Calls</th>}
                   </>
@@ -652,11 +659,11 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab }) {
           </>
         ) : (
           <>
+            <td>{r.billingCategory || '—'}</td>
             <td data-align="center"><CompareCell csv={r.csvPlan} co={r.coPlan} unit=" min" mismatch={r.planMismatch} /></td>
             <td data-align="center"><CompareCell csv={r.csvBillDay} co={r.coBillDay} unit="" ordinal mismatch={r.billDayMismatch} /></td>
             <td><ReasonPill reason={r.reason} /></td>
             <td data-align="right" data-num>{fmtNum(r.answer)}</td>
-            {showAllCols && <td>{r.billingCategory || '—'}</td>}
             {showAllCols && <td>{r.billingCycle || '—'}</td>}
             {showAllCols && <td data-align="right" data-num>{fmtNum(r.totalCalls)}</td>}
           </>
