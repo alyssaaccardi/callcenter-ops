@@ -5766,7 +5766,7 @@ async function prefetchHubspotPaidDeals(progressCb) {
   let after;
   let count = 0;
   while (true) {
-    const properties = ['dealname', 'sales_rep', 'hubspot_owner_id', 'company_name', 'account_name', 'chargeover_package_customer_id', 'createdate'];
+    const properties = ['dealname', 'hubspot_owner_id', 'company_name', 'account_name', 'chargeover_package_customer_id', 'createdate'];
     if (previouslyPayingProp) properties.push(previouslyPayingProp);
     const body = {
       filterGroups: [{ filters: [
@@ -5786,7 +5786,6 @@ async function prefetchHubspotPaidDeals(progressCb) {
       const record = {
         dealId:       d.id,
         dealName:     d.properties.dealname,
-        salesRep:     d.properties.sales_rep || null,
         ownerId:      d.properties.hubspot_owner_id || null,
         ownerName:    null,    // filled in below once owners resolve
         ownerActive:  null,
@@ -5814,14 +5813,15 @@ async function prefetchHubspotPaidDeals(progressCb) {
     await new Promise(r => setTimeout(r, 100));
   }
 
-  // Resolve Deal Owner → name. Owner is the sales rep of record; sales_rep is
-  // the fallback when a deal has no owner (or when the scope is missing).
+  // Deal Owner is the sales rep of record. No fallback — the sales_rep
+  // custom property is stale on many deals, so falling back to it caused
+  // false rep-mismatch flags.
   const owners = await fetchHubspotOwners(token);
   for (const rec of allDeals) {
     const o = owners && rec.ownerId ? owners.get(String(rec.ownerId)) : null;
     if (o) { rec.ownerName = o.name; rec.ownerActive = o.isActive; }
-    rec.rep       = rec.ownerName || rec.salesRep || null;
-    rec.repSource = rec.ownerName ? 'deal owner' : (rec.salesRep ? 'sales_rep property' : null);
+    rec.rep       = rec.ownerName || null;
+    rec.repSource = rec.ownerName ? 'deal owner' : null;
   }
 
   // HubSpot's coverage floor: the oldest deal it knows about. ChargeOver
