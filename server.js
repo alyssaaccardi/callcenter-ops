@@ -5582,9 +5582,17 @@ function resolveInPrefetched(prefetched, tenantHint, coId) {
     const sub = activeSub || canceledSub || subs[0] || null;
     // Look up the parent customer (if any) from the same prefetch map so
     // MULTIPLE-category rows can group by their parent (see the MULTIPLE
-    // tab in the client).
+    // tab in the client). Also check the parent's subscription status —
+    // a child shouldn't flag "No subscription" if their parent is the one
+    // actually paying.
     const parentId = cust.parent_customer_id ? String(cust.parent_customer_id) : null;
     const parent = parentId ? data.customerById.get(parentId) : null;
+    let parentHasActiveSub = false;
+    if (parent) {
+      const parentSubs = data.packagesByCustomer.get(parentId) || [];
+      parentHasActiveSub = parentSubs.some(s =>
+        s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
+    }
 
     return {
       tenant: t,
@@ -5611,8 +5619,11 @@ function resolveInPrefetched(prefetched, tenantHint, coId) {
       createdAt:     cust.write_datetime?.slice(0, 10) || null,
       // Parent/child grouping for MULTIPLE accounts. parentCustomerId is
       // null on parents (they have no parent) and populated on children.
-      parentCustomerId: parentId,
-      parentCompany:    parent?.company || null,
+      // parentHasActiveSub suppresses the "No subscription" flag on
+      // children — if the parent is paying, the whole family is covered.
+      parentCustomerId:   parentId,
+      parentCompany:      parent?.company || null,
+      parentHasActiveSub,
       url: cust.url_self || null,
     };
   }
@@ -6000,7 +6011,10 @@ async function runMinuteAuditorJob(jobId, rows) {
     } else if (isManual) {
       // Manuals aren't subscription-billed. Nothing to audit here.
     } else {
-      const usageIssue = hasUsage(row) && result.active !== true;
+      // Children of a paying parent are covered by the parent's sub —
+      // don't flag them individually for missing their own subscription.
+      const parentCovers = result.chargeover?.parentHasActiveSub === true;
+      const usageIssue   = hasUsage(row) && result.active !== true && !parentCovers;
       if (usageIssue) {
         result.flagReasons.push(result.error === 'Not found in ChargeOver' || result.error === 'No COCustomerId'
           ? 'No CO match' : 'Not paying');

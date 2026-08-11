@@ -304,6 +304,44 @@ body.dark .ma-brand-mark { filter: invert(1) brightness(1.1); }
 }
 .ma-foot-hint { color: var(--text-subtle); }
 
+/* ── MULTIPLE tab: parent / child grouping ───────────────────────── */
+.ma-group-header td {
+  padding: 0 !important;
+  background: var(--surface-sunken);
+  border-top: 3px solid var(--royal-600);
+  border-bottom: 1px solid var(--border);
+}
+.ma-group-title-row {
+  padding: 12px 20px;
+}
+.ma-group-title {
+  font-family: var(--font-display);
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-h3);
+  color: var(--text-strong);
+  line-height: 1.2;
+}
+.ma-group-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  margin-top: 2px;
+}
+.ma-row-parent td { background: rgba(26,111,232,0.04); }
+.ma-row-parent .ma-cell-name { font-weight: var(--fw-semibold); }
+.ma-row-child .ma-caret { padding-left: 32px !important; position: relative; }
+.ma-tree-marker {
+  position: absolute;
+  left: 18px;
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
 .ma-row { cursor: pointer; }
 .ma-caret {
   color: var(--text-subtle);

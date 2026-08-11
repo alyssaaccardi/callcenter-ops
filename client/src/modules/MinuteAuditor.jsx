@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import api from '../api';
 import { Button, Card, Input, Select, Badge, Tabs, EmptyState, DensitySwitch } from '../components/ui';
@@ -346,12 +346,12 @@ export default function MinuteAuditor() {
     // parent id then their own id.
     if (tab === 'multiple') {
       return [...filtered].sort((a, b) => {
-        const aGroup = a.chargeover?.parentCustomerId || a.coCustomerId || '';
-        const bGroup = b.chargeover?.parentCustomerId || b.coCustomerId || '';
+        const aGroup = a.parentCustomerId || a.coCustomerId || '';
+        const bGroup = b.parentCustomerId || b.coCustomerId || '';
         if (aGroup !== bGroup) return String(aGroup).localeCompare(String(bGroup), undefined, { numeric: true });
         // Within a group: parent first (no parent id), then children by id.
-        const aChild = a.chargeover?.parentCustomerId ? 1 : 0;
-        const bChild = b.chargeover?.parentCustomerId ? 1 : 0;
+        const aChild = a.parentCustomerId ? 1 : 0;
+        const bChild = b.parentCustomerId ? 1 : 0;
         if (aChild !== bChild) return aChild - bChild;
         return String(a.coCustomerId || '').localeCompare(String(b.coCustomerId || ''), undefined, { numeric: true });
       });
@@ -363,6 +363,31 @@ export default function MinuteAuditor() {
       return av.localeCompare(bv) * dir;
     });
   }, [filtered, sort, tab]);
+
+  // Build parent → children groups for the MULTIPLE tab. Each group carries
+  // its parent row (if present in the CSV, otherwise null), the array of
+  // children, and metadata used to render the header block.
+  const multipleGroups = useMemo(() => {
+    if (tab !== 'multiple') return null;
+    const groupsMap = new Map();
+    for (const r of sorted) {
+      const isChild = !!r.parentCustomerId;
+      const key = String(isChild ? r.parentCustomerId : (r.coCustomerId || r.id));
+      if (!groupsMap.has(key)) {
+        groupsMap.set(key, {
+          key,
+          parentCoId: isChild ? r.parentCustomerId : (r.coCustomerId || null),
+          parentName: isChild ? (r.parentCompany || null) : (r.coCompany || r.client || null),
+          parent: null,
+          children: [],
+        });
+      }
+      const g = groupsMap.get(key);
+      if (isChild) g.children.push(r);
+      else         g.parent = r;
+    }
+    return [...groupsMap.values()];
+  }, [sorted, tab]);
 
   const clickSort = (key) => {
     setSort(s => s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' });
@@ -562,7 +587,7 @@ export default function MinuteAuditor() {
                   </>
                 ) : tab === 'multiple' ? (
                   <>
-                    <th>Parent (ChargeOver)</th>
+                    <th>Role</th>
                     <th data-align="center">Plan (Answer / CO)</th>
                     <th data-align="center">Bill day (Answer / CO)</th>
                     <th>Reason</th>
@@ -604,6 +629,37 @@ export default function MinuteAuditor() {
                       : null}
                   />
                 </td></tr>
+              ) : tab === 'multiple' ? (
+                multipleGroups.map(g => {
+                  const total = (g.parent ? 1 : 0) + g.children.length;
+                  return (
+                    <React.Fragment key={g.key}>
+                      <tr className="ma-group-header">
+                        <td colSpan={colCount}>
+                          <div className="ma-group-title-row">
+                            <div>
+                              <div className="ma-group-title">{g.parentName || `ChargeOver #${g.parentCoId}`}</div>
+                              <div className="ma-group-meta">
+                                Parent CO #{g.parentCoId || '—'} · {total} account{total === 1 ? '' : 's'} in this file
+                                {!g.parent && ' · parent row not in CSV'}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                      {g.parent && (
+                        <TableRow key={g.parent.id} r={g.parent} expanded={expandedId === g.parent.id}
+                          onToggle={() => setExpandedId(id => id === g.parent.id ? null : g.parent.id)}
+                          colCount={colCount} showAllCols={showAllCols} tab={tab} groupRole="parent" />
+                      )}
+                      {g.children.map(c => (
+                        <TableRow key={c.id} r={c} expanded={expandedId === c.id}
+                          onToggle={() => setExpandedId(id => id === c.id ? null : c.id)}
+                          colCount={colCount} showAllCols={showAllCols} tab={tab} groupRole="child" />
+                      ))}
+                    </React.Fragment>
+                  );
+                })
               ) : sorted.map(r => (
                 <TableRow key={r.id} r={r} expanded={expandedId === r.id}
                   onToggle={() => setExpandedId(id => id === r.id ? null : r.id)}
@@ -669,14 +725,20 @@ function ReasonPill({ reason }) {
 }
 
 
-function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab }) {
+function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole }) {
   const rowState = (r.planMismatch || r.billDayMismatch) ? 'crit'
                  : r.flagged                             ? 'warn'
                                                          : undefined;
+  const rowCls = ['ma-row'];
+  if (groupRole === 'parent') rowCls.push('ma-row-parent');
+  if (groupRole === 'child')  rowCls.push('ma-row-child');
   return (
     <>
-      <tr onClick={onToggle} className="ma-row" data-state={rowState}>
-        <td className="ma-caret">{expanded ? '▼' : '▶'}</td>
+      <tr onClick={onToggle} className={rowCls.join(' ')} data-state={rowState}>
+        <td className="ma-caret">
+          {groupRole === 'child' && <span className="ma-tree-marker" aria-hidden="true">└</span>}
+          {expanded ? '▼' : '▶'}
+        </td>
         <td>
           <div className="ma-cell-name">{r.client || '—'}</div>
           <div className="ma-cell-meta">
@@ -703,14 +765,9 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab }) {
         ) : tab === 'multiple' ? (
           <>
             <td>
-              {r.parentCustomerId ? (
-                <>
-                  <div className="ma-cell-name">{r.parentCompany || `CO #${r.parentCustomerId}`}</div>
-                  <div className="ma-cell-meta">parent CO {r.parentCustomerId} · this row is a child</div>
-                </>
-              ) : (
-                <div className="ma-cell-meta">— this row is the parent —</div>
-              )}
+              {groupRole === 'parent'
+                ? <Badge tone="info">Parent</Badge>
+                : <Badge tone="neutral">Child</Badge>}
             </td>
             <td data-align="center"><CompareCell csv={r.csvPlan} co={r.coPlan} unit=" min" mismatch={r.planMismatch} /></td>
             <td data-align="center"><CompareCell csv={r.csvBillDay} co={r.coBillDay} unit="" ordinal mismatch={r.billDayMismatch} /></td>
