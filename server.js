@@ -5974,15 +5974,30 @@ async function runMinuteAuditorJob(jobId, rows) {
 
     // Aggregate reasons and set the flag. Legacy suppresses name + sales-rep
     // mismatches (both are CRM-drift issues, not billing issues).
-    const usageIssue = hasUsage(row) && result.active !== true;
-    if (usageIssue) {
-      result.flagReasons.push(result.error === 'Not found in ChargeOver' || result.error === 'No COCustomerId'
-        ? 'No CO match' : 'Not paying');
+    // Category-aware flag rules. TRIAL is audited inversely (should NOT
+    // have an active sub); MANUAL customers don't have subscriptions by
+    // design; MULTIPLE customers legitimately span different plans.
+    const catUpper   = String(row.billingCategory || '').toUpperCase();
+    const isTrial    = catUpper === 'TRIAL';
+    const isManual   = catUpper === 'MANUAL';
+    const isMultiple = catUpper === 'MULTIPLE';
+
+    if (isTrial) {
+      // Only check: trials shouldn't have active subscriptions.
+      if (result.active === true) result.flagReasons.push('Trial with active sub');
+    } else if (isManual) {
+      // Manuals aren't subscription-billed. Nothing to audit here.
+    } else {
+      const usageIssue = hasUsage(row) && result.active !== true;
+      if (usageIssue) {
+        result.flagReasons.push(result.error === 'Not found in ChargeOver' || result.error === 'No COCustomerId'
+          ? 'No CO match' : 'Not paying');
+      }
+      if (result.zeroUsageActiveSub)  result.flagReasons.push('Zero usage');
+      if (result.planMismatch && !isMultiple) result.flagReasons.push('Plan mismatch');
+      if (result.billDayMismatch)     result.flagReasons.push('Bill day mismatch');
+      if (result.nameMismatch && !result.isLegacy) result.flagReasons.push('Name mismatch');
     }
-    if (result.zeroUsageActiveSub) result.flagReasons.push('Zero usage');
-    if (result.planMismatch)       result.flagReasons.push('Plan mismatch');
-    if (result.billDayMismatch)    result.flagReasons.push('Bill day mismatch');
-    if (result.nameMismatch    && !result.isLegacy) result.flagReasons.push('Name mismatch');
     // HubSpot never flags a row. The cross-check lives entirely in the HubSpot
     // tab as its own read on the data (3-way account-name agreement + sales
     // rep for reference); the core audit stays Answer ↔ ChargeOver only.

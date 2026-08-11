@@ -21,13 +21,20 @@ function fmtNum(v) {
 // Answer ↔ ChargeOver only.
 function computeReason(r) {
   if (r.skipped) return 'Skipped';
-  // Real billing issues always take precedence over CRM drift.
-  if (r.planMismatch)    return 'Plan mismatch';
+  const cat = String(r.billingCategory || '').toUpperCase();
+  // TRIAL is audited inversely: no active sub is expected. Having one is
+  // the only thing that flags a trial.
+  if (cat === 'TRIAL') return r.active === true ? 'Trial with active sub' : 'Matched';
+  // MANUAL customers are billed manually — no subscription is expected,
+  // no plan / bill-day check applies.
+  if (cat === 'MANUAL') return 'Matched';
+  // MULTIPLE customers legitimately span different plans across their
+  // parent + child accounts, so plan mismatch alone isn't a real issue.
+  if (r.planMismatch && cat !== 'MULTIPLE') return 'Plan mismatch';
   if (r.billDayMismatch) return 'Bill day mismatch';
   if (r.zeroUsageActiveSub) return 'Zero usage';
   const notInCO = r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
   if (notInCO || r.active !== true) return 'No subscription';
-  // Legacy customers with only CRM-drift issues get the "Legacy" label.
   if (r.isLegacy && r.nameMismatch) return 'Legacy';
   if (r.nameMismatch)     return 'Name mismatch';
   if (r.isLegacy)         return 'Legacy';
@@ -40,30 +47,33 @@ function describeReason(r) {
   if (r.reason === 'Bill day mismatch')  return `Answer bills on day ${r.csvBillDay ?? '?'}; ChargeOver next invoice is day ${r.coBillDay ?? '?'}.`;
   if (r.reason === 'No subscription')    return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
   if (r.reason === 'Zero usage')         return `Zero minutes and zero calls this cycle in Answer, but the ChargeOver subscription is still active — the customer likely deactivated in Answer or never went live, and CO wasn't caught up.`;
+  if (r.reason === 'Trial with active sub') return `Answer marks this account as TRIAL, but ChargeOver has an active subscription. Trials shouldn't be paying — either Answer needs to update to STANDARD or ChargeOver needs to end the trial.`;
   if (r.reason === 'Name mismatch')      return `Answer client "${r.client}" doesn't match ChargeOver company "${r.coCompany}".`;
   if (r.reason === 'Legacy')             return `Grandfathered — ${r.legacyReason || 'created before the cutoff'}. Name-drift flags suppressed; billing flags stay live.`;
   return r.error || '';
 }
 
 const REASON_TONE = {
-  'Matched':             'ok',
-  'Plan mismatch':       'crit',
-  'Bill day mismatch':   'crit',
-  'Zero usage':          'crit',
-  'No subscription':     'warn',
-  'Name mismatch':       'neutral',
-  'Legacy':              'neutral',
-  'Skipped':             'neutral',
+  'Matched':                'ok',
+  'Trial with active sub':  'crit',
+  'Plan mismatch':          'crit',
+  'Bill day mismatch':      'crit',
+  'Zero usage':             'crit',
+  'No subscription':        'warn',
+  'Name mismatch':          'neutral',
+  'Legacy':                 'neutral',
+  'Skipped':                'neutral',
 };
 
 const REASON_OPTIONS = [
-  { value: 'all',                  label: 'All reasons' },
-  { value: 'Plan mismatch',        label: 'Plan mismatch' },
-  { value: 'Bill day mismatch',    label: 'Bill day mismatch' },
-  { value: 'Zero usage',           label: 'Zero usage, active sub' },
-  { value: 'No subscription',      label: 'No subscription' },
-  { value: 'Name mismatch',        label: 'Name mismatch' },
-  { value: 'Legacy',               label: 'Legacy (grandfathered)' },
+  { value: 'all',                     label: 'All reasons' },
+  { value: 'Trial with active sub',   label: 'Trial with active sub' },
+  { value: 'Plan mismatch',           label: 'Plan mismatch' },
+  { value: 'Bill day mismatch',       label: 'Bill day mismatch' },
+  { value: 'Zero usage',              label: 'Zero usage, active sub' },
+  { value: 'No subscription',         label: 'No subscription' },
+  { value: 'Name mismatch',           label: 'Name mismatch' },
+  { value: 'Legacy',                  label: 'Legacy (grandfathered)' },
 ];
 
 /* ─── CSV export (preserved) ───────────────────────────────────────── */
@@ -281,7 +291,7 @@ export default function MinuteAuditor() {
     const s = {
       total: flat.length, audited: 0, flagged: 0, matched: 0, skipped: 0, legacy: 0,
       hubspotMatched: 0,
-      reasonPlan: 0, reasonBillDay: 0, reasonZeroUsage: 0, reasonNoSub: 0, reasonName: 0,
+      reasonTrial: 0, reasonPlan: 0, reasonBillDay: 0, reasonZeroUsage: 0, reasonNoSub: 0, reasonName: 0,
       hubspotNameAgree: 0, hubspotNameDisagree: 0,
     };
     for (const r of flat) {
@@ -295,11 +305,12 @@ export default function MinuteAuditor() {
       }
       if (r.flagged) {
         s.flagged++;
-        if      (r.reason === 'Plan mismatch')       s.reasonPlan++;
-        else if (r.reason === 'Bill day mismatch')   s.reasonBillDay++;
-        else if (r.reason === 'Zero usage')          s.reasonZeroUsage++;
-        else if (r.reason === 'No subscription')     s.reasonNoSub++;
-        else if (r.reason === 'Name mismatch')       s.reasonName++;
+        if      (r.reason === 'Trial with active sub') s.reasonTrial++;
+        else if (r.reason === 'Plan mismatch')         s.reasonPlan++;
+        else if (r.reason === 'Bill day mismatch')     s.reasonBillDay++;
+        else if (r.reason === 'Zero usage')            s.reasonZeroUsage++;
+        else if (r.reason === 'No subscription')       s.reasonNoSub++;
+        else if (r.reason === 'Name mismatch')         s.reasonName++;
       } else if (r.active === true) {
         s.matched++;
       }
@@ -449,6 +460,7 @@ export default function MinuteAuditor() {
             <div>
               <div className="ma-attn-eyebrow ma-attn-eyebrow--sub">Why they flagged</div>
               <div className="ma-reason-bar">
+                {summary.reasonTrial      > 0 && <div style={{ flex: summary.reasonTrial,      background: 'var(--warn-600)' }} title={`Trial with active sub (${summary.reasonTrial})`} />}
                 {summary.reasonPlan       > 0 && <div style={{ flex: summary.reasonPlan,       background: 'var(--crit-600)' }} title={`Plan mismatch (${summary.reasonPlan})`} />}
                 {summary.reasonBillDay    > 0 && <div style={{ flex: summary.reasonBillDay,    background: 'var(--crit-500)' }} title={`Bill day mismatch (${summary.reasonBillDay})`} />}
                 {summary.reasonZeroUsage  > 0 && <div style={{ flex: summary.reasonZeroUsage,  background: 'var(--crit-700)' }} title={`Zero usage, active sub (${summary.reasonZeroUsage})`} />}
@@ -456,6 +468,7 @@ export default function MinuteAuditor() {
                 {summary.reasonName       > 0 && <div style={{ flex: summary.reasonName,       background: 'var(--ink-300)' }} title={`Name mismatch (${summary.reasonName})`} />}
               </div>
               <div className="ma-reason-legend">
+                <LegendChip color="var(--warn-600)" label="Trial with active sub"  n={summary.reasonTrial} />
                 <LegendChip color="var(--crit-600)" label="Plan mismatch"          n={summary.reasonPlan} />
                 <LegendChip color="var(--crit-500)" label="Bill day mismatch"      n={summary.reasonBillDay} />
                 <LegendChip color="var(--crit-700)" label="Zero usage, active sub" n={summary.reasonZeroUsage} />
