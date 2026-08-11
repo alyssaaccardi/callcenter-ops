@@ -5596,11 +5596,13 @@ function resolveInPrefetched(prefetched, tenantHint, coId) {
       canceledAt: sub?.cancel_datetime?.slice(0, 10) || null,
       planMinutes: sub?.custom_2 ?? null,       // Allotted minutes plan
       overageRate: sub?.custom_1 ?? null,       // $/min over plan
-      // Bill day comes from `holduntil_datetime` — the subscription's billing
-      // anchor. It doesn't shift with prorations or missed invoices the way
-      // `next_invoice_datetime` can, so it's the canonical "what day does
-      // this subscription bill?" Fallback to next_invoice_datetime if unset.
-      billAnchorDate:  sub?.holduntil_datetime || sub?.next_invoice_datetime || null,
+      // Bill day comes from `next_invoice_datetime` — that's the day the
+      // subscription actually bills going forward. `holduntil_datetime` is
+      // the ORIGINAL hold date and doesn't update when a customer is later
+      // moved to a different billing day (e.g. package 672: hold anchored
+      // Feb 3 2015, current invoices land on the 1st). Falls back to
+      // `holduntil_datetime` only when next-invoice is unset (canceled subs).
+      billAnchorDate:  sub?.next_invoice_datetime || sub?.holduntil_datetime || null,
       nextInvoiceDate: sub?.next_invoice_datetime || null,
       // Sales-rep + linkage fields used by the HubSpot cross-check.
       superuserName: [cust.superuser_first_name, cust.superuser_last_name].filter(Boolean).join(' ') || null,
