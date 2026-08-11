@@ -5580,6 +5580,12 @@ function resolveInPrefetched(prefetched, tenantHint, coId) {
     const activeSub   = subs.find(s => s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
     const canceledSub = subs.find(s => s.package_status_str === 'canceled-manual');
     const sub = activeSub || canceledSub || subs[0] || null;
+    // Look up the parent customer (if any) from the same prefetch map so
+    // MULTIPLE-category rows can group by their parent (see the MULTIPLE
+    // tab in the client).
+    const parentId = cust.parent_customer_id ? String(cust.parent_customer_id) : null;
+    const parent = parentId ? data.customerById.get(parentId) : null;
+
     return {
       tenant: t,
       customerId: cust.customer_id,
@@ -5601,6 +5607,10 @@ function resolveInPrefetched(prefetched, tenantHint, coId) {
       adminName:     cust.admin_name  || null,
       adminEmail:    cust.admin_email || null,
       createdAt:     cust.write_datetime?.slice(0, 10) || null,
+      // Parent/child grouping for MULTIPLE accounts. parentCustomerId is
+      // null on parents (they have no parent) and populated on children.
+      parentCustomerId: parentId,
+      parentCompany:    parent?.company || null,
       url: cust.url_self || null,
     };
   }

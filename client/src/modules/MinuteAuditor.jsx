@@ -284,13 +284,15 @@ export default function MinuteAuditor() {
       coCompany: co.company || '',
       coUrl: co.url || '',
       resolvedTenant: co.tenant || r.clientType || '',
+      parentCustomerId: co.parentCustomerId || null,
+      parentCompany: co.parentCompany || null,
     };
   }), [results]);
 
   const summary = useMemo(() => {
     const s = {
       total: flat.length, audited: 0, flagged: 0, matched: 0, skipped: 0, legacy: 0,
-      hubspotMatched: 0,
+      hubspotMatched: 0, multiple: 0,
       reasonTrial: 0, reasonPlan: 0, reasonBillDay: 0, reasonZeroUsage: 0, reasonNoSub: 0, reasonName: 0,
       hubspotNameAgree: 0, hubspotNameDisagree: 0,
     };
@@ -298,6 +300,7 @@ export default function MinuteAuditor() {
       if (r.skipped) { s.skipped++; continue; }
       s.audited++;
       if (r.isLegacy) s.legacy++;
+      if (String(r.billingCategory || '').toUpperCase() === 'MULTIPLE') s.multiple++;
       if (r.hubspotDealFound) {
         s.hubspotMatched++;
         if      (r.nameAllThreeMatch === true)  s.hubspotNameAgree++;
@@ -326,6 +329,7 @@ export default function MinuteAuditor() {
       if (tab === 'attention' && !r.flagged) return false;
       if (tab === 'matched'   && (r.flagged || r.active !== true)) return false;
       if (tab === 'hubspot'   && !r.hubspotDealFound) return false;
+      if (tab === 'multiple'  && String(r.billingCategory || '').toUpperCase() !== 'MULTIPLE') return false;
       if (reasonFilter !== 'all' && r.reason !== reasonFilter) return false;
       if (q) {
         const hay = `${r.client || ''} ${r.coCustomerId || ''} ${r.coCompany || ''} ${r.hubspotDealName || ''} ${r.hubspotDealCompany || ''} ${r.hubspotSalesRep || ''}`.toLowerCase();
@@ -337,13 +341,28 @@ export default function MinuteAuditor() {
 
   const sorted = useMemo(() => {
     const dir = sort.dir === 'asc' ? 1 : -1;
+    // MULTIPLE tab groups by parent so parents and children cluster. Parents
+    // (no parentCustomerId) sort by their own CO id; children sort by their
+    // parent id then their own id.
+    if (tab === 'multiple') {
+      return [...filtered].sort((a, b) => {
+        const aGroup = a.chargeover?.parentCustomerId || a.coCustomerId || '';
+        const bGroup = b.chargeover?.parentCustomerId || b.coCustomerId || '';
+        if (aGroup !== bGroup) return String(aGroup).localeCompare(String(bGroup), undefined, { numeric: true });
+        // Within a group: parent first (no parent id), then children by id.
+        const aChild = a.chargeover?.parentCustomerId ? 1 : 0;
+        const bChild = b.chargeover?.parentCustomerId ? 1 : 0;
+        if (aChild !== bChild) return aChild - bChild;
+        return String(a.coCustomerId || '').localeCompare(String(b.coCustomerId || ''), undefined, { numeric: true });
+      });
+    }
     return [...filtered].sort((a, b) => {
       if (sort.key === 'answer') { return ((a.answer || 0) - (b.answer || 0)) * dir; }
       const av = (a.client || '').toLowerCase();
       const bv = (b.client || '').toLowerCase();
       return av.localeCompare(bv) * dir;
     });
-  }, [filtered, sort]);
+  }, [filtered, sort, tab]);
 
   const clickSort = (key) => {
     setSort(s => s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' });
@@ -497,6 +516,7 @@ export default function MinuteAuditor() {
         tabs={[
           { id: 'attention', label: 'Needs attention', count: summary.flagged },
           { id: 'matched',   label: 'Matched',         count: summary.matched },
+          { id: 'multiple',  label: 'Multiple',        count: summary.multiple },
           { id: 'hubspot',   label: 'HubSpot',         count: summary.hubspotMatched },
           { id: 'all',       label: 'All audited',     count: summary.audited },
         ]}
@@ -539,6 +559,16 @@ export default function MinuteAuditor() {
                     {showAllCols && <th>Matched by</th>}
                     {showAllCols && <th data-align="center">Sales rep (HS / CO)</th>}
                     {showAllCols && <th>Deal</th>}
+                  </>
+                ) : tab === 'multiple' ? (
+                  <>
+                    <th>Parent (ChargeOver)</th>
+                    <th data-align="center">Plan (Answer / CO)</th>
+                    <th data-align="center">Bill day (Answer / CO)</th>
+                    <th>Reason</th>
+                    <th data-align="right">Used</th>
+                    {showAllCols && <th>Category</th>}
+                    {showAllCols && <th>Cycle</th>}
                   </>
                 ) : (
                   <>
@@ -669,6 +699,25 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab }) {
             {showAllCols && <td className="ma-cell-meta">{r.hubspotMatchedBy || '—'}</td>}
             {showAllCols && <td data-align="center"><CompareCell csv={r.hubspotSalesRep} co={r.coAdminName} unit="" mismatch={r.salesRepMismatch} labels={{ csv: 'HS', co: 'CO' }} /></td>}
             {showAllCols && <td className="ma-cell-meta">{r.hubspotDealId || '—'}</td>}
+          </>
+        ) : tab === 'multiple' ? (
+          <>
+            <td>
+              {r.parentCustomerId ? (
+                <>
+                  <div className="ma-cell-name">{r.parentCompany || `CO #${r.parentCustomerId}`}</div>
+                  <div className="ma-cell-meta">parent CO {r.parentCustomerId} · this row is a child</div>
+                </>
+              ) : (
+                <div className="ma-cell-meta">— this row is the parent —</div>
+              )}
+            </td>
+            <td data-align="center"><CompareCell csv={r.csvPlan} co={r.coPlan} unit=" min" mismatch={r.planMismatch} /></td>
+            <td data-align="center"><CompareCell csv={r.csvBillDay} co={r.coBillDay} unit="" ordinal mismatch={r.billDayMismatch} /></td>
+            <td><ReasonPill reason={r.reason} /></td>
+            <td data-align="right" data-num>{fmtNum(r.answer)}</td>
+            {showAllCols && <td>{r.billingCategory || '—'}</td>}
+            {showAllCols && <td>{r.billingCycle || '—'}</td>}
           </>
         ) : (
           <>
