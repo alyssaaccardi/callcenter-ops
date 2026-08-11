@@ -5632,9 +5632,10 @@ function salesRepsMatch(a, b) {
 // on active accounts) but every match gives us a sales-rep cross-check.
 const HS_ONBOARDING_PIPELINE   = '137772405';
 const HS_ONBOARDING_PAID_STAGE = '240513405';
-// Anything created in CO before this date + no HubSpot deal = grandfathered.
-// Chosen after 2018-19 admin churn (Chris Ferguson / Tyler Indelicato) but
-// before HubSpot became source of truth. Adjust as ops verify.
+// Fallback grandfather cutoff, used only when the HubSpot prefetch is
+// unavailable. Normally the cutoff is derived at runtime from HubSpot's oldest
+// deal (see prefetchHubspotPaidDeals → earliestDealDate), so the boundary
+// tracks the CRM's real coverage instead of a hand-picked date.
 const MINUTE_AUDITOR_LEGACY_CUTOFF = '2020-01-01';
 
 // Key a firm-style name for HubSpot ↔ CO ↔ Answer matching. Strips
@@ -5649,11 +5650,48 @@ function normalizeCompanyKey(name) {
   return [...chosen].sort().join(' ');
 }
 
+// Resolve HubSpot owner ids → { name, isActive }. Deal Owner is the sales rep
+// of record; the custom sales_rep property is the fallback for deals with no
+// owner set. Requires the crm.objects.owners.read scope on the private app —
+// without it HubSpot 403s and we degrade to sales_rep for every deal.
+async function fetchHubspotOwners(token) {
+  const owners = new Map();
+  try {
+    // Two passes: active owners, then deactivated ones. Deactivated owners
+    // still need resolving — their deals exist and ops still see the name.
+    for (const archived of [false, true]) {
+      let after;
+      while (true) {
+        const resp = await axios.get('https://api.hubapi.com/crm/v3/owners', {
+          headers: { Authorization: 'Bearer ' + token },
+          params: { limit: 100, archived, ...(after ? { after } : {}) },
+          timeout: 15000,
+        });
+        for (const o of resp.data.results || []) {
+          const name = [o.firstName, o.lastName].filter(Boolean).join(' ').trim();
+          if (name) owners.set(String(o.id), { name, isActive: !archived });
+        }
+        if (!resp.data.paging?.next?.after) break;
+        after = resp.data.paging.next.after;
+      }
+    }
+  } catch (e) {
+    if (e.response?.status === 403) {
+      console.warn('[minute-auditor] HubSpot owners unavailable — private app is missing the "crm.objects.owners.read" scope. Falling back to the sales_rep property for every deal.');
+    } else {
+      console.warn('[minute-auditor] HubSpot owners lookup failed:', e.response?.data?.message || e.message);
+    }
+    return null;
+  }
+  return owners;
+}
+
 async function prefetchHubspotPaidDeals(progressCb) {
   const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
   if (!token) return null;
   const dealByPerson  = new Map();   // norm(dealname) → deal (superuser fallback)
   const dealByCompany = new Map();   // firm-key → deal (primary match path)
+  const allDeals      = [];          // every record, for post-fetch owner resolution
   const activeRepSet  = new Set();
   let after;
   let count = 0;
@@ -5664,7 +5702,7 @@ async function prefetchHubspotPaidDeals(progressCb) {
         { propertyName: 'dealstage', operator: 'EQ', value: HS_ONBOARDING_PAID_STAGE },
       ] }],
       limit: 100,
-      properties: ['dealname', 'sales_rep', 'company_name', 'account_name', 'chargeover_package_customer_id'],
+      properties: ['dealname', 'sales_rep', 'hubspot_owner_id', 'company_name', 'account_name', 'chargeover_package_customer_id', 'createdate'],
       after,
     };
     const resp = await axios.post(
@@ -5677,10 +5715,15 @@ async function prefetchHubspotPaidDeals(progressCb) {
         dealId:       d.id,
         dealName:     d.properties.dealname,
         salesRep:     d.properties.sales_rep || null,
+        ownerId:      d.properties.hubspot_owner_id || null,
+        ownerName:    null,    // filled in below once owners resolve
+        ownerActive:  null,
         companyName:  d.properties.company_name || null,
         accountName:  d.properties.account_name || null,
         coCustomerId: d.properties.chargeover_package_customer_id || null,
+        createdAt:    (d.properties.createdate || '').slice(0, 10) || null,
       };
+      allDeals.push(record);
       const personKey = normPersonName(d.properties.dealname);
       if (personKey) dealByPerson.set(personKey, record);
       // Prefer company_name (92% populated) but also index account_name (32%)
@@ -5690,7 +5733,6 @@ async function prefetchHubspotPaidDeals(progressCb) {
         const firmKey = normalizeCompanyKey(rawFirm);
         if (firmKey && !dealByCompany.has(firmKey)) dealByCompany.set(firmKey, record);
       }
-      if (d.properties.sales_rep) activeRepSet.add(d.properties.sales_rep);
       count++;
     }
     progressCb?.(count);
@@ -5698,7 +5740,26 @@ async function prefetchHubspotPaidDeals(progressCb) {
     after = resp.data.paging.next.after;
     await new Promise(r => setTimeout(r, 100));
   }
-  return { dealByPerson, dealByCompany, activeRepNames: [...activeRepSet] };
+
+  // Resolve Deal Owner → name. Owner is the sales rep of record; sales_rep is
+  // the fallback when a deal has no owner (or when the scope is missing).
+  const owners = await fetchHubspotOwners(token);
+  for (const rec of allDeals) {
+    const o = owners && rec.ownerId ? owners.get(String(rec.ownerId)) : null;
+    if (o) { rec.ownerName = o.name; rec.ownerActive = o.isActive; }
+    rec.rep       = rec.ownerName || rec.salesRep || null;
+    rec.repSource = rec.ownerName ? 'deal owner' : (rec.salesRep ? 'sales_rep property' : null);
+    // A rep counts as current unless HubSpot says the owner is deactivated.
+    if (rec.rep && rec.ownerActive !== false) activeRepSet.add(rec.rep);
+  }
+
+  // HubSpot's coverage floor: the oldest deal it knows about. ChargeOver
+  // customers created before this predate the CRM entirely, so their missing
+  // deal is an artifact of history rather than a data-entry gap.
+  const dealDates = allDeals.map(d => d.createdAt).filter(Boolean).sort();
+  const earliestDealDate = dealDates[0] || null;
+
+  return { dealByPerson, dealByCompany, activeRepNames: [...activeRepSet], earliestDealDate };
 }
 
 // True if `name` fuzzy-matches ANY current HubSpot sales rep. Used to detect
@@ -5855,21 +5916,39 @@ async function runMinuteAuditorJob(jobId, rows) {
             result.hubspotDealId       = deal.dealId;
             result.hubspotDealName     = deal.dealName;
             result.hubspotDealCompany  = deal.companyName || deal.accountName || null;
-            result.hubspotSalesRep     = deal.salesRep;
+            // Deal Owner is the sales rep of record; sales_rep is the fallback
+            // for deals with no owner. Both are HubSpot, both are truth — a
+            // mismatch means ChargeOver's admin needs updating to match.
+            result.hubspotSalesRep     = deal.rep;
+            result.hubspotRepSource    = deal.repSource;
+            result.hubspotOwnerActive  = deal.ownerActive;
             result.hubspotMatchedBy    = matchedBy;
-            const repsMatch = salesRepsMatch(deal.salesRep, co.adminName);
+            const repsMatch = salesRepsMatch(deal.rep, co.adminName);
             // Only mark mismatched when we have both names to compare.
             result.salesRepMismatch = repsMatch === false;
           }
         }
-        // Legacy grandfathering — purely date-based. Any customer created
-        // before the cutoff is treated as pre-modern-CRM: name and sales-rep
-        // mismatches get demoted to informational. Real billing issues
-        // (plan, bill day, no active sub) still flag on Legacy rows.
-        result.isLegacy = !!co.createdAt && co.createdAt < MINUTE_AUDITOR_LEGACY_CUTOFF;
-        result.legacyReason = result.isLegacy
-          ? `created in ChargeOver ${co.createdAt}, before the ${MINUTE_AUDITOR_LEGACY_CUTOFF} cutoff`
-          : null;
+        // Legacy grandfathering — purely date-based, on two independent
+        // boundaries. Whichever is later wins, and the reason records which
+        // one fired so ops can tell "the CRM can't know" from "the CRM knows
+        // but we don't trust it":
+        //   1. COVERAGE — older than HubSpot's oldest deal. No record can
+        //      exist that far back, so a missing deal is history, not a gap.
+        //   2. QUALITY  — inside the 2018-19 admin-churn window. Deals do
+        //      exist, but their rep assignments predate HubSpot being source
+        //      of truth, so a "mismatch" there is confident and wrong.
+        const coverageFloor = prefetched?.hubspot?.earliestDealDate || null;
+        const churnCutoff   = MINUTE_AUDITOR_LEGACY_CUTOFF;
+        const created       = co.createdAt || null;
+        const beforeCoverage = !!created && !!coverageFloor && created < coverageFloor;
+        const beforeChurn    = !!created && created < churnCutoff;
+        result.legacyCutoff = coverageFloor && coverageFloor > churnCutoff ? coverageFloor : churnCutoff;
+        result.isLegacy     = beforeCoverage || beforeChurn;
+        result.legacyReason = beforeCoverage
+          ? `created in ChargeOver ${created}, before HubSpot's oldest deal (${coverageFloor}) — the CRM has no record this far back`
+          : beforeChurn
+            ? `created in ChargeOver ${created}, before the ${churnCutoff} cutoff — 2018-19 admin churn, rep data predates HubSpot as source of truth`
+            : null;
       }
     }
 

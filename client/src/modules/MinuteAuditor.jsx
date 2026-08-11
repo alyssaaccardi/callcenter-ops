@@ -683,7 +683,11 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab }) {
               {r.hubspotDealFound ? (
                 <DetailField label="Sales rep (HubSpot) — source of truth"
                   value={r.hubspotSalesRep || '—'}
-                  sub={`deal: ${r.hubspotDealName}`} />
+                  sub={[
+                    r.hubspotRepSource ? `from ${r.hubspotRepSource}` : null,
+                    r.hubspotOwnerActive === false ? 'owner deactivated' : null,
+                    `deal: ${r.hubspotDealName}`,
+                  ].filter(Boolean).join(' · ')} />
               ) : (
                 <DetailField label="HubSpot deal"
                   value={r.isLegacy ? 'none (legacy)' : 'no matching deal'}
