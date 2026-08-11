@@ -328,6 +328,23 @@ body.dark .ma-brand-mark { filter: invert(1) brightness(1.1); }
   letter-spacing: 0.02em;
   margin-top: 2px;
 }
+/* By-category tab: same group-header structure, warmer accent bar */
+.ma-group-header--category td {
+  border-top-color: var(--violet-600);
+  background: rgba(124,58,237,0.04);
+}
+.ma-group-header--category .ma-group-title {
+  font-family: var(--font-mono);
+  font-size: var(--fs-h3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--violet-700);
+}
+.ma-group-flagged {
+  color: var(--crit-700);
+  font-weight: var(--fw-semibold);
+}
+
 .ma-row-parent td { background: rgba(26,111,232,0.04); }
 .ma-row-parent .ma-cell-name { font-weight: var(--fw-semibold); }
 .ma-row-child .ma-caret { padding-left: 32px !important; position: relative; }

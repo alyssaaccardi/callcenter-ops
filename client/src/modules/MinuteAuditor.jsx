@@ -389,12 +389,47 @@ export default function MinuteAuditor() {
     return [...groupsMap.values()];
   }, [sorted, tab]);
 
+  // Group by CSV Billing Category for the "By category" tab. Rollup counts
+  // per category (total, flagged, matched, legacy) surface in the header
+  // so ops can eyeball where the pain is without expanding groups.
+  const categoryGroups = useMemo(() => {
+    if (tab !== 'category') return null;
+    const groupsMap = new Map();
+    for (const r of sorted) {
+      const cat = String(r.billingCategory || 'UNCATEGORIZED').toUpperCase();
+      if (!groupsMap.has(cat)) groupsMap.set(cat, {
+        key: cat, category: cat, rows: [],
+        total: 0, flagged: 0, matched: 0, legacy: 0,
+      });
+      const g = groupsMap.get(cat);
+      g.rows.push(r);
+      g.total++;
+      if (r.flagged) g.flagged++;
+      if (r.isLegacy) g.legacy++;
+      if (!r.flagged && r.active === true) g.matched++;
+    }
+    // Biggest categories first, but with flagged categories always above
+    // clean ones — surface the pain.
+    return [...groupsMap.values()].sort((a, b) => {
+      if ((b.flagged > 0) !== (a.flagged > 0)) return b.flagged > 0 ? 1 : -1;
+      return b.total - a.total;
+    });
+  }, [sorted, tab]);
+
   const clickSort = (key) => {
     setSort(s => s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' });
   };
 
   const doExport = () => {
-    const blob = new Blob([toCsv(sorted)], { type: 'text/csv;charset=utf-8' });
+    // Group the export by billing category (with client-sort within group)
+    // to mirror the "By category" tab and give billing a scannable sheet.
+    const catOrdered = [...sorted].sort((a, b) => {
+      const ca = String(a.billingCategory || 'ZZZ').toUpperCase();
+      const cb = String(b.billingCategory || 'ZZZ').toUpperCase();
+      if (ca !== cb) return ca.localeCompare(cb);
+      return (a.client || '').toLowerCase().localeCompare((b.client || '').toLowerCase());
+    });
+    const blob = new Blob([toCsv(catOrdered)], { type: 'text/csv;charset=utf-8' });
     const url  = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -545,6 +580,7 @@ export default function MinuteAuditor() {
       <Tabs
         tabs={[
           { id: 'attention', label: 'Needs attention', count: summary.flagged },
+          { id: 'category',  label: 'By category',     count: summary.audited },
           { id: 'matched',   label: 'Matched',         count: summary.matched },
           { id: 'multiple',  label: 'Multiple',        count: summary.multiple },
           { id: 'hubspot',   label: 'HubSpot',         count: summary.hubspotMatched },
@@ -665,6 +701,31 @@ export default function MinuteAuditor() {
                     </React.Fragment>
                   );
                 })
+              ) : tab === 'category' ? (
+                categoryGroups.map(g => (
+                  <React.Fragment key={g.key}>
+                    <tr className="ma-group-header ma-group-header--category">
+                      <td colSpan={colCount}>
+                        <div className="ma-group-title-row">
+                          <div>
+                            <div className="ma-group-title">{g.category}</div>
+                            <div className="ma-group-meta">
+                              {g.total} account{g.total === 1 ? '' : 's'}
+                              {g.flagged > 0 && <> · <span className="ma-group-flagged">{g.flagged} flagged</span></>}
+                              {g.matched > 0 && ` · ${g.matched} matched`}
+                              {g.legacy  > 0 && ` · ${g.legacy} legacy`}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                    {g.rows.map(r => (
+                      <TableRow key={r.id} r={r} expanded={expandedId === r.id}
+                        onToggle={() => setExpandedId(id => id === r.id ? null : r.id)}
+                        colCount={colCount} showAllCols={showAllCols} tab={tab} />
+                    ))}
+                  </React.Fragment>
+                ))
               ) : sorted.map(r => (
                 <TableRow key={r.id} r={r} expanded={expandedId === r.id}
                   onToggle={() => setExpandedId(id => id === r.id ? null : r.id)}
