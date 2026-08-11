@@ -5818,22 +5818,14 @@ async function runMinuteAuditorJob(jobId, rows) {
             result.salesRepMismatch = repsMatch === false;
           }
         }
-        // Legacy grandfathering — two triggers:
-        //   1. Created before the cutoff AND we couldn't link a HubSpot deal.
-        //   2. The CO admin isn't a current HubSpot sales rep — "former staff"
-        //      whose accounts were never reassigned. That's the majority of
-        //      the noise: ~21% of AL customers fall in this bucket
-        //      (Thomas Lombardo, Tyler Indelicato, etc.).
-        // Both suppress name + sales-rep flags but keep billing flags live.
-        const activeReps = prefetched.hubspot?.activeRepNames || null;
-        const preCutoff = !!co.createdAt && co.createdAt < MINUTE_AUDITOR_LEGACY_CUTOFF && !result.hubspotDealFound;
-        const formerStaff = !!co.adminName && !isCurrentHubspotRep(co.adminName, activeReps);
-        result.isLegacy = preCutoff || formerStaff;
-        result.legacyReason = formerStaff
-          ? `admin "${co.adminName}" is no longer a HubSpot sales rep`
-          : preCutoff
-            ? `created in ChargeOver ${co.createdAt}, before the ${MINUTE_AUDITOR_LEGACY_CUTOFF} cutoff, with no matching HubSpot deal`
-            : null;
+        // Legacy grandfathering — purely date-based. Any customer created
+        // before the cutoff is treated as pre-modern-CRM: name and sales-rep
+        // mismatches get demoted to informational. Real billing issues
+        // (plan, bill day, no active sub) still flag on Legacy rows.
+        result.isLegacy = !!co.createdAt && co.createdAt < MINUTE_AUDITOR_LEGACY_CUTOFF;
+        result.legacyReason = result.isLegacy
+          ? `created in ChargeOver ${co.createdAt}, before the ${MINUTE_AUDITOR_LEGACY_CUTOFF} cutoff`
+          : null;
       }
     }
 

@@ -462,7 +462,7 @@ export default function MinuteAuditor() {
           <Tile eyebrow="Flagged" sub={summary.flagged > 0 ? 'need review' : 'nothing to review'}
             value={String(summary.flagged)} tone={summary.flagged > 0 ? 'crit' : undefined} />
           {summary.legacy > 0 && (
-            <Tile eyebrow="Legacy" sub="pre-2020 or former-staff CO admin"
+            <Tile eyebrow="Legacy" sub="created before 2020"
               value={String(summary.legacy)} hint={summary.hubspotMatched > 0 ? `${summary.hubspotMatched} matched` : undefined} />
           )}
           <Tile eyebrow="Skipped" sub="INTERNAL / TRIAL / FREE"
