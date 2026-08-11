@@ -5591,10 +5591,89 @@ function resolveInPrefetched(prefetched, tenantHint, coId) {
       planMinutes: sub?.custom_2 ?? null,       // Allotted minutes plan
       overageRate: sub?.custom_1 ?? null,       // $/min over plan
       nextInvoiceDate: sub?.next_invoice_datetime || null,
+      // Sales-rep + linkage fields used by the HubSpot cross-check.
+      superuserName: [cust.superuser_first_name, cust.superuser_last_name].filter(Boolean).join(' ') || null,
+      adminName:     cust.admin_name  || null,
+      adminEmail:    cust.admin_email || null,
+      createdAt:     cust.write_datetime?.slice(0, 10) || null,
       url: cust.url_self || null,
     };
   }
   return null;
+}
+
+// Normalize a person name for map keys and fuzzy compare — lower, strip
+// punctuation, collapse whitespace. Used for both dealname↔CO-superuser and
+// sales-rep↔admin comparisons.
+function normPersonName(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// True if two rep names look like the same person after stopword/token
+// normalization. Handles "Jeff Victoriano" vs "Jeffry Victoriano" (nickname)
+// by requiring the last word (typically surname) match strictly and the
+// first word to share a 3-char prefix.
+function salesRepsMatch(a, b) {
+  const na = normPersonName(a);
+  const nb = normPersonName(b);
+  if (!na || !nb) return null;   // insufficient data to judge
+  if (na === nb) return true;
+  const at = na.split(' '), bt = nb.split(' ');
+  if (at.length < 2 || bt.length < 2) return na.includes(nb) || nb.includes(na);
+  const aLast = at[at.length - 1], bLast = bt[bt.length - 1];
+  if (aLast !== bLast) return false;
+  const aFirst = at[0], bFirst = bt[0];
+  return aFirst === bFirst || aFirst.startsWith(bFirst.slice(0, 3)) || bFirst.startsWith(aFirst.slice(0, 3));
+}
+
+// ─── HubSpot: prefetch PAID deals in Onboarding 2 ────────────────────────────
+// The audit joins each CO customer to a HubSpot deal by the customer's
+// superuser (contact) name matching the deal's name. Coverage is thin (~5%
+// on active accounts) but every match gives us a sales-rep cross-check.
+const HS_ONBOARDING_PIPELINE   = '137772405';
+const HS_ONBOARDING_PAID_STAGE = '240513405';
+// Anything created in CO before this date + no HubSpot deal = grandfathered.
+// Chosen after 2018-19 admin churn (Chris Ferguson / Tyler Indelicato) but
+// before HubSpot became source of truth. Adjust as ops verify.
+const MINUTE_AUDITOR_LEGACY_CUTOFF = '2020-01-01';
+
+async function prefetchHubspotPaidDeals(progressCb) {
+  const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
+  if (!token) return null;
+  const map = new Map();  // norm(dealname) → { dealId, dealName, salesRep }
+  let after;
+  let count = 0;
+  while (true) {
+    const body = {
+      filterGroups: [{ filters: [
+        { propertyName: 'pipeline',  operator: 'EQ', value: HS_ONBOARDING_PIPELINE },
+        { propertyName: 'dealstage', operator: 'EQ', value: HS_ONBOARDING_PAID_STAGE },
+      ] }],
+      limit: 100,
+      properties: ['dealname', 'sales_rep', 'chargeover_package_customer_id'],
+      after,
+    };
+    const resp = await axios.post(
+      'https://api.hubapi.com/crm/v3/objects/deals/search',
+      body,
+      { headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, timeout: 15000 }
+    );
+    for (const d of resp.data.results || []) {
+      const key = normPersonName(d.properties.dealname);
+      if (key) map.set(key, {
+        dealId:       d.id,
+        dealName:     d.properties.dealname,
+        salesRep:     d.properties.sales_rep || null,
+        coCustomerId: d.properties.chargeover_package_customer_id || null,
+      });
+      count++;
+    }
+    progressCb?.(count);
+    if (!resp.data.paging?.next?.after) break;
+    after = resp.data.paging.next.after;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return map;
 }
 
 // Parse "1st (03/01/2026 - 03/12/2026)" or "15th (...)" → day of month integer.
@@ -5620,18 +5699,22 @@ async function runMinuteAuditorJob(jobId, rows) {
   const job = minuteAuditorJobs.get(jobId);
   if (!job) return;
 
-  // ── Phase 1: bulk prefetch every customer + package from AL and RS ──
+  // ── Phase 1: bulk prefetch every customer + package from AL and RS,
+  //             plus every PAID deal in HubSpot Onboarding 2 ──
   job.phase = 'prefetching';
   job.prefetch = {};
-  const prefetched = { AL: null, RS: null };
+  const prefetched = { AL: null, RS: null, hubspot: null };
   try {
     const updateProgress = (label, n) => { job.prefetch[label] = n; };
-    const [al, rs] = await Promise.all([
+    const [al, rs, hs] = await Promise.all([
       prefetchTenantData('AL', updateProgress),
       prefetchTenantData('RS', updateProgress),
+      prefetchHubspotPaidDeals(n => updateProgress('HubSpot paid deals', n))
+        .catch(e => { console.warn('[minute-auditor] hubspot prefetch failed:', e.message); return null; }),
     ]);
     prefetched.AL = al;
     prefetched.RS = rs;
+    prefetched.hubspot = hs;
   } catch (e) {
     console.error('[minute-auditor] prefetch failed:', e.message);
     job.status = 'error';
@@ -5661,7 +5744,7 @@ async function runMinuteAuditorJob(jobId, rows) {
   for (const row of rows) {
     const cat = String(row.billingCategory || '').toUpperCase();
     if (MINUTE_AUDITOR_SKIP_CATEGORIES.has(cat)) {
-      job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true, flagged: false, nameMismatch: false, nameMatchScore: null });
+      job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true, flagged: false, nameMismatch: false, nameMatchScore: null, isLegacy: false, hubspotDealFound: false });
       job.done++;
       continue;
     }
@@ -5669,9 +5752,13 @@ async function runMinuteAuditorJob(jobId, rows) {
       ...row,
       chargeover: null, active: null, error: null, skipped: false,
       flagged: false, flagReasons: [],
-      nameMismatch: false,   nameMatchScore: null,
-      planMismatch: false,   csvPlan: null, coPlan: null,
+      nameMismatch: false,    nameMatchScore: null,
+      planMismatch: false,    csvPlan: null, coPlan: null,
       billDayMismatch: false, csvBillDay: null, coBillDay: null,
+      // HubSpot cross-check fields
+      hubspotDealFound: false, hubspotDealId: null, hubspotDealName: null, hubspotSalesRep: null,
+      coAdminName: null, coAdminEmail: null, coCreatedAt: null,
+      salesRepMismatch: false, isLegacy: false,
     };
     if (!row.coCustomerId) {
       result.error = 'No COCustomerId';
@@ -5701,18 +5788,43 @@ async function runMinuteAuditorJob(jobId, rows) {
         if (result.csvBillDay != null && result.coBillDay != null) {
           result.billDayMismatch = result.csvBillDay !== result.coBillDay;
         }
+        // HubSpot cross-check — match CO customer to a PAID deal by superuser
+        // name ↔ dealname. Only meaningful when a match is found.
+        result.coAdminName  = co.adminName;
+        result.coAdminEmail = co.adminEmail;
+        result.coCreatedAt  = co.createdAt;
+        if (prefetched.hubspot && co.superuserName) {
+          const deal = prefetched.hubspot.get(normPersonName(co.superuserName));
+          if (deal) {
+            result.hubspotDealFound = true;
+            result.hubspotDealId    = deal.dealId;
+            result.hubspotDealName  = deal.dealName;
+            result.hubspotSalesRep  = deal.salesRep;
+            const repsMatch = salesRepsMatch(deal.salesRep, co.adminName);
+            // Only mark mismatched when we have both names to compare.
+            result.salesRepMismatch = repsMatch === false;
+          }
+        }
+        // Legacy grandfathering — created in CO before the cutoff AND no
+        // HubSpot linkage. Suppresses name + sales-rep flags for these rows,
+        // but keeps real billing flags (plan / bill-day / no active sub).
+        result.isLegacy = !!co.createdAt
+          && co.createdAt < MINUTE_AUDITOR_LEGACY_CUTOFF
+          && !result.hubspotDealFound;
       }
     }
 
-    // Aggregate reasons and set the flag.
+    // Aggregate reasons and set the flag. Legacy suppresses name + sales-rep
+    // mismatches (both are CRM-drift issues, not billing issues).
     const usageIssue = hasUsage(row) && result.active !== true;
     if (usageIssue) {
       result.flagReasons.push(result.error === 'Not found in ChargeOver' || result.error === 'No COCustomerId'
         ? 'No CO match' : 'Not paying');
     }
-    if (result.nameMismatch)    result.flagReasons.push('Name mismatch');
     if (result.planMismatch)    result.flagReasons.push('Plan mismatch');
     if (result.billDayMismatch) result.flagReasons.push('Bill day mismatch');
+    if (result.nameMismatch    && !result.isLegacy) result.flagReasons.push('Name mismatch');
+    if (result.salesRepMismatch && !result.isLegacy) result.flagReasons.push('Sales rep mismatch');
     result.flagged = result.flagReasons.length > 0;
 
     job.results.push(result);

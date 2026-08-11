@@ -13,53 +13,68 @@ function fmtNum(v) {
 }
 
 // The two mismatches this audit actually cares about — plan and bill day.
-// Everything else is secondary. Precedence: plan > bill day > no-sub > name.
+// Everything else is secondary. Legacy grandfathering demotes name and
+// sales-rep mismatches to informational for pre-2020 customers with no
+// matching HubSpot deal.
 function computeReason(r) {
   if (r.skipped) return 'Skipped';
-  if (!r.flagged) return 'Matched';
+  // Real billing issues always take precedence over CRM drift.
   if (r.planMismatch)    return 'Plan mismatch';
   if (r.billDayMismatch) return 'Bill day mismatch';
   const notInCO = r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
   if (notInCO || r.active !== true) return 'No subscription';
-  if (r.nameMismatch)    return 'Name mismatch';
-  return 'Flagged';
+  // Legacy customers with only CRM-drift issues get the "Legacy" label.
+  if (r.isLegacy && (r.nameMismatch || r.salesRepMismatch)) return 'Legacy';
+  if (r.salesRepMismatch) return 'Sales rep mismatch';
+  if (r.nameMismatch)     return 'Name mismatch';
+  if (r.isLegacy)         return 'Legacy';
+  return 'Matched';
 }
 
 function describeReason(r) {
-  if (r.reason === 'Matched')          return 'Answer and ChargeOver agree on plan and bill day.';
-  if (r.reason === 'Plan mismatch')    return `Answer allotted ${r.csvPlan ?? '?'} min; ChargeOver plan is ${r.coPlan ?? '?'} min.`;
-  if (r.reason === 'Bill day mismatch')return `Answer bills on day ${r.csvBillDay ?? '?'}; ChargeOver next invoice is day ${r.coBillDay ?? '?'}.`;
-  if (r.reason === 'No subscription')  return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
-  if (r.reason === 'Name mismatch')    return `Answer client "${r.client}" doesn't match ChargeOver company "${r.coCompany}".`;
+  if (r.reason === 'Matched')            return 'Answer and ChargeOver agree on plan and bill day.';
+  if (r.reason === 'Plan mismatch')      return `Answer allotted ${r.csvPlan ?? '?'} min; ChargeOver plan is ${r.coPlan ?? '?'} min.`;
+  if (r.reason === 'Bill day mismatch')  return `Answer bills on day ${r.csvBillDay ?? '?'}; ChargeOver next invoice is day ${r.coBillDay ?? '?'}.`;
+  if (r.reason === 'No subscription')    return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
+  if (r.reason === 'Sales rep mismatch') return `HubSpot lists sales rep as "${r.hubspotSalesRep}", ChargeOver admin is "${r.coAdminName}".`;
+  if (r.reason === 'Name mismatch')      return `Answer client "${r.client}" doesn't match ChargeOver company "${r.coCompany}".`;
+  if (r.reason === 'Legacy')             return `Grandfathered — created in ChargeOver ${r.coCreatedAt || 'before the cutoff'} with no matching HubSpot deal. CRM-drift flags suppressed.`;
   return r.error || '';
 }
 
 const REASON_TONE = {
-  'Matched':           'ok',
-  'Plan mismatch':     'crit',
-  'Bill day mismatch': 'crit',
-  'No subscription':   'warn',
-  'Name mismatch':     'neutral',
-  'Skipped':           'neutral',
+  'Matched':             'ok',
+  'Plan mismatch':       'crit',
+  'Bill day mismatch':   'crit',
+  'No subscription':     'warn',
+  'Sales rep mismatch':  'warn',
+  'Name mismatch':       'neutral',
+  'Legacy':              'neutral',
+  'Skipped':             'neutral',
 };
 
 const REASON_OPTIONS = [
-  { value: 'all',                 label: 'All reasons' },
-  { value: 'Plan mismatch',       label: 'Plan mismatch' },
-  { value: 'Bill day mismatch',   label: 'Bill day mismatch' },
-  { value: 'No subscription',     label: 'No subscription' },
-  { value: 'Name mismatch',       label: 'Name mismatch' },
+  { value: 'all',                  label: 'All reasons' },
+  { value: 'Plan mismatch',        label: 'Plan mismatch' },
+  { value: 'Bill day mismatch',    label: 'Bill day mismatch' },
+  { value: 'No subscription',      label: 'No subscription' },
+  { value: 'Sales rep mismatch',   label: 'Sales rep mismatch' },
+  { value: 'Name mismatch',        label: 'Name mismatch' },
+  { value: 'Legacy',               label: 'Legacy (grandfathered)' },
 ];
 
 /* ─── CSV export (preserved) ───────────────────────────────────────── */
 
 function toCsv(rows) {
   const header = [
-    'Flagged','Reason',
+    'Flagged','Reason','Legacy',
     'Client (Answer)','Company (ChargeOver)','Name Match Score',
     'Plan Answer (Allotted)','Plan ChargeOver','Plan Mismatch',
     'Bill Day Answer','Bill Day ChargeOver','Bill Day Mismatch','ChargeOver Next Invoice',
     'ChargeOver Customer ID','Tenant (Answer)','Tenant (ChargeOver)',
+    'Sales Rep (ChargeOver)','Sales Rep (HubSpot)','Sales Rep Mismatch',
+    'HubSpot Deal ID','HubSpot Deal Name','HubSpot Deal Found',
+    'CO Created At',
     'Billing Category (Answer)','Billing Cycle (Answer)',
     'Used (Answer)','Total Calls (Answer)',
     'ChargeOver Sub Status','Error','ChargeOver URL',
@@ -73,11 +88,14 @@ function toCsv(rows) {
   for (const r of rows) {
     const co = r.chargeover || {};
     lines.push([
-      r.flagged ? 'FLAGGED' : '', r.reason,
+      r.flagged ? 'FLAGGED' : '', r.reason, yn(r.isLegacy),
       r.client, co.company || '', r.nameMatchScore ?? '',
       r.csvPlan ?? r.allotted, r.coPlan ?? '', yn(r.planMismatch),
       r.csvBillDay ?? '', r.coBillDay ?? '', yn(r.billDayMismatch), co.nextInvoiceDate || '',
       r.coCustomerId, r.clientType, co.tenant || '',
+      r.coAdminName || '', r.hubspotSalesRep || '', yn(r.salesRepMismatch),
+      r.hubspotDealId || '', r.hubspotDealName || '', yn(r.hubspotDealFound),
+      r.coCreatedAt || '',
       r.billingCategory, r.billingCycle,
       r.used, r.totalCalls,
       co.subStatus || '', r.error || '', co.url || '',
@@ -256,18 +274,23 @@ export default function MinuteAuditor() {
 
   const summary = useMemo(() => {
     const s = {
-      total: flat.length, audited: 0, flagged: 0, matched: 0, skipped: 0,
-      reasonNoSub: 0, reasonPlan: 0, reasonBillDay: 0, reasonName: 0,
+      total: flat.length, audited: 0, flagged: 0, matched: 0, skipped: 0, legacy: 0,
+      hubspotMatched: 0,
+      reasonPlan: 0, reasonBillDay: 0, reasonNoSub: 0,
+      reasonSalesRep: 0, reasonName: 0,
     };
     for (const r of flat) {
       if (r.skipped) { s.skipped++; continue; }
       s.audited++;
+      if (r.isLegacy) s.legacy++;
+      if (r.hubspotDealFound) s.hubspotMatched++;
       if (r.flagged) {
         s.flagged++;
-        if      (r.reason === 'No subscription')   s.reasonNoSub++;
-        else if (r.reason === 'Plan mismatch')     s.reasonPlan++;
-        else if (r.reason === 'Bill day mismatch') s.reasonBillDay++;
-        else if (r.reason === 'Name mismatch')     s.reasonName++;
+        if      (r.reason === 'Plan mismatch')       s.reasonPlan++;
+        else if (r.reason === 'Bill day mismatch')   s.reasonBillDay++;
+        else if (r.reason === 'No subscription')     s.reasonNoSub++;
+        else if (r.reason === 'Sales rep mismatch')  s.reasonSalesRep++;
+        else if (r.reason === 'Name mismatch')       s.reasonName++;
       } else if (r.active === true) {
         s.matched++;
       }
@@ -416,16 +439,18 @@ export default function MinuteAuditor() {
             <div>
               <div className="ma-attn-eyebrow ma-attn-eyebrow--sub">Why they flagged</div>
               <div className="ma-reason-bar">
-                {summary.reasonPlan    > 0 && <div style={{ flex: summary.reasonPlan,    background: 'var(--crit-600)' }} title={`Plan mismatch (${summary.reasonPlan})`} />}
-                {summary.reasonBillDay > 0 && <div style={{ flex: summary.reasonBillDay, background: 'var(--crit-500)' }} title={`Bill day mismatch (${summary.reasonBillDay})`} />}
-                {summary.reasonNoSub   > 0 && <div style={{ flex: summary.reasonNoSub,   background: 'var(--warn-500)' }} title={`No subscription (${summary.reasonNoSub})`} />}
-                {summary.reasonName    > 0 && <div style={{ flex: summary.reasonName,    background: 'var(--ink-300)' }} title={`Name mismatch (${summary.reasonName})`} />}
+                {summary.reasonPlan     > 0 && <div style={{ flex: summary.reasonPlan,     background: 'var(--crit-600)' }} title={`Plan mismatch (${summary.reasonPlan})`} />}
+                {summary.reasonBillDay  > 0 && <div style={{ flex: summary.reasonBillDay,  background: 'var(--crit-500)' }} title={`Bill day mismatch (${summary.reasonBillDay})`} />}
+                {summary.reasonNoSub    > 0 && <div style={{ flex: summary.reasonNoSub,    background: 'var(--warn-500)' }} title={`No subscription (${summary.reasonNoSub})`} />}
+                {summary.reasonSalesRep > 0 && <div style={{ flex: summary.reasonSalesRep, background: 'var(--warn-600)' }} title={`Sales rep mismatch (${summary.reasonSalesRep})`} />}
+                {summary.reasonName     > 0 && <div style={{ flex: summary.reasonName,     background: 'var(--ink-300)' }} title={`Name mismatch (${summary.reasonName})`} />}
               </div>
               <div className="ma-reason-legend">
-                <LegendChip color="var(--crit-600)" label="Plan mismatch"     n={summary.reasonPlan} />
-                <LegendChip color="var(--crit-500)" label="Bill day mismatch" n={summary.reasonBillDay} />
-                <LegendChip color="var(--warn-500)" label="No subscription"   n={summary.reasonNoSub} />
-                <LegendChip color="var(--ink-300)" label="Name mismatch"      n={summary.reasonName} />
+                <LegendChip color="var(--crit-600)" label="Plan mismatch"      n={summary.reasonPlan} />
+                <LegendChip color="var(--crit-500)" label="Bill day mismatch"  n={summary.reasonBillDay} />
+                <LegendChip color="var(--warn-500)" label="No subscription"    n={summary.reasonNoSub} />
+                <LegendChip color="var(--warn-600)" label="Sales rep mismatch" n={summary.reasonSalesRep} />
+                <LegendChip color="var(--ink-300)" label="Name mismatch"       n={summary.reasonName} />
               </div>
             </div>
           )}
@@ -436,6 +461,10 @@ export default function MinuteAuditor() {
             value={`${summary.reconciledPct}%`} tone="ok" hint={String(summary.matched)} />
           <Tile eyebrow="Flagged" sub={summary.flagged > 0 ? 'need review' : 'nothing to review'}
             value={String(summary.flagged)} tone={summary.flagged > 0 ? 'crit' : undefined} />
+          {summary.legacy > 0 && (
+            <Tile eyebrow="Legacy" sub={`pre-2020, no HubSpot deal`}
+              value={String(summary.legacy)} hint={summary.hubspotMatched > 0 ? `${summary.hubspotMatched} matched` : undefined} />
+          )}
           <Tile eyebrow="Skipped" sub="INTERNAL / TRIAL / FREE"
             value={String(summary.skipped)} />
         </div>
@@ -609,6 +638,18 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols }) {
               <DetailField label="Bill day (ChargeOver)"
                 value={r.coBillDay != null ? ordinal(r.coBillDay) : '—'}
                 sub={r.chargeover?.nextInvoiceDate ? `next invoice ${r.chargeover.nextInvoiceDate}` : null} />
+              <DetailField label="Sales rep (ChargeOver)"
+                value={r.coAdminName || '—'}
+                sub={r.coAdminEmail || null} />
+              {r.hubspotDealFound ? (
+                <DetailField label="Sales rep (HubSpot)"
+                  value={r.hubspotSalesRep || '—'}
+                  sub={r.salesRepMismatch ? 'differs from ChargeOver' : `deal: ${r.hubspotDealName}`} />
+              ) : (
+                <DetailField label="HubSpot deal"
+                  value={r.isLegacy ? 'none (legacy)' : 'no matching deal'}
+                  sub={r.coCreatedAt ? `CO customer since ${r.coCreatedAt}` : null} />
+              )}
               <DetailField label="ChargeOver customer"
                 value={r.coCustomerId || '—'} mono
                 sub={r.resolvedTenant || null} />
@@ -617,6 +658,11 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols }) {
                 {r.coUrl && (
                   <Button variant="secondary" onClick={(e) => { e.stopPropagation(); window.open(r.coUrl, '_blank', 'noopener,noreferrer'); }}>
                     Open in ChargeOver ↗
+                  </Button>
+                )}
+                {r.hubspotDealId && (
+                  <Button variant="secondary" onClick={(e) => { e.stopPropagation(); window.open(`https://app.hubspot.com/contacts/*/deal/${r.hubspotDealId}`, '_blank', 'noopener,noreferrer'); }}>
+                    Open deal in HubSpot ↗
                   </Button>
                 )}
               </div>
