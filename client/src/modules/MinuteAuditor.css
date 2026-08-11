@@ -344,6 +344,16 @@ body.dark .ma-brand-mark { filter: invert(1) brightness(1.1); }
   color: var(--crit-700);
   font-weight: var(--fw-semibold);
 }
+.ma-group-clickable { cursor: pointer; user-select: none; }
+.ma-group-clickable:hover td { background: rgba(124,58,237,0.08); }
+.ma-group-caret {
+  display: inline-block;
+  width: 18px;
+  font-size: 10px;
+  color: var(--violet-600);
+  margin-right: 4px;
+  transition: transform var(--dur-fast) var(--ease);
+}
 
 .ma-row-parent td { background: rgba(26,111,232,0.04); }
 .ma-row-parent .ma-cell-name { font-weight: var(--fw-semibold); }

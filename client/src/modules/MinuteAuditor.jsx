@@ -135,6 +135,16 @@ export default function MinuteAuditor() {
   const [density, setDensity] = useState('compact');
   const [showAllCols, setShowAllCols] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
+  const [collapsedCategories, setCollapsedCategories] = useState(() => new Set());
+
+  const toggleCategory = useCallback((key) => {
+    setCollapsedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
   const [sort, setSort] = useState({ key: 'client', dir: 'asc' });
   const readerRef = useRef(null);
 
@@ -389,11 +399,12 @@ export default function MinuteAuditor() {
     return [...groupsMap.values()];
   }, [sorted, tab]);
 
-  // Group by CSV Billing Category for the "By category" tab. Rollup counts
-  // per category (total, flagged, matched, legacy) surface in the header
-  // so ops can eyeball where the pain is without expanding groups.
+  // Group by CSV Billing Category for the "By category" and "Needs
+  // attention" tabs. Rollup counts per category (total, flagged, matched,
+  // legacy) surface in the header so ops can eyeball where the pain is
+  // without expanding groups.
   const categoryGroups = useMemo(() => {
-    if (tab !== 'category') return null;
+    if (tab !== 'category' && tab !== 'attention') return null;
     const groupsMap = new Map();
     for (const r of sorted) {
       const cat = String(r.billingCategory || 'UNCATEGORIZED').toUpperCase();
@@ -598,6 +609,14 @@ export default function MinuteAuditor() {
           <Select value={reasonFilter} onChange={e => setReasonFilter(e.target.value)} options={REASON_OPTIONS} />
         </div>
         <div className="ma-filter-spacer" />
+        {(tab === 'attention' || tab === 'category') && categoryGroups && categoryGroups.length > 0 && (
+          <Button variant="secondary" size="sm" onClick={() => {
+            const anyExpanded = categoryGroups.some(g => !collapsedCategories.has(g.key));
+            setCollapsedCategories(anyExpanded ? new Set(categoryGroups.map(g => g.key)) : new Set());
+          }}>
+            {categoryGroups.some(g => !collapsedCategories.has(g.key)) ? 'Collapse all' : 'Expand all'}
+          </Button>
+        )}
         <Button variant="secondary" size="sm" onClick={() => setShowAllCols(v => !v)}>
           {showAllCols ? 'Hide extra columns' : 'Show all columns'}
         </Button>
@@ -701,31 +720,37 @@ export default function MinuteAuditor() {
                     </React.Fragment>
                   );
                 })
-              ) : tab === 'category' ? (
-                categoryGroups.map(g => (
-                  <React.Fragment key={g.key}>
-                    <tr className="ma-group-header ma-group-header--category">
-                      <td colSpan={colCount}>
-                        <div className="ma-group-title-row">
-                          <div>
-                            <div className="ma-group-title">{g.category}</div>
-                            <div className="ma-group-meta">
-                              {g.total} account{g.total === 1 ? '' : 's'}
-                              {g.flagged > 0 && <> · <span className="ma-group-flagged">{g.flagged} flagged</span></>}
-                              {g.matched > 0 && ` · ${g.matched} matched`}
-                              {g.legacy  > 0 && ` · ${g.legacy} legacy`}
+              ) : (tab === 'category' || tab === 'attention') ? (
+                categoryGroups.map(g => {
+                  const collapsed = collapsedCategories.has(g.key);
+                  return (
+                    <React.Fragment key={g.key}>
+                      <tr className="ma-group-header ma-group-header--category ma-group-clickable" onClick={() => toggleCategory(g.key)}>
+                        <td colSpan={colCount}>
+                          <div className="ma-group-title-row">
+                            <div>
+                              <div className="ma-group-title">
+                                <span className="ma-group-caret" aria-hidden="true">{collapsed ? '▶' : '▼'}</span>
+                                {g.category}
+                              </div>
+                              <div className="ma-group-meta">
+                                {g.total} account{g.total === 1 ? '' : 's'}
+                                {g.flagged > 0 && <> · <span className="ma-group-flagged">{g.flagged} flagged</span></>}
+                                {g.matched > 0 && ` · ${g.matched} matched`}
+                                {g.legacy  > 0 && ` · ${g.legacy} legacy`}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </td>
-                    </tr>
-                    {g.rows.map(r => (
-                      <TableRow key={r.id} r={r} expanded={expandedId === r.id}
-                        onToggle={() => setExpandedId(id => id === r.id ? null : r.id)}
-                        colCount={colCount} showAllCols={showAllCols} tab={tab} />
-                    ))}
-                  </React.Fragment>
-                ))
+                        </td>
+                      </tr>
+                      {!collapsed && g.rows.map(r => (
+                        <TableRow key={r.id} r={r} expanded={expandedId === r.id}
+                          onToggle={() => setExpandedId(id => id === r.id ? null : r.id)}
+                          colCount={colCount} showAllCols={showAllCols} tab={tab} />
+                      ))}
+                    </React.Fragment>
+                  );
+                })
               ) : sorted.map(r => (
                 <TableRow key={r.id} r={r} expanded={expandedId === r.id}
                   onToggle={() => setExpandedId(id => id === r.id ? null : r.id)}
