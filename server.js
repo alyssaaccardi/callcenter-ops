@@ -5627,6 +5627,18 @@ function resolveInPrefetched(prefetched, tenantHint, coId, hintName) {
   } else {
     winner = candidates[0];
   }
+  // Hard-miss guard: when the CSV supplied a name and the winner's company is
+  // completely unrelated, treat as "wrong id". Otherwise the CSV row would
+  // reconcile against an unrelated customer (Neil Flit's canceled sub
+  // producing a bogus Plan mismatch against F.L.A.C. Services, etc.). 0.3 is
+  // well below NAME_MATCH_THRESHOLD (0.7) — d/b/a and rename variations still
+  // pass through and hit the normal name-mismatch flag; only true unrelated
+  // customers get rejected here.
+  const HARD_MISS_THRESHOLD = 0.3;
+  if (hintName && winner.cust.company) {
+    const winnerScore = nameMatchScore(hintName, winner.cust.company);
+    if (winnerScore < HARD_MISS_THRESHOLD) return null;
+  }
   const t = winner.t, data = winner.data, cust = winner.cust;
   const subs = data.packagesByCustomer.get(id) || [];
   const activeSub   = subs.find(s => s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
@@ -6038,18 +6050,23 @@ async function runMinuteAuditorJob(jobId, rows) {
           result.nameMatchScore = Math.round(score * 100) / 100;
           result.nameMismatch = score < NAME_MATCH_THRESHOLD;
         }
-        // Plan check — CSV Allotted vs CO subscription custom_2
-        result.csvPlan = parseNumericPlan(row.allotted);
-        result.coPlan  = parseNumericPlan(co.planMinutes);
-        if (result.csvPlan != null && result.coPlan != null) {
-          result.planMismatch = result.csvPlan !== result.coPlan;
-        }
-        // Bill-date check — CSV cycle day (1st / 15th) vs the CO subscription
-        // bill anchor day (from holduntil_datetime).
+        // Plan + bill-day checks. Values populated for display regardless, but
+        // the mismatch flag only fires when the CO sub is ACTIVE. A canceled
+        // sub's custom_2 / next_invoice_datetime are stale — comparing a live
+        // CSV plan to a dead sub's plan produces bogus "Plan mismatch" flags
+        // (the real issue is that the sub is canceled, which is surfaced by
+        // the usage-issue branch further down).
+        result.csvPlan    = parseNumericPlan(row.allotted);
+        result.coPlan     = parseNumericPlan(co.planMinutes);
         result.csvBillDay = parseCycleDay(row.billingCycle);
         result.coBillDay  = parseInvoiceDay(co.billAnchorDate);
-        if (result.csvBillDay != null && result.coBillDay != null) {
-          result.billDayMismatch = result.csvBillDay !== result.coBillDay;
+        if (result.active === true) {
+          if (result.csvPlan != null && result.coPlan != null) {
+            result.planMismatch = result.csvPlan !== result.coPlan;
+          }
+          if (result.csvBillDay != null && result.coBillDay != null) {
+            result.billDayMismatch = result.csvBillDay !== result.coBillDay;
+          }
         }
         // HubSpot cross-check — match CO customer to a PAID deal by superuser
         // name ↔ dealname. Only meaningful when a match is found.
