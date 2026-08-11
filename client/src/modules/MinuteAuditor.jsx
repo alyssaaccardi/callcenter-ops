@@ -37,6 +37,11 @@ function computeReason(r) {
   if (notInCO || r.active !== true) return 'No subscription';
   if (r.isLegacy && r.nameMismatch) return 'Legacy';
   if (r.nameMismatch)     return 'Name mismatch';
+  // HubSpot cross-check flags. These only fire when a HubSpot deal was
+  // matched — no false negatives from missing HubSpot coverage.
+  if (r.previouslyPayingMissing)            return 'Previously paying unchecked';
+  if (r.hsVsCoMismatch && !r.isLegacy)      return 'HubSpot name mismatch';
+  if (r.salesRepMismatch && !r.isLegacy)    return 'Sales rep mismatch';
   if (r.isLegacy)         return 'Legacy';
   return 'Matched';
 }
@@ -48,32 +53,41 @@ function describeReason(r) {
   if (r.reason === 'No subscription')    return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
   if (r.reason === 'Zero usage')         return `Zero minutes and zero calls this cycle in Answer, but the ChargeOver subscription is still active — the customer likely deactivated in Answer or never went live, and CO wasn't caught up.`;
   if (r.reason === 'Trial with active sub') return `Answer marks this account as TRIAL, but ChargeOver has an active subscription. Trials shouldn't be paying — either Answer needs to update to STANDARD or ChargeOver needs to end the trial.`;
-  if (r.reason === 'Name mismatch')      return `Answer client "${r.client}" doesn't match ChargeOver company "${r.coCompany}".`;
+  if (r.reason === 'Name mismatch')      return `Answer client "${r.client}" doesn't match ChargeOver company "${r.chargeover?.company || ''}".`;
+  if (r.reason === 'HubSpot name mismatch') return `ChargeOver company "${r.chargeover?.company || ''}" doesn't match the HubSpot deal "${r.hubspotName || ''}". HubSpot is source of truth — update ChargeOver to match.`;
+  if (r.reason === 'Sales rep mismatch') return `HubSpot lists rep "${r.hubspotSalesRep || '?'}" but ChargeOver has "${r.coAdminName || '?'}". HubSpot is source of truth — update ChargeOver.`;
+  if (r.reason === 'Previously paying unchecked') return `Customer has a canceled subscription AND an active one in ChargeOver (returning customer), but "Previously Paying Customer" isn't checked on the HubSpot deal.`;
   if (r.reason === 'Legacy')             return `Grandfathered — ${r.legacyReason || 'created before the cutoff'}. Name-drift flags suppressed; billing flags stay live.`;
   return r.error || '';
 }
 
 const REASON_TONE = {
-  'Matched':                'ok',
-  'Trial with active sub':  'crit',
-  'Plan mismatch':          'crit',
-  'Bill day mismatch':      'crit',
-  'Zero usage':             'crit',
-  'No subscription':        'warn',
-  'Name mismatch':          'neutral',
-  'Legacy':                 'neutral',
-  'Skipped':                'neutral',
+  'Matched':                       'ok',
+  'Trial with active sub':         'crit',
+  'Plan mismatch':                 'crit',
+  'Bill day mismatch':             'crit',
+  'Zero usage':                    'crit',
+  'No subscription':               'warn',
+  'Name mismatch':                 'neutral',
+  'HubSpot name mismatch':         'warn',
+  'Sales rep mismatch':            'warn',
+  'Previously paying unchecked':   'warn',
+  'Legacy':                        'neutral',
+  'Skipped':                       'neutral',
 };
 
 const REASON_OPTIONS = [
-  { value: 'all',                     label: 'All reasons' },
-  { value: 'Trial with active sub',   label: 'Trial with active sub' },
-  { value: 'Plan mismatch',           label: 'Plan mismatch' },
-  { value: 'Bill day mismatch',       label: 'Bill day mismatch' },
-  { value: 'Zero usage',              label: 'Zero usage, active sub' },
-  { value: 'No subscription',         label: 'No subscription' },
-  { value: 'Name mismatch',           label: 'Name mismatch' },
-  { value: 'Legacy',                  label: 'Legacy (grandfathered)' },
+  { value: 'all',                          label: 'All reasons' },
+  { value: 'Trial with active sub',        label: 'Trial with active sub' },
+  { value: 'Plan mismatch',                label: 'Plan mismatch' },
+  { value: 'Bill day mismatch',            label: 'Bill day mismatch' },
+  { value: 'Zero usage',                   label: 'Zero usage, active sub' },
+  { value: 'No subscription',              label: 'No subscription' },
+  { value: 'Name mismatch',                label: 'Name mismatch (Answer↔CO)' },
+  { value: 'HubSpot name mismatch',        label: 'HubSpot name mismatch (CO↔HS)' },
+  { value: 'Sales rep mismatch',           label: 'Sales rep mismatch (HubSpot↔CO)' },
+  { value: 'Previously paying unchecked',  label: 'Previously paying unchecked (HS)' },
+  { value: 'Legacy',                       label: 'Legacy (grandfathered)' },
 ];
 
 /* ─── CSV export (preserved) ───────────────────────────────────────── */
@@ -87,6 +101,7 @@ function toCsv(rows) {
     'Bill Day Answer','Bill Day ChargeOver','Bill Day Mismatch','ChargeOver Next Invoice',
     'ChargeOver Customer ID','Tenant (Answer)','Tenant (ChargeOver)',
     'Sales Rep — HubSpot (source of truth)','Sales Rep — ChargeOver (to update on mismatch)','Sales Rep Mismatch',
+    'HubSpot Name Mismatch (CO↔HS)','Return Customer (CO)','Previously Paying Checked (HS)','Previously Paying Unchecked',
     'HubSpot Deal ID','HubSpot Deal Name','HubSpot Deal Found',
     'CO Created At',
     'Billing Category (Answer)','Billing Cycle (Answer)',
@@ -109,6 +124,7 @@ function toCsv(rows) {
       r.csvBillDay ?? '', r.coBillDay ?? '', yn(r.billDayMismatch), co.nextInvoiceDate || '',
       r.coCustomerId, r.clientType, co.tenant || '',
       r.hubspotSalesRep || '', r.coAdminName || '', yn(r.salesRepMismatch),
+      yn(r.hsVsCoMismatch), yn(r.previouslyPayingRequired), yn(r.previouslyPayingChecked), yn(r.previouslyPayingMissing),
       r.hubspotDealId || '', r.hubspotDealName || '', yn(r.hubspotDealFound),
       r.coCreatedAt || '',
       r.billingCategory, r.billingCycle,
@@ -318,12 +334,15 @@ export default function MinuteAuditor() {
       }
       if (r.flagged) {
         s.flagged++;
-        if      (r.reason === 'Trial with active sub') s.reasonTrial++;
-        else if (r.reason === 'Plan mismatch')         s.reasonPlan++;
-        else if (r.reason === 'Bill day mismatch')     s.reasonBillDay++;
-        else if (r.reason === 'Zero usage')            s.reasonZeroUsage++;
-        else if (r.reason === 'No subscription')       s.reasonNoSub++;
-        else if (r.reason === 'Name mismatch')         s.reasonName++;
+        if      (r.reason === 'Trial with active sub')       s.reasonTrial++;
+        else if (r.reason === 'Plan mismatch')               s.reasonPlan++;
+        else if (r.reason === 'Bill day mismatch')           s.reasonBillDay++;
+        else if (r.reason === 'Zero usage')                  s.reasonZeroUsage++;
+        else if (r.reason === 'No subscription')             s.reasonNoSub++;
+        else if (r.reason === 'Name mismatch')               s.reasonName++;
+        else if (r.reason === 'HubSpot name mismatch')       s.reasonHsName = (s.reasonHsName || 0) + 1;
+        else if (r.reason === 'Sales rep mismatch')          s.reasonSalesRep = (s.reasonSalesRep || 0) + 1;
+        else if (r.reason === 'Previously paying unchecked') s.reasonPrevPaying = (s.reasonPrevPaying || 0) + 1;
       } else if (r.active === true) {
         s.matched++;
       }
@@ -911,6 +930,12 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole
               <DetailField label={r.salesRepMismatch ? 'Sales rep (ChargeOver) — update to match' : 'Sales rep (ChargeOver)'}
                 value={r.coAdminName || '—'}
                 sub={r.coAdminEmail || null} />
+
+              {r.previouslyPayingRequired && (
+                <DetailField label={r.previouslyPayingMissing ? 'Previously paying (HubSpot) — needs to be checked' : 'Previously paying (HubSpot)'}
+                  value={r.previouslyPayingChecked ? 'Checked ✓' : (r.previouslyPayingProp ? 'Not checked' : 'Property not found')}
+                  sub="Customer has a canceled and a separate active subscription in CO" />
+              )}
 
               <DetailField label="ChargeOver customer"
                 value={r.coCustomerId || '—'} mono

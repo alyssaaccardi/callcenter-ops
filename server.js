@@ -5580,6 +5580,13 @@ function resolveInPrefetched(prefetched, tenantHint, coId) {
     const activeSub   = subs.find(s => s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
     const canceledSub = subs.find(s => s.package_status_str === 'canceled-manual');
     const sub = activeSub || canceledSub || subs[0] || null;
+    // "Return customer" = ≥1 canceled package AND ≥1 separate active package
+    // on the same CO account. Signals they churned then re-signed. Different
+    // package_ids so parent/child concurrency doesn't false-positive.
+    const canceledPkgs = subs.filter(s => s.package_status_str === 'canceled-manual');
+    const activePkgs   = subs.filter(s => s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
+    const isReturnCustomer = canceledPkgs.length >= 1 && activePkgs.length >= 1
+      && canceledPkgs.some(c => activePkgs.every(a => String(a.package_id) !== String(c.package_id)));
     // Look up the parent customer (if any) from the same prefetch map so
     // MULTIPLE-category rows can group by their parent (see the MULTIPLE
     // tab in the client). Also check the parent's subscription status —
@@ -5624,6 +5631,7 @@ function resolveInPrefetched(prefetched, tenantHint, coId) {
       parentCustomerId:   parentId,
       parentCompany:      parent?.company || null,
       parentHasActiveSub,
+      isReturnCustomer,
       url: cust.url_self || null,
     };
   }
@@ -5714,22 +5722,59 @@ async function fetchHubspotOwners(token) {
   return owners;
 }
 
+// Discover the deal property that holds the "previously paying customer" flag.
+// The internal name isn't standardized across HubSpot portals, so we list every
+// deal property once and look for a name/label match. Cached per process.
+let hubspotPreviouslyPayingProp = undefined;
+async function discoverPreviouslyPayingProperty(token) {
+  if (hubspotPreviouslyPayingProp !== undefined) return hubspotPreviouslyPayingProp;
+  try {
+    const resp = await axios.get('https://api.hubapi.com/crm/v3/properties/deals', {
+      headers: { Authorization: 'Bearer ' + token },
+      timeout: 15000,
+    });
+    for (const p of resp.data.results || []) {
+      const nm  = String(p.name  || '').toLowerCase();
+      const lbl = String(p.label || '').toLowerCase();
+      if (nm.includes('previously_paying') || lbl.includes('previously paying') ||
+          nm.includes('previous_paying')  || lbl.includes('previous paying')) {
+        hubspotPreviouslyPayingProp = p.name;
+        return p.name;
+      }
+    }
+  } catch (e) {
+    console.warn('[minute-auditor] could not list HubSpot deal properties:', e.response?.data?.message || e.message);
+  }
+  hubspotPreviouslyPayingProp = null;
+  return null;
+}
+
+// Normalize HubSpot's boolean serialization (varies: true, "true", "Yes", 1).
+function hsTruthy(v) {
+  if (v === true || v === 1) return true;
+  const s = String(v ?? '').trim().toLowerCase();
+  return s === 'true' || s === 'yes' || s === '1' || s === 'y';
+}
+
 async function prefetchHubspotPaidDeals(progressCb) {
   const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
   if (!token) return null;
+  const previouslyPayingProp = await discoverPreviouslyPayingProperty(token);
   const dealByPerson  = new Map();   // norm(dealname) → deal (superuser fallback)
   const dealByCompany = new Map();   // firm-key → deal (primary match path)
   const allDeals      = [];          // every record, for post-fetch owner resolution
   let after;
   let count = 0;
   while (true) {
+    const properties = ['dealname', 'sales_rep', 'hubspot_owner_id', 'company_name', 'account_name', 'chargeover_package_customer_id', 'createdate'];
+    if (previouslyPayingProp) properties.push(previouslyPayingProp);
     const body = {
       filterGroups: [{ filters: [
         { propertyName: 'pipeline',  operator: 'EQ', value: HS_ONBOARDING_PIPELINE },
         { propertyName: 'dealstage', operator: 'EQ', value: HS_ONBOARDING_PAID_STAGE },
       ] }],
       limit: 100,
-      properties: ['dealname', 'sales_rep', 'hubspot_owner_id', 'company_name', 'account_name', 'chargeover_package_customer_id', 'createdate'],
+      properties,
       after,
     };
     const resp = await axios.post(
@@ -5749,6 +5794,7 @@ async function prefetchHubspotPaidDeals(progressCb) {
         accountName:  d.properties.account_name || null,
         coCustomerId: d.properties.chargeover_package_customer_id || null,
         createdAt:    (d.properties.createdate || '').slice(0, 10) || null,
+        previouslyPaying: previouslyPayingProp ? hsTruthy(d.properties[previouslyPayingProp]) : null,
       };
       allDeals.push(record);
       const personKey = normPersonName(d.properties.dealname);
@@ -5784,7 +5830,7 @@ async function prefetchHubspotPaidDeals(progressCb) {
   const dealDates = allDeals.map(d => d.createdAt).filter(Boolean).sort();
   const earliestDealDate = dealDates[0] || null;
 
-  return { dealByPerson, dealByCompany, earliestDealDate };
+  return { dealByPerson, dealByCompany, earliestDealDate, previouslyPayingProp };
 }
 
 // Parse "1st (03/01/2026 - 03/12/2026)" or "15th (...)" → day of month integer.
@@ -5963,6 +6009,26 @@ async function runMinuteAuditorJob(jobId, rows) {
               ? known.every(s => s >= NAME_MATCH_THRESHOLD)
               : null;   // not enough names to judge
             result.nameThreeWaySources = known.length;
+
+            // ── HubSpot flags now feed the main flag pipeline (was
+            // informational-only). Three checks with a matched deal:
+            //   1. CO company vs HubSpot company must match (CO is what we
+            //      bill; HubSpot is what sales sold — they should agree).
+            //   2. Sales rep in CO must match HubSpot (source of truth).
+            //   3. Return customers (canceled + separate active in CO) must
+            //      have "previously paying customer" checked on the deal.
+            result.hsVsCoMismatch = sCoHs != null && sCoHs < NAME_MATCH_THRESHOLD;
+
+            result.previouslyPayingProp     = prefetched.hubspot.previouslyPayingProp || null;
+            result.previouslyPayingRequired = co.isReturnCustomer === true;
+            result.previouslyPayingChecked  = deal.previouslyPaying === true;
+            // Only flag when the property exists in HubSpot AND we required it
+            // AND it wasn't checked. When the property couldn't be discovered
+            // we can't judge — leave the flag off rather than false-positive
+            // every return customer.
+            result.previouslyPayingMissing  = !!result.previouslyPayingProp
+              && result.previouslyPayingRequired
+              && deal.previouslyPaying !== true;
           }
         }
         // Legacy grandfathering — purely date-based, on two independent
@@ -6024,9 +6090,15 @@ async function runMinuteAuditorJob(jobId, rows) {
       if (result.billDayMismatch)     result.flagReasons.push('Bill day mismatch');
       if (result.nameMismatch && !result.isLegacy) result.flagReasons.push('Name mismatch');
     }
-    // HubSpot never flags a row. The cross-check lives entirely in the HubSpot
-    // tab as its own read on the data (3-way account-name agreement + sales
-    // rep for reference); the core audit stays Answer ↔ ChargeOver only.
+    // HubSpot cross-check flags apply to every category (including TRIAL and
+    // MANUAL) once a deal is matched. Legacy accounts still suppress CRM-drift
+    // flags but a missing "previously paying" tick is a data-entry gap that
+    // legacy status shouldn't excuse.
+    if (result.hubspotDealFound) {
+      if (result.hsVsCoMismatch && !result.isLegacy)  result.flagReasons.push('HubSpot name mismatch');
+      if (result.salesRepMismatch && !result.isLegacy) result.flagReasons.push('Sales rep mismatch');
+      if (result.previouslyPayingMissing)              result.flagReasons.push('Previously paying unchecked');
+    }
     result.flagged = result.flagReasons.length > 0;
 
     job.results.push(result);
