@@ -35,8 +35,9 @@ function computeReason(r) {
   if (r.zeroUsageActiveSub) return 'Zero usage';
   const notInCO = r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
   if (notInCO || r.active !== true) return 'No subscription';
-  if (r.isLegacy && r.nameMismatch) return 'Legacy';
-  if (r.nameMismatch)     return 'Name mismatch';
+  // CSV(Answer)↔CO name divergence is informational only — the required
+  // name check is CO↔HubSpot, evaluated below. The alias display in the
+  // row cell still calls out the divergence for context.
   // HubSpot cross-check flags. These only fire when a HubSpot deal was
   // matched — no false negatives from missing HubSpot coverage.
   if (r.previouslyPayingMissing)            return 'Previously paying unchecked';
@@ -53,7 +54,6 @@ function describeReason(r) {
   if (r.reason === 'No subscription')    return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
   if (r.reason === 'Zero usage')         return `Zero minutes and zero calls this cycle in Answer, but the ChargeOver subscription is still active — the customer likely deactivated in Answer or never went live, and CO wasn't caught up.`;
   if (r.reason === 'Trial with active sub') return `Answer marks this account as TRIAL, but ChargeOver has an active subscription. Trials shouldn't be paying — either Answer needs to update to STANDARD or ChargeOver needs to end the trial.`;
-  if (r.reason === 'Name mismatch')      return `Answer client "${r.client}" doesn't match ChargeOver company "${r.chargeover?.company || ''}".`;
   if (r.reason === 'HubSpot name mismatch') return `ChargeOver company "${r.chargeover?.company || ''}" doesn't match the HubSpot deal "${r.hubspotName || ''}". HubSpot is source of truth — update ChargeOver to match.`;
   if (r.reason === 'Sales rep mismatch') return `HubSpot Deal Owner is "${r.hubspotSalesRepEmail || r.hubspotSalesRep || '?'}" but the ChargeOver salesperson field is "${r.coSalesperson || '?'}". HubSpot is source of truth — update ChargeOver.`;
   if (r.reason === 'Previously paying unchecked') return `Customer has a canceled subscription AND an active one in ChargeOver (returning customer), but "Previously Paying Customer" isn't checked on the HubSpot deal.`;
@@ -68,7 +68,6 @@ const REASON_TONE = {
   'Bill day mismatch':             'crit',
   'Zero usage':                    'crit',
   'No subscription':               'warn',
-  'Name mismatch':                 'neutral',
   'HubSpot name mismatch':         'warn',
   'Sales rep mismatch':            'warn',
   'Previously paying unchecked':   'warn',
@@ -83,7 +82,6 @@ const REASON_OPTIONS = [
   { value: 'Bill day mismatch',            label: 'Bill day mismatch' },
   { value: 'Zero usage',                   label: 'Zero usage, active sub' },
   { value: 'No subscription',              label: 'No subscription' },
-  { value: 'Name mismatch',                label: 'Name mismatch (Answer↔CO)' },
   { value: 'HubSpot name mismatch',        label: 'HubSpot name mismatch (CO↔HS)' },
   { value: 'Sales rep mismatch',           label: 'Sales rep mismatch (HubSpot↔CO)' },
   { value: 'Previously paying unchecked',  label: 'Previously paying unchecked (HS)' },
@@ -319,7 +317,7 @@ export default function MinuteAuditor() {
     const s = {
       total: flat.length, audited: 0, flagged: 0, matched: 0, skipped: 0, legacy: 0,
       hubspotMatched: 0, multiple: 0,
-      reasonTrial: 0, reasonPlan: 0, reasonBillDay: 0, reasonZeroUsage: 0, reasonNoSub: 0, reasonName: 0,
+      reasonTrial: 0, reasonPlan: 0, reasonBillDay: 0, reasonZeroUsage: 0, reasonNoSub: 0,
       hubspotNameAgree: 0, hubspotNameDisagree: 0,
     };
     for (const r of flat) {
@@ -339,7 +337,6 @@ export default function MinuteAuditor() {
         else if (r.reason === 'Bill day mismatch')           s.reasonBillDay++;
         else if (r.reason === 'Zero usage')                  s.reasonZeroUsage++;
         else if (r.reason === 'No subscription')             s.reasonNoSub++;
-        else if (r.reason === 'Name mismatch')               s.reasonName++;
         else if (r.reason === 'HubSpot name mismatch')       s.reasonHsName = (s.reasonHsName || 0) + 1;
         else if (r.reason === 'Sales rep mismatch')          s.reasonSalesRep = (s.reasonSalesRep || 0) + 1;
         else if (r.reason === 'Previously paying unchecked') s.reasonPrevPaying = (s.reasonPrevPaying || 0) + 1;
@@ -579,7 +576,6 @@ export default function MinuteAuditor() {
                 {summary.reasonBillDay    > 0 && <div style={{ flex: summary.reasonBillDay,    background: 'var(--crit-500)' }} title={`Bill day mismatch (${summary.reasonBillDay})`} />}
                 {summary.reasonZeroUsage  > 0 && <div style={{ flex: summary.reasonZeroUsage,  background: 'var(--crit-700)' }} title={`Zero usage, active sub (${summary.reasonZeroUsage})`} />}
                 {summary.reasonNoSub      > 0 && <div style={{ flex: summary.reasonNoSub,      background: 'var(--warn-500)' }} title={`No subscription (${summary.reasonNoSub})`} />}
-                {summary.reasonName       > 0 && <div style={{ flex: summary.reasonName,       background: 'var(--ink-300)' }} title={`Name mismatch (${summary.reasonName})`} />}
                 {summary.reasonHsName     > 0 && <div style={{ flex: summary.reasonHsName,     background: 'var(--warn-100)' }} title={`HubSpot name mismatch (${summary.reasonHsName})`} />}
                 {summary.reasonSalesRep   > 0 && <div style={{ flex: summary.reasonSalesRep,   background: 'var(--ink-500)' }} title={`Sales rep mismatch (${summary.reasonSalesRep})`} />}
                 {summary.reasonPrevPaying > 0 && <div style={{ flex: summary.reasonPrevPaying, background: 'var(--warn-700)' }} title={`Previously paying unchecked (${summary.reasonPrevPaying})`} />}
@@ -590,7 +586,6 @@ export default function MinuteAuditor() {
                 <LegendChip color="var(--crit-500)" label="Bill day mismatch"        n={summary.reasonBillDay} />
                 <LegendChip color="var(--crit-700)" label="Zero usage, active sub"   n={summary.reasonZeroUsage} />
                 <LegendChip color="var(--warn-500)" label="No subscription"          n={summary.reasonNoSub} />
-                <LegendChip color="var(--ink-300)" label="Name mismatch"             n={summary.reasonName} />
                 {summary.reasonHsName     > 0 && <LegendChip color="var(--warn-100)" label="HubSpot name mismatch"    n={summary.reasonHsName} />}
                 {summary.reasonSalesRep   > 0 && <LegendChip color="var(--ink-500)" label="Sales rep mismatch"       n={summary.reasonSalesRep} />}
                 {summary.reasonPrevPaying > 0 && <LegendChip color="var(--warn-700)" label="Previously paying unchecked" n={summary.reasonPrevPaying} />}

@@ -6235,7 +6235,10 @@ async function runMinuteAuditorJob(jobId, rows) {
       if (result.zeroUsageActiveSub)  result.flagReasons.push('Zero usage');
       if (result.planMismatch && !isMultiple) result.flagReasons.push('Plan mismatch');
       if (result.billDayMismatch)     result.flagReasons.push('Bill day mismatch');
-      if (result.nameMismatch && !result.isLegacy) result.flagReasons.push('Name mismatch');
+      // CSV(Answer)<->CO name divergence is informational only. Answer's display
+      // name and the CO company can legitimately differ (d/b/a, rename, legal
+      // entity vs client-facing name). The name check that matters is
+      // CO<->HubSpot, handled below in the HubSpot cross-check block.
     }
     // HubSpot cross-check flags apply to every category (including TRIAL and
     // MANUAL) once a deal is matched. Legacy accounts still suppress CRM-drift
