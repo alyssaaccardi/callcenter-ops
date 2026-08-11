@@ -439,6 +439,7 @@ export default function MinuteAuditor() {
   if (view === 'running') {
     const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
     const isPrefetch = progress.phase === 'prefetching';
+    const isVerify   = progress.phase === 'verifying';
     return (
       <div className="ma-root">
         <PageHead subtitle="Comparing Answer usage against ChargeOver…" />
@@ -446,16 +447,20 @@ export default function MinuteAuditor() {
           <div className="ma-run-label">
             {isPrefetch
               ? 'Loading ChargeOver customer & subscription data…'
-              : <>Matching Answer rows against ChargeOver… <b>{progress.done}</b> / {progress.total}</>
+              : isVerify
+                ? <>Verifying plan mismatches against invoices…</>
+                : <>Matching Answer rows against ChargeOver… <b>{progress.done}</b> / {progress.total}</>
             }
           </div>
-          <div className={`ma-progress${isPrefetch ? ' ma-progress--indeterminate' : ''}`}>
-            <div className="ma-progress-fill" style={isPrefetch ? undefined : { width: `${pct}%` }} />
+          <div className={`ma-progress${(isPrefetch || isVerify) ? ' ma-progress--indeterminate' : ''}`}>
+            <div className="ma-progress-fill" style={(isPrefetch || isVerify) ? undefined : { width: `${pct}%` }} />
           </div>
           <div className="ma-run-hint">
             {isPrefetch && progress.prefetch && Object.keys(progress.prefetch).length > 0
               ? Object.entries(progress.prefetch).map(([k, v]) => `${k}: ${v}`).join(' · ')
-              : 'Streaming results as each row is resolved.'}
+              : isVerify
+                ? 'Re-checking each flagged row against its most recent CO invoice to filter out stale package data.'
+                : 'Streaming results as each row is resolved.'}
           </div>
         </Card>
       </div>

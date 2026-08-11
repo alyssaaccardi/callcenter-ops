@@ -6032,8 +6032,68 @@ async function runMinuteAuditorJob(jobId, rows) {
     job.results.push(result);
     job.done++;
   }
+
+  // ── Phase 3: verify plan mismatches against invoice line items ──
+  // `custom_2` on the CO package is a manually-entered field that goes
+  // stale (e.g. Comfortable Carla's says 120 there, but the actual invoice
+  // line reads "100 minutes -"). The truth lives in the most recent
+  // invoice's base recurring line-item description. Only re-verify rows
+  // we already flagged for plan mismatch — bounded and targeted.
+  const toVerify = job.results.filter(r =>
+    r.planMismatch && r.coCustomerId && r.chargeover?.tenant);
+  if (toVerify.length > 0) {
+    job.phase = 'verifying';
+    job.verifyTotal = toVerify.length;
+    job.verifyDone  = 0;
+    const CONCURRENCY_VERIFY = 3;
+    for (let i = 0; i < toVerify.length; i += CONCURRENCY_VERIFY) {
+      await Promise.all(toVerify.slice(i, i + CONCURRENCY_VERIFY).map(async (r) => {
+        try {
+          const truePlan = await fetchInvoicePlanMinutes(r.chargeover.tenant, r.coCustomerId);
+          if (truePlan != null) {
+            r.coPlan = truePlan;
+            r.planVerifiedFromInvoice = true;
+            const csvPlanNum = r.csvPlan;
+            if (csvPlanNum != null && csvPlanNum === truePlan) {
+              // Now matches — remove the Plan mismatch flag.
+              r.planMismatch = false;
+              const idx = r.flagReasons.indexOf('Plan mismatch');
+              if (idx >= 0) r.flagReasons.splice(idx, 1);
+              r.flagged = r.flagReasons.length > 0;
+            }
+          }
+        } catch { /* leave the pre-verification value in place */ }
+        job.verifyDone++;
+      }));
+    }
+  }
+
   job.status = 'done';
   job.finishedAt = Date.now();
+}
+
+// Look up a customer's true plan by parsing the "N minutes" prefix from
+// the base recurring line item on their most recent invoice. Two API
+// calls: one to find the newest invoice id, one to pull its line items.
+async function fetchInvoicePlanMinutes(tenant, customerId) {
+  const list = await chargeoverGet(tenant, '/invoice', {
+    where: `customer_id:EQUALS:${customerId}`,
+    order: 'invoice_date:desc',
+    limit: 3,
+  });
+  if (!Array.isArray(list) || list.length === 0) return null;
+  // Some months a customer only has an overage-only invoice; walk back
+  // a few invoices to find one that carries a base recurring line.
+  for (const summary of list) {
+    const full = await chargeoverGet(tenant, `/invoice/${summary.invoice_id}`);
+    const lines = full?.line_items || [];
+    const base = lines.find(l => l.is_base && l.is_recurring)
+              || lines.find(l => l.is_recurring);
+    if (!base) continue;
+    const m = String(base.descrip || '').match(/^\s*(\d+)\s*minutes?\b/i);
+    if (m) return parseInt(m[1], 10);
+  }
+  return null;
 }
 
 app.post('/api/minute-auditor/upload', requireRole(...MINUTE_AUDITOR_ROLES), minuteAuditorUpload.single('file'), (req, res) => {
