@@ -5640,7 +5640,8 @@ const MINUTE_AUDITOR_LEGACY_CUTOFF = '2020-01-01';
 async function prefetchHubspotPaidDeals(progressCb) {
   const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
   if (!token) return null;
-  const map = new Map();  // norm(dealname) → { dealId, dealName, salesRep }
+  const dealByName = new Map();  // norm(dealname) → { dealId, dealName, salesRep }
+  const activeRepSet = new Set();  // unique salesperson names across PAID deals
   let after;
   let count = 0;
   while (true) {
@@ -5660,12 +5661,13 @@ async function prefetchHubspotPaidDeals(progressCb) {
     );
     for (const d of resp.data.results || []) {
       const key = normPersonName(d.properties.dealname);
-      if (key) map.set(key, {
+      if (key) dealByName.set(key, {
         dealId:       d.id,
         dealName:     d.properties.dealname,
         salesRep:     d.properties.sales_rep || null,
         coCustomerId: d.properties.chargeover_package_customer_id || null,
       });
+      if (d.properties.sales_rep) activeRepSet.add(d.properties.sales_rep);
       count++;
     }
     progressCb?.(count);
@@ -5673,7 +5675,18 @@ async function prefetchHubspotPaidDeals(progressCb) {
     after = resp.data.paging.next.after;
     await new Promise(r => setTimeout(r, 100));
   }
-  return map;
+  return { dealByName, activeRepNames: [...activeRepSet] };
+}
+
+// True if `name` fuzzy-matches ANY current HubSpot sales rep. Used to detect
+// "former staff" — CO admins whose accounts should be grandfathered because
+// they're no longer selling.
+function isCurrentHubspotRep(name, activeRepNames) {
+  if (!name || !activeRepNames) return false;
+  for (const rep of activeRepNames) {
+    if (salesRepsMatch(name, rep) === true) return true;
+  }
+  return false;
 }
 
 // Parse "1st (03/01/2026 - 03/12/2026)" or "15th (...)" → day of month integer.
@@ -5744,7 +5757,7 @@ async function runMinuteAuditorJob(jobId, rows) {
   for (const row of rows) {
     const cat = String(row.billingCategory || '').toUpperCase();
     if (MINUTE_AUDITOR_SKIP_CATEGORIES.has(cat)) {
-      job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true, flagged: false, nameMismatch: false, nameMatchScore: null, isLegacy: false, hubspotDealFound: false });
+      job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true, flagged: false, nameMismatch: false, nameMatchScore: null, isLegacy: false, legacyReason: null, hubspotDealFound: false });
       job.done++;
       continue;
     }
@@ -5758,7 +5771,7 @@ async function runMinuteAuditorJob(jobId, rows) {
       // HubSpot cross-check fields
       hubspotDealFound: false, hubspotDealId: null, hubspotDealName: null, hubspotSalesRep: null,
       coAdminName: null, coAdminEmail: null, coCreatedAt: null,
-      salesRepMismatch: false, isLegacy: false,
+      salesRepMismatch: false, isLegacy: false, legacyReason: null,
     };
     if (!row.coCustomerId) {
       result.error = 'No COCustomerId';
@@ -5794,7 +5807,7 @@ async function runMinuteAuditorJob(jobId, rows) {
         result.coAdminEmail = co.adminEmail;
         result.coCreatedAt  = co.createdAt;
         if (prefetched.hubspot && co.superuserName) {
-          const deal = prefetched.hubspot.get(normPersonName(co.superuserName));
+          const deal = prefetched.hubspot.dealByName.get(normPersonName(co.superuserName));
           if (deal) {
             result.hubspotDealFound = true;
             result.hubspotDealId    = deal.dealId;
@@ -5805,12 +5818,22 @@ async function runMinuteAuditorJob(jobId, rows) {
             result.salesRepMismatch = repsMatch === false;
           }
         }
-        // Legacy grandfathering — created in CO before the cutoff AND no
-        // HubSpot linkage. Suppresses name + sales-rep flags for these rows,
-        // but keeps real billing flags (plan / bill-day / no active sub).
-        result.isLegacy = !!co.createdAt
-          && co.createdAt < MINUTE_AUDITOR_LEGACY_CUTOFF
-          && !result.hubspotDealFound;
+        // Legacy grandfathering — two triggers:
+        //   1. Created before the cutoff AND we couldn't link a HubSpot deal.
+        //   2. The CO admin isn't a current HubSpot sales rep — "former staff"
+        //      whose accounts were never reassigned. That's the majority of
+        //      the noise: ~21% of AL customers fall in this bucket
+        //      (Thomas Lombardo, Tyler Indelicato, etc.).
+        // Both suppress name + sales-rep flags but keep billing flags live.
+        const activeReps = prefetched.hubspot?.activeRepNames || null;
+        const preCutoff = !!co.createdAt && co.createdAt < MINUTE_AUDITOR_LEGACY_CUTOFF && !result.hubspotDealFound;
+        const formerStaff = !!co.adminName && !isCurrentHubspotRep(co.adminName, activeReps);
+        result.isLegacy = preCutoff || formerStaff;
+        result.legacyReason = formerStaff
+          ? `admin "${co.adminName}" is no longer a HubSpot sales rep`
+          : preCutoff
+            ? `created in ChargeOver ${co.createdAt}, before the ${MINUTE_AUDITOR_LEGACY_CUTOFF} cutoff, with no matching HubSpot deal`
+            : null;
       }
     }
 

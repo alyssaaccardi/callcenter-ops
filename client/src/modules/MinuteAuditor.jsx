@@ -38,7 +38,7 @@ function describeReason(r) {
   if (r.reason === 'No subscription')    return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
   if (r.reason === 'Sales rep mismatch') return `HubSpot (source of truth) has "${r.hubspotSalesRep}". Update ChargeOver admin from "${r.coAdminName}".`;
   if (r.reason === 'Name mismatch')      return `Answer client "${r.client}" doesn't match ChargeOver company "${r.coCompany}".`;
-  if (r.reason === 'Legacy')             return `Grandfathered — created in ChargeOver ${r.coCreatedAt || 'before the cutoff'} with no matching HubSpot deal. CRM-drift flags suppressed.`;
+  if (r.reason === 'Legacy')             return `Grandfathered — ${r.legacyReason || 'created before the cutoff with no matching HubSpot deal'}. CRM-drift flags suppressed; billing flags stay live.`;
   return r.error || '';
 }
 
@@ -462,7 +462,7 @@ export default function MinuteAuditor() {
           <Tile eyebrow="Flagged" sub={summary.flagged > 0 ? 'need review' : 'nothing to review'}
             value={String(summary.flagged)} tone={summary.flagged > 0 ? 'crit' : undefined} />
           {summary.legacy > 0 && (
-            <Tile eyebrow="Legacy" sub={`pre-2020, no HubSpot deal`}
+            <Tile eyebrow="Legacy" sub="pre-2020 or former-staff CO admin"
               value={String(summary.legacy)} hint={summary.hubspotMatched > 0 ? `${summary.hubspotMatched} matched` : undefined} />
           )}
           <Tile eyebrow="Skipped" sub="INTERNAL / TRIAL / FREE"
