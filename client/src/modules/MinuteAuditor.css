@@ -399,3 +399,16 @@ body.dark .ma-brand-mark { filter: invert(1) brightness(1.1); }
   padding-top: 4px;
   border-top: 1px solid var(--border);
 }
+
+/* Three-way name agreement cell (HubSpot tab) — badge over pairwise scores. */
+.ma-name3 {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.ma-name3 .ma-cell-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}

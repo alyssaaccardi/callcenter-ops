@@ -5692,7 +5692,6 @@ async function prefetchHubspotPaidDeals(progressCb) {
   const dealByPerson  = new Map();   // norm(dealname) → deal (superuser fallback)
   const dealByCompany = new Map();   // firm-key → deal (primary match path)
   const allDeals      = [];          // every record, for post-fetch owner resolution
-  const activeRepSet  = new Set();
   let after;
   let count = 0;
   while (true) {
@@ -5749,8 +5748,6 @@ async function prefetchHubspotPaidDeals(progressCb) {
     if (o) { rec.ownerName = o.name; rec.ownerActive = o.isActive; }
     rec.rep       = rec.ownerName || rec.salesRep || null;
     rec.repSource = rec.ownerName ? 'deal owner' : (rec.salesRep ? 'sales_rep property' : null);
-    // A rep counts as current unless HubSpot says the owner is deactivated.
-    if (rec.rep && rec.ownerActive !== false) activeRepSet.add(rec.rep);
   }
 
   // HubSpot's coverage floor: the oldest deal it knows about. ChargeOver
@@ -5759,18 +5756,7 @@ async function prefetchHubspotPaidDeals(progressCb) {
   const dealDates = allDeals.map(d => d.createdAt).filter(Boolean).sort();
   const earliestDealDate = dealDates[0] || null;
 
-  return { dealByPerson, dealByCompany, activeRepNames: [...activeRepSet], earliestDealDate };
-}
-
-// True if `name` fuzzy-matches ANY current HubSpot sales rep. Used to detect
-// "former staff" — CO admins whose accounts should be grandfathered because
-// they're no longer selling.
-function isCurrentHubspotRep(name, activeRepNames) {
-  if (!name || !activeRepNames) return false;
-  for (const rep of activeRepNames) {
-    if (salesRepsMatch(name, rep) === true) return true;
-  }
-  return false;
+  return { dealByPerson, dealByCompany, earliestDealDate };
 }
 
 // Parse "1st (03/01/2026 - 03/12/2026)" or "15th (...)" → day of month integer.
@@ -5917,15 +5903,36 @@ async function runMinuteAuditorJob(jobId, rows) {
             result.hubspotDealName     = deal.dealName;
             result.hubspotDealCompany  = deal.companyName || deal.accountName || null;
             // Deal Owner is the sales rep of record; sales_rep is the fallback
-            // for deals with no owner. Both are HubSpot, both are truth — a
-            // mismatch means ChargeOver's admin needs updating to match.
+            // for deals with no owner. Informational only — the sales rep does
+            // NOT flag a row. See the flag aggregation below.
             result.hubspotSalesRep     = deal.rep;
             result.hubspotRepSource    = deal.repSource;
             result.hubspotOwnerActive  = deal.ownerActive;
             result.hubspotMatchedBy    = matchedBy;
             const repsMatch = salesRepsMatch(deal.rep, co.adminName);
-            // Only mark mismatched when we have both names to compare.
             result.salesRepMismatch = repsMatch === false;
+
+            // ── The HubSpot tab's actual job: does the account name agree in
+            // all three systems? Answer (CSV) ↔ ChargeOver ↔ HubSpot. Same
+            // fuzzy scorer and threshold as the core CSV↔CO name check, so
+            // "match" means the same thing everywhere. Each pair is null when
+            // either side is missing a name — unknown, not mismatched.
+            const pairScore = (a, b) => (a && b) ? Math.round(nameMatchScore(a, b) * 100) / 100 : null;
+            const hsName = result.hubspotDealCompany || deal.dealName || null;
+            const sAnswerCo = pairScore(row.client, co.company);
+            const sCoHs     = pairScore(co.company,  hsName);
+            const sAnswerHs = pairScore(row.client,  hsName);
+            result.hubspotName        = hsName;
+            result.nameScoreAnswerCo  = sAnswerCo;
+            result.nameScoreCoHs      = sCoHs;
+            result.nameScoreAnswerHs  = sAnswerHs;
+            const pairs = [sAnswerCo, sCoHs, sAnswerHs];
+            const known = pairs.filter(s => s != null);
+            // All three agree only when every comparable pair clears the bar.
+            result.nameAllThreeMatch = known.length === 3
+              ? known.every(s => s >= NAME_MATCH_THRESHOLD)
+              : null;   // not enough names to judge
+            result.nameThreeWaySources = known.length;
           }
         }
         // Legacy grandfathering — purely date-based, on two independent
@@ -5962,7 +5969,9 @@ async function runMinuteAuditorJob(jobId, rows) {
     if (result.planMismatch)    result.flagReasons.push('Plan mismatch');
     if (result.billDayMismatch) result.flagReasons.push('Bill day mismatch');
     if (result.nameMismatch    && !result.isLegacy) result.flagReasons.push('Name mismatch');
-    if (result.salesRepMismatch && !result.isLegacy) result.flagReasons.push('Sales rep mismatch');
+    // HubSpot never flags a row. The cross-check lives entirely in the HubSpot
+    // tab as its own read on the data (3-way account-name agreement + sales
+    // rep for reference); the core audit stays Answer ↔ ChargeOver only.
     result.flagged = result.flagReasons.length > 0;
 
     job.results.push(result);

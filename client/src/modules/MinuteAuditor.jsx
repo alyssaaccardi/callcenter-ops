@@ -13,9 +13,12 @@ function fmtNum(v) {
 }
 
 // The two mismatches this audit actually cares about — plan and bill day.
-// Everything else is secondary. Legacy grandfathering demotes name and
-// sales-rep mismatches to informational for pre-2020 customers with no
-// matching HubSpot deal.
+// Everything else is secondary. Legacy grandfathering demotes name mismatches
+// to informational for customers created before the cutoff.
+//
+// HubSpot is deliberately absent here. It never contributes a reason and never
+// flags a row; it lives entirely in its own tab. The core audit is
+// Answer ↔ ChargeOver only.
 function computeReason(r) {
   if (r.skipped) return 'Skipped';
   // Real billing issues always take precedence over CRM drift.
@@ -24,8 +27,7 @@ function computeReason(r) {
   const notInCO = r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
   if (notInCO || r.active !== true) return 'No subscription';
   // Legacy customers with only CRM-drift issues get the "Legacy" label.
-  if (r.isLegacy && (r.nameMismatch || r.salesRepMismatch)) return 'Legacy';
-  if (r.salesRepMismatch) return 'Sales rep mismatch';
+  if (r.isLegacy && r.nameMismatch) return 'Legacy';
   if (r.nameMismatch)     return 'Name mismatch';
   if (r.isLegacy)         return 'Legacy';
   return 'Matched';
@@ -36,9 +38,8 @@ function describeReason(r) {
   if (r.reason === 'Plan mismatch')      return `Answer allotted ${r.csvPlan ?? '?'} min; ChargeOver plan is ${r.coPlan ?? '?'} min.`;
   if (r.reason === 'Bill day mismatch')  return `Answer bills on day ${r.csvBillDay ?? '?'}; ChargeOver next invoice is day ${r.coBillDay ?? '?'}.`;
   if (r.reason === 'No subscription')    return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
-  if (r.reason === 'Sales rep mismatch') return `HubSpot (source of truth) has "${r.hubspotSalesRep}". Update ChargeOver admin from "${r.coAdminName}".`;
   if (r.reason === 'Name mismatch')      return `Answer client "${r.client}" doesn't match ChargeOver company "${r.coCompany}".`;
-  if (r.reason === 'Legacy')             return `Grandfathered — ${r.legacyReason || 'created before the cutoff with no matching HubSpot deal'}. CRM-drift flags suppressed; billing flags stay live.`;
+  if (r.reason === 'Legacy')             return `Grandfathered — ${r.legacyReason || 'created before the cutoff'}. Name-drift flags suppressed; billing flags stay live.`;
   return r.error || '';
 }
 
@@ -47,7 +48,6 @@ const REASON_TONE = {
   'Plan mismatch':       'crit',
   'Bill day mismatch':   'crit',
   'No subscription':     'warn',
-  'Sales rep mismatch':  'warn',
   'Name mismatch':       'neutral',
   'Legacy':              'neutral',
   'Skipped':             'neutral',
@@ -58,7 +58,6 @@ const REASON_OPTIONS = [
   { value: 'Plan mismatch',        label: 'Plan mismatch' },
   { value: 'Bill day mismatch',    label: 'Bill day mismatch' },
   { value: 'No subscription',      label: 'No subscription' },
-  { value: 'Sales rep mismatch',   label: 'Sales rep mismatch' },
   { value: 'Name mismatch',        label: 'Name mismatch' },
   { value: 'Legacy',               label: 'Legacy (grandfathered)' },
 ];
@@ -68,7 +67,8 @@ const REASON_OPTIONS = [
 function toCsv(rows) {
   const header = [
     'Flagged','Reason','Legacy',
-    'Client (Answer)','Company (ChargeOver)','Name Match Score',
+    'Client (Answer)','Company (ChargeOver)','Account (HubSpot)','Name Match Score',
+    'Name Score Answer-CO','Name Score CO-HubSpot','Name Score Answer-HubSpot','All 3 Names Match',
     'Plan Answer (Allotted)','Plan ChargeOver','Plan Mismatch',
     'Bill Day Answer','Bill Day ChargeOver','Bill Day Mismatch','ChargeOver Next Invoice',
     'ChargeOver Customer ID','Tenant (Answer)','Tenant (ChargeOver)',
@@ -89,7 +89,8 @@ function toCsv(rows) {
     const co = r.chargeover || {};
     lines.push([
       r.flagged ? 'FLAGGED' : '', r.reason, yn(r.isLegacy),
-      r.client, co.company || '', r.nameMatchScore ?? '',
+      r.client, co.company || '', r.hubspotName || '', r.nameMatchScore ?? '',
+      r.nameScoreAnswerCo ?? '', r.nameScoreCoHs ?? '', r.nameScoreAnswerHs ?? '', yn(r.nameAllThreeMatch),
       r.csvPlan ?? r.allotted, r.coPlan ?? '', yn(r.planMismatch),
       r.csvBillDay ?? '', r.coBillDay ?? '', yn(r.billDayMismatch), co.nextInvoiceDate || '',
       r.coCustomerId, r.clientType, co.tenant || '',
@@ -276,20 +277,23 @@ export default function MinuteAuditor() {
     const s = {
       total: flat.length, audited: 0, flagged: 0, matched: 0, skipped: 0, legacy: 0,
       hubspotMatched: 0,
-      reasonPlan: 0, reasonBillDay: 0, reasonNoSub: 0,
-      reasonSalesRep: 0, reasonName: 0,
+      reasonPlan: 0, reasonBillDay: 0, reasonNoSub: 0, reasonName: 0,
+      hubspotNameAgree: 0, hubspotNameDisagree: 0,
     };
     for (const r of flat) {
       if (r.skipped) { s.skipped++; continue; }
       s.audited++;
       if (r.isLegacy) s.legacy++;
-      if (r.hubspotDealFound) s.hubspotMatched++;
+      if (r.hubspotDealFound) {
+        s.hubspotMatched++;
+        if      (r.nameAllThreeMatch === true)  s.hubspotNameAgree++;
+        else if (r.nameAllThreeMatch === false) s.hubspotNameDisagree++;
+      }
       if (r.flagged) {
         s.flagged++;
         if      (r.reason === 'Plan mismatch')       s.reasonPlan++;
         else if (r.reason === 'Bill day mismatch')   s.reasonBillDay++;
         else if (r.reason === 'No subscription')     s.reasonNoSub++;
-        else if (r.reason === 'Sales rep mismatch')  s.reasonSalesRep++;
         else if (r.reason === 'Name mismatch')       s.reasonName++;
       } else if (r.active === true) {
         s.matched++;
@@ -443,14 +447,12 @@ export default function MinuteAuditor() {
                 {summary.reasonPlan     > 0 && <div style={{ flex: summary.reasonPlan,     background: 'var(--crit-600)' }} title={`Plan mismatch (${summary.reasonPlan})`} />}
                 {summary.reasonBillDay  > 0 && <div style={{ flex: summary.reasonBillDay,  background: 'var(--crit-500)' }} title={`Bill day mismatch (${summary.reasonBillDay})`} />}
                 {summary.reasonNoSub    > 0 && <div style={{ flex: summary.reasonNoSub,    background: 'var(--warn-500)' }} title={`No subscription (${summary.reasonNoSub})`} />}
-                {summary.reasonSalesRep > 0 && <div style={{ flex: summary.reasonSalesRep, background: 'var(--warn-600)' }} title={`Sales rep mismatch (${summary.reasonSalesRep})`} />}
                 {summary.reasonName     > 0 && <div style={{ flex: summary.reasonName,     background: 'var(--ink-300)' }} title={`Name mismatch (${summary.reasonName})`} />}
               </div>
               <div className="ma-reason-legend">
                 <LegendChip color="var(--crit-600)" label="Plan mismatch"      n={summary.reasonPlan} />
                 <LegendChip color="var(--crit-500)" label="Bill day mismatch"  n={summary.reasonBillDay} />
                 <LegendChip color="var(--warn-500)" label="No subscription"    n={summary.reasonNoSub} />
-                <LegendChip color="var(--warn-600)" label="Sales rep mismatch" n={summary.reasonSalesRep} />
                 <LegendChip color="var(--ink-300)" label="Name mismatch"       n={summary.reasonName} />
               </div>
             </div>
@@ -508,16 +510,15 @@ export default function MinuteAuditor() {
                 </th>
                 {tab === 'hubspot' ? (
                   <>
-                    <th>HubSpot Deal</th>
-                    <th data-align="center">Sales Rep (HubSpot / CO)</th>
-                    <th>Reason</th>
+                    <th>Account name (HubSpot)</th>
+                    <th data-align="center">Name agreement</th>
                     <th data-align="right" onClick={() => clickSort('answer')} data-sortable data-active={sort.key === 'answer' || undefined}>
                       Used
                       {sort.key === 'answer' && <span className="ui-table__arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
                     </th>
                     {showAllCols && <th>Matched by</th>}
-                    {showAllCols && <th data-align="center">Plan (A / CO)</th>}
-                    {showAllCols && <th data-align="center">Bill day (A / CO)</th>}
+                    {showAllCols && <th data-align="center">Sales rep (HS / CO)</th>}
+                    {showAllCols && <th>Deal</th>}
                   </>
                 ) : (
                   <>
@@ -546,7 +547,7 @@ export default function MinuteAuditor() {
                       : tab === 'attention' && summary.flagged === 0
                         ? 'Every audited account agrees with ChargeOver.'
                         : tab === 'hubspot' && summary.hubspotMatched === 0
-                          ? 'No CSV rows resolved to a HubSpot deal in Onboarding 2 / PAID this run.'
+                          ? 'No CSV rows resolved to a HubSpot account in Onboarding 2 / PAID this run.'
                           : 'Try a different tab, or clear filters to widen the view.'}
                     actions={search || reasonFilter !== 'all' || tab !== 'attention'
                       ? <Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button>
@@ -638,19 +639,16 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab }) {
         {tab === 'hubspot' ? (
           <>
             <td>
-              <div className="ma-cell-name">{r.hubspotDealName || '—'}</div>
-              {r.hubspotDealCompany && (
-                <div className="ma-cell-meta">{r.hubspotDealCompany}</div>
+              <div className="ma-cell-name">{r.hubspotName || '—'}</div>
+              {r.hubspotDealName && r.hubspotDealName !== r.hubspotName && (
+                <div className="ma-cell-meta">deal: {r.hubspotDealName}</div>
               )}
             </td>
-            <td data-align="center">
-              <CompareCell csv={r.hubspotSalesRep} co={r.coAdminName} unit="" mismatch={r.salesRepMismatch} labels={{ csv: 'HS', co: 'CO' }} />
-            </td>
-            <td><ReasonPill reason={r.reason} /></td>
+            <td data-align="center"><NameAgreement r={r} /></td>
             <td data-align="right" data-num>{fmtNum(r.answer)}</td>
             {showAllCols && <td className="ma-cell-meta">{r.hubspotMatchedBy || '—'}</td>}
-            {showAllCols && <td data-align="center"><CompareCell csv={r.csvPlan} co={r.coPlan} unit=" min" mismatch={r.planMismatch} /></td>}
-            {showAllCols && <td data-align="center"><CompareCell csv={r.csvBillDay} co={r.coBillDay} unit="" ordinal mismatch={r.billDayMismatch} /></td>}
+            {showAllCols && <td data-align="center"><CompareCell csv={r.hubspotSalesRep} co={r.coAdminName} unit="" mismatch={r.salesRepMismatch} labels={{ csv: 'HS', co: 'CO' }} /></td>}
+            {showAllCols && <td className="ma-cell-meta">{r.hubspotDealId || '—'}</td>}
           </>
         ) : (
           <>
@@ -725,6 +723,40 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab }) {
 // Mismatched = two lines, both bold, second side in critical red.
 // Default labels are ANSWER / CO; override via `labels` for other pairs
 // (e.g. HubSpot rep vs CO admin uses HS / CO).
+/* Three-way account-name agreement: Answer (CSV) / ChargeOver / HubSpot.
+   This is the whole point of the HubSpot tab — it reports agreement and
+   never flags a row. Legacy rows are labelled so grandfathering stays
+   visible here even though nothing is suppressed. */
+function NameAgreement({ r }) {
+  const pairs = [
+    ['A↔CO', r.nameScoreAnswerCo],
+    ['CO↔HS', r.nameScoreCoHs],
+    ['A↔HS', r.nameScoreAnswerHs],
+  ];
+  const scores = (
+    <div className="ma-cell-meta">
+      {pairs.map(([l, v]) => `${l} ${v == null ? '—' : v.toFixed(2)}`).join('   ')}
+    </div>
+  );
+  if (r.nameAllThreeMatch == null) {
+    return (
+      <div className="ma-name3">
+        <Badge tone="neutral" size="sm">Not enough names</Badge>
+        {scores}
+      </div>
+    );
+  }
+  return (
+    <div className="ma-name3">
+      <Badge tone={r.nameAllThreeMatch ? 'ok' : 'crit'} size="sm">
+        {r.nameAllThreeMatch ? 'All 3 match' : 'Names differ'}
+      </Badge>
+      {r.isLegacy && <Badge tone="neutral" size="sm">Legacy</Badge>}
+      {scores}
+    </div>
+  );
+}
+
 function CompareCell({ csv, co, unit = '', ordinal: asOrd = false, mismatch, labels }) {
   const fmt = v => v == null || v === '' ? '—' : (asOrd ? ordinal(v) : v + unit);
   const csvS = fmt(csv);
