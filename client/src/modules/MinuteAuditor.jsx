@@ -701,7 +701,7 @@ export default function MinuteAuditor() {
                       : tab === 'attention' && summary.flagged === 0
                         ? 'Every audited account agrees with ChargeOver.'
                         : tab === 'hubspot' && summary.hubspotMatched === 0
-                          ? 'No CSV rows resolved to a HubSpot account in Onboarding 2 / PAID this run.'
+                          ? 'No CSV rows resolved to a HubSpot account that entered Onboarding 2 / PAID in the last 90 days.'
                           : 'Try a different tab, or clear filters to widen the view.'}
                     actions={search || reasonFilter !== 'all' || tab !== 'attention'
                       ? <Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button>
@@ -920,11 +920,12 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole
                   sub={[
                     r.hubspotRepSource ? `from ${r.hubspotRepSource}` : null,
                     r.hubspotOwnerActive === false ? 'owner deactivated' : null,
+                    r.hubspotPaidEnteredAt ? `moved to PAID ${r.hubspotPaidEnteredAt}` : null,
                     `deal: ${r.hubspotDealName}`,
                   ].filter(Boolean).join(' · ')} />
               ) : (
                 <DetailField label="HubSpot deal"
-                  value={r.isLegacy ? 'none (legacy)' : 'no matching deal'}
+                  value={r.isLegacy ? 'none (legacy)' : 'no matching deal in last 90 days'}
                   sub={r.coCreatedAt ? `CO customer since ${r.coCreatedAt}` : null} />
               )}
               <DetailField label={r.salesRepMismatch ? 'Sales rep (ChargeOver) — update to match' : 'Sales rep (ChargeOver)'}

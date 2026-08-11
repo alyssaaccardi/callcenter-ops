@@ -5756,6 +5756,12 @@ function hsTruthy(v) {
   return s === 'true' || s === 'yes' || s === '1' || s === 'y';
 }
 
+// Rolling window: only audit deals that entered the PAID stage within the last
+// N days. Older deals fall outside the HubSpot check entirely (no deal match →
+// no HS flags). Bounded so recent onboarding hygiene stays in focus and the
+// audit doesn't churn on stable long-standing customers.
+const MINUTE_AUDITOR_HUBSPOT_WINDOW_DAYS = 90;
+
 async function prefetchHubspotPaidDeals(progressCb) {
   const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
   if (!token) return null;
@@ -5763,15 +5769,19 @@ async function prefetchHubspotPaidDeals(progressCb) {
   const dealByPerson  = new Map();   // norm(dealname) → deal (superuser fallback)
   const dealByCompany = new Map();   // firm-key → deal (primary match path)
   const allDeals      = [];          // every record, for post-fetch owner resolution
+  const stageEnteredProp = `hs_date_entered_${HS_ONBOARDING_PAID_STAGE}`;
+  const windowCutoffMs = Date.now() - MINUTE_AUDITOR_HUBSPOT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  const windowCutoffDate = new Date(windowCutoffMs).toISOString().slice(0, 10);
   let after;
   let count = 0;
   while (true) {
-    const properties = ['dealname', 'hubspot_owner_id', 'company_name', 'account_name', 'chargeover_package_customer_id', 'createdate'];
+    const properties = ['dealname', 'hubspot_owner_id', 'company_name', 'account_name', 'chargeover_package_customer_id', 'createdate', stageEnteredProp];
     if (previouslyPayingProp) properties.push(previouslyPayingProp);
     const body = {
       filterGroups: [{ filters: [
-        { propertyName: 'pipeline',  operator: 'EQ', value: HS_ONBOARDING_PIPELINE },
-        { propertyName: 'dealstage', operator: 'EQ', value: HS_ONBOARDING_PAID_STAGE },
+        { propertyName: 'pipeline',  operator: 'EQ',  value: HS_ONBOARDING_PIPELINE },
+        { propertyName: 'dealstage', operator: 'EQ',  value: HS_ONBOARDING_PAID_STAGE },
+        { propertyName: stageEnteredProp, operator: 'GTE', value: String(windowCutoffMs) },
       ] }],
       limit: 100,
       properties,
@@ -5793,6 +5803,7 @@ async function prefetchHubspotPaidDeals(progressCb) {
         accountName:  d.properties.account_name || null,
         coCustomerId: d.properties.chargeover_package_customer_id || null,
         createdAt:    (d.properties.createdate || '').slice(0, 10) || null,
+        paidEnteredAt: (d.properties[stageEnteredProp] || '').slice(0, 10) || null,
         previouslyPaying: previouslyPayingProp ? hsTruthy(d.properties[previouslyPayingProp]) : null,
       };
       allDeals.push(record);
@@ -5824,13 +5835,17 @@ async function prefetchHubspotPaidDeals(progressCb) {
     rec.repSource = rec.ownerName ? 'deal owner' : null;
   }
 
-  // HubSpot's coverage floor: the oldest deal it knows about. ChargeOver
-  // customers created before this predate the CRM entirely, so their missing
-  // deal is an artifact of history rather than a data-entry gap.
-  const dealDates = allDeals.map(d => d.createdAt).filter(Boolean).sort();
-  const earliestDealDate = dealDates[0] || null;
-
-  return { dealByPerson, dealByCompany, earliestDealDate, previouslyPayingProp };
+  // The rolling window is the effective coverage floor: any customer whose
+  // deal moved to PAID before `windowCutoffDate` simply isn't in the prefetch
+  // and won't be cross-checked. The old `earliestDealDate` (oldest deal HS
+  // has) is no longer meaningful — we're intentionally not looking past the
+  // window.
+  return {
+    dealByPerson, dealByCompany, previouslyPayingProp,
+    windowCutoffDate,
+    windowDays: MINUTE_AUDITOR_HUBSPOT_WINDOW_DAYS,
+    dealCount: allDeals.length,
+  };
 }
 
 // Parse "1st (03/01/2026 - 03/12/2026)" or "15th (...)" → day of month integer.
@@ -5978,6 +5993,8 @@ async function runMinuteAuditorJob(jobId, rows) {
             result.hubspotDealId       = deal.dealId;
             result.hubspotDealName     = deal.dealName;
             result.hubspotDealCompany  = deal.companyName || deal.accountName || null;
+            result.hubspotPaidEnteredAt = deal.paidEnteredAt || null;
+            result.hubspotWindowDays    = prefetched.hubspot.windowDays || null;
             // Deal Owner is the sales rep of record; sales_rep is the fallback
             // for deals with no owner. Informational only — the sales rep does
             // NOT flag a row. See the flag aggregation below.
@@ -6031,27 +6048,20 @@ async function runMinuteAuditorJob(jobId, rows) {
               && deal.previouslyPaying !== true;
           }
         }
-        // Legacy grandfathering — purely date-based, on two independent
-        // boundaries. Whichever is later wins, and the reason records which
-        // one fired so ops can tell "the CRM can't know" from "the CRM knows
-        // but we don't trust it":
-        //   1. COVERAGE — older than HubSpot's oldest deal. No record can
-        //      exist that far back, so a missing deal is history, not a gap.
-        //   2. QUALITY  — inside the 2018-19 admin-churn window. Deals do
-        //      exist, but their rep assignments predate HubSpot being source
-        //      of truth, so a "mismatch" there is confident and wrong.
-        const coverageFloor = prefetched?.hubspot?.earliestDealDate || null;
-        const churnCutoff   = MINUTE_AUDITOR_LEGACY_CUTOFF;
-        const created       = co.createdAt || null;
-        const beforeCoverage = !!created && !!coverageFloor && created < coverageFloor;
-        const beforeChurn    = !!created && created < churnCutoff;
-        result.legacyCutoff = coverageFloor && coverageFloor > churnCutoff ? coverageFloor : churnCutoff;
-        result.isLegacy     = beforeCoverage || beforeChurn;
-        result.legacyReason = beforeCoverage
-          ? `created in ChargeOver ${created}, before HubSpot's oldest deal (${coverageFloor}) — the CRM has no record this far back`
-          : beforeChurn
-            ? `created in ChargeOver ${created}, before the ${churnCutoff} cutoff — 2018-19 admin churn, rep data predates HubSpot as source of truth`
-            : null;
+        // Legacy grandfathering — pre-churn-cutoff CO customers. Deals do
+        // exist for these but their rep assignments predate HubSpot being
+        // source of truth, so a "mismatch" there is confident and wrong.
+        // The old "coverage floor" branch (older than HubSpot's oldest deal)
+        // was retired when the HubSpot prefetch became a rolling 90-day
+        // window — coverage is now intentional scope, not historical gap.
+        const churnCutoff = MINUTE_AUDITOR_LEGACY_CUTOFF;
+        const created     = co.createdAt || null;
+        const beforeChurn = !!created && created < churnCutoff;
+        result.legacyCutoff = churnCutoff;
+        result.isLegacy     = beforeChurn;
+        result.legacyReason = beforeChurn
+          ? `created in ChargeOver ${created}, before the ${churnCutoff} cutoff — 2018-19 admin churn, rep data predates HubSpot as source of truth`
+          : null;
       }
     }
 
