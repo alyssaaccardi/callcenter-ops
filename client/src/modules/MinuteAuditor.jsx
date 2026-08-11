@@ -580,14 +580,20 @@ export default function MinuteAuditor() {
                 {summary.reasonZeroUsage  > 0 && <div style={{ flex: summary.reasonZeroUsage,  background: 'var(--crit-700)' }} title={`Zero usage, active sub (${summary.reasonZeroUsage})`} />}
                 {summary.reasonNoSub      > 0 && <div style={{ flex: summary.reasonNoSub,      background: 'var(--warn-500)' }} title={`No subscription (${summary.reasonNoSub})`} />}
                 {summary.reasonName       > 0 && <div style={{ flex: summary.reasonName,       background: 'var(--ink-300)' }} title={`Name mismatch (${summary.reasonName})`} />}
+                {summary.reasonHsName     > 0 && <div style={{ flex: summary.reasonHsName,     background: 'var(--warn-100)' }} title={`HubSpot name mismatch (${summary.reasonHsName})`} />}
+                {summary.reasonSalesRep   > 0 && <div style={{ flex: summary.reasonSalesRep,   background: 'var(--ink-500)' }} title={`Sales rep mismatch (${summary.reasonSalesRep})`} />}
+                {summary.reasonPrevPaying > 0 && <div style={{ flex: summary.reasonPrevPaying, background: 'var(--warn-700)' }} title={`Previously paying unchecked (${summary.reasonPrevPaying})`} />}
               </div>
               <div className="ma-reason-legend">
-                <LegendChip color="var(--warn-600)" label="Trial with active sub"  n={summary.reasonTrial} />
-                <LegendChip color="var(--crit-600)" label="Plan mismatch"          n={summary.reasonPlan} />
-                <LegendChip color="var(--crit-500)" label="Bill day mismatch"      n={summary.reasonBillDay} />
-                <LegendChip color="var(--crit-700)" label="Zero usage, active sub" n={summary.reasonZeroUsage} />
-                <LegendChip color="var(--warn-500)" label="No subscription"        n={summary.reasonNoSub} />
-                <LegendChip color="var(--ink-300)" label="Name mismatch"           n={summary.reasonName} />
+                <LegendChip color="var(--warn-600)" label="Trial with active sub"    n={summary.reasonTrial} />
+                <LegendChip color="var(--crit-600)" label="Plan mismatch"            n={summary.reasonPlan} />
+                <LegendChip color="var(--crit-500)" label="Bill day mismatch"        n={summary.reasonBillDay} />
+                <LegendChip color="var(--crit-700)" label="Zero usage, active sub"   n={summary.reasonZeroUsage} />
+                <LegendChip color="var(--warn-500)" label="No subscription"          n={summary.reasonNoSub} />
+                <LegendChip color="var(--ink-300)" label="Name mismatch"             n={summary.reasonName} />
+                {summary.reasonHsName     > 0 && <LegendChip color="var(--warn-100)" label="HubSpot name mismatch"    n={summary.reasonHsName} />}
+                {summary.reasonSalesRep   > 0 && <LegendChip color="var(--ink-500)" label="Sales rep mismatch"       n={summary.reasonSalesRep} />}
+                {summary.reasonPrevPaying > 0 && <LegendChip color="var(--warn-700)" label="Previously paying unchecked" n={summary.reasonPrevPaying} />}
               </div>
             </div>
           )}
@@ -600,7 +606,7 @@ export default function MinuteAuditor() {
             value={String(summary.flagged)} tone={summary.flagged > 0 ? 'crit' : undefined} />
           {summary.legacy > 0 && (
             <Tile eyebrow="Legacy" sub="created before 2020"
-              value={String(summary.legacy)} hint={summary.hubspotMatched > 0 ? `${summary.hubspotMatched} matched` : undefined} />
+              value={String(summary.legacy)} hint="name-drift flags suppressed" />
           )}
           <Tile eyebrow="Skipped" sub="INTERNAL / FREE"
             value={String(summary.skipped)} />
@@ -935,7 +941,9 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole
               {r.previouslyPayingRequired && (
                 <DetailField label={r.previouslyPayingMissing ? 'Previously paying (HubSpot) — needs to be checked' : 'Previously paying (HubSpot)'}
                   value={r.previouslyPayingChecked ? 'Checked ✓' : (r.previouslyPayingProp ? 'Not checked' : 'Property not found')}
-                  sub="Customer has a canceled and a separate active subscription in CO" />
+                  sub={r.returnCustomerLinkedTo
+                    ? `Linked to prior CO customer #${r.returnCustomerLinkedTo} (matched on ${String(r.returnCustomerMatchedBy || '').replace('_', ' ')})`
+                    : 'Customer has a canceled and a separate active subscription in CO'} />
               )}
 
               <DetailField label="ChargeOver customer"

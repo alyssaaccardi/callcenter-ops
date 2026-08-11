@@ -5564,78 +5564,161 @@ async function prefetchTenantData(tenant, progressCb) {
     list.push(p);
     packagesByCustomer.set(key, list);
   }
-  return { customerById, packagesByCustomer, counts: { customers: customers.length, packages: packages.length } };
+  // Cross-record "return customer" lookup: index every CO customer that has at
+  // least one canceled-manual package by three identity signals. Used from
+  // resolveInPrefetched to detect the case where a returning client got a whole
+  // new CO customer record instead of a new subscription on the old one —
+  // which the same-record check misses entirely.
+  const canceledBySuperuserEmail = new Map();
+  const canceledByAdminEmail     = new Map();
+  const canceledByCompanyKey     = new Map();
+  const pushIdx = (map, keyRaw, id) => {
+    const key = String(keyRaw || '').trim().toLowerCase();
+    if (!key) return;
+    const list = map.get(key) || [];
+    if (!list.includes(id)) list.push(id);
+    map.set(key, list);
+  };
+  for (const c of customers) {
+    const id = String(c.customer_id);
+    const pkgs = packagesByCustomer.get(id) || [];
+    if (!pkgs.some(p => p.package_status_str === 'canceled-manual')) continue;
+    pushIdx(canceledBySuperuserEmail, c.superuser_email, id);
+    pushIdx(canceledByAdminEmail,     c.admin_email,     id);
+    // Company key uses normalizeCompanyKey (already lowercased); pushIdx will
+    // re-lowercase harmlessly.
+    pushIdx(canceledByCompanyKey,     normalizeCompanyKey(c.company || ''), id);
+  }
+  return {
+    customerById, packagesByCustomer,
+    canceledBySuperuserEmail, canceledByAdminEmail, canceledByCompanyKey,
+    counts: { customers: customers.length, packages: packages.length },
+  };
 }
 
-function resolveInPrefetched(prefetched, tenantHint, coId) {
+function resolveInPrefetched(prefetched, tenantHint, coId, hintName) {
   const id = String(coId).trim();
   if (!id) return null;
-  const tenants = tenantHint && ['AL', 'RS'].includes(tenantHint) ? [tenantHint] : ['AL', 'RS'];
-  for (const t of tenants) {
-    const data = prefetched[t];
-    if (!data) continue;
-    const cust = data.customerById.get(id);
-    if (!cust) continue;
-    const subs = data.packagesByCustomer.get(id) || [];
-    const activeSub   = subs.find(s => s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
-    const canceledSub = subs.find(s => s.package_status_str === 'canceled-manual');
-    const sub = activeSub || canceledSub || subs[0] || null;
-    // "Return customer" = ≥1 canceled package AND ≥1 separate active package
-    // on the same CO account. Signals they churned then re-signed. Different
-    // package_ids so parent/child concurrency doesn't false-positive.
-    const canceledPkgs = subs.filter(s => s.package_status_str === 'canceled-manual');
-    const activePkgs   = subs.filter(s => s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
-    const isReturnCustomer = canceledPkgs.length >= 1 && activePkgs.length >= 1
-      && canceledPkgs.some(c => activePkgs.every(a => String(a.package_id) !== String(c.package_id)));
-    // Look up the parent customer (if any) from the same prefetch map so
-    // MULTIPLE-category rows can group by their parent (see the MULTIPLE
-    // tab in the client). Also check the parent's subscription status —
-    // a child shouldn't flag "No subscription" if their parent is the one
-    // actually paying.
-    const parentId = cust.parent_customer_id ? String(cust.parent_customer_id) : null;
-    const parent = parentId ? data.customerById.get(parentId) : null;
-    let parentHasActiveSub = false;
-    if (parent) {
-      const parentSubs = data.packagesByCustomer.get(parentId) || [];
-      parentHasActiveSub = parentSubs.some(s =>
-        s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
-    }
-
-    return {
-      tenant: t,
-      customerId: cust.customer_id,
-      company: cust.company || null,
-      email: cust.superuser_email || cust.email || null,
-      status: cust.customer_status_str || null,
-      subStatus: sub?.package_status_str || null,
-      canceledAt: sub?.cancel_datetime?.slice(0, 10) || null,
-      planMinutes: sub?.custom_2 ?? null,       // Allotted minutes plan
-      overageRate: sub?.custom_1 ?? null,       // $/min over plan
-      // Bill day comes from `next_invoice_datetime` — that's the day the
-      // subscription actually bills going forward. `holduntil_datetime` is
-      // the ORIGINAL hold date and doesn't update when a customer is later
-      // moved to a different billing day (e.g. package 672: hold anchored
-      // Feb 3 2015, current invoices land on the 1st). Falls back to
-      // `holduntil_datetime` only when next-invoice is unset (canceled subs).
-      billAnchorDate:  sub?.next_invoice_datetime || sub?.holduntil_datetime || null,
-      nextInvoiceDate: sub?.next_invoice_datetime || null,
-      // Sales-rep + linkage fields used by the HubSpot cross-check.
-      superuserName: [cust.superuser_first_name, cust.superuser_last_name].filter(Boolean).join(' ') || null,
-      adminName:     cust.admin_name  || null,
-      adminEmail:    cust.admin_email || null,
-      createdAt:     cust.write_datetime?.slice(0, 10) || null,
-      // Parent/child grouping for MULTIPLE accounts. parentCustomerId is
-      // null on parents (they have no parent) and populated on children.
-      // parentHasActiveSub suppresses the "No subscription" flag on
-      // children — if the parent is paying, the whole family is covered.
-      parentCustomerId:   parentId,
-      parentCompany:      parent?.company || null,
-      parentHasActiveSub,
-      isReturnCustomer,
-      url: cust.url_self || null,
-    };
+  // ChargeOver customer_ids overlap between AL and RS — the same numeric id
+  // exists in both tenants pointing to unrelated customers. Always look in
+  // both and pick the tenant whose company best matches the CSV client name.
+  // Previously we early-returned on the first hit (or on the hinted tenant),
+  // which surfaced the wrong customer whenever the CSV clientType pointed at
+  // the wrong tenant — that's the root cause of unexplained "Name mismatch"
+  // flags. tenantHint is now only a tiebreaker for the no-name case.
+  const candidates = [];
+  for (const tt of ['AL', 'RS']) {
+    const dd = prefetched[tt];
+    if (!dd) continue;
+    const cc = dd.customerById.get(id);
+    if (!cc) continue;
+    candidates.push({ t: tt, data: dd, cust: cc });
   }
-  return null;
+  if (candidates.length === 0) return null;
+  let winner;
+  if (candidates.length === 1) {
+    winner = candidates[0];
+  } else if (hintName) {
+    winner = candidates
+      .map(c => ({ c, s: c.cust.company ? nameMatchScore(hintName, c.cust.company) : 0 }))
+      .sort((a, b) => b.s - a.s)[0].c;
+  } else if (tenantHint && ['AL', 'RS'].includes(tenantHint)) {
+    winner = candidates.find(c => c.t === tenantHint) || candidates[0];
+  } else {
+    winner = candidates[0];
+  }
+  const t = winner.t, data = winner.data, cust = winner.cust;
+  const subs = data.packagesByCustomer.get(id) || [];
+  const activeSub   = subs.find(s => s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
+  const canceledSub = subs.find(s => s.package_status_str === 'canceled-manual');
+  const sub = activeSub || canceledSub || subs[0] || null;
+  // "Return customer" — two paths, either one is enough:
+  //   1. Same-record: ≥1 canceled + ≥1 active on THIS CO customer. Ops
+  //      added a new sub to the old record.
+  //   2. Cross-record: this customer has an active sub, and a *different*
+  //      CO customer (same tenant) with the same identity signal has a
+  //      canceled-manual sub. Ops opened a whole new CO record instead of
+  //      reusing the old one. Cascading match on superuser_email →
+  //      admin_email → normalized company (strong signal first shields
+  //      against company-name false positives).
+  const canceledPkgs = subs.filter(s => s.package_status_str === 'canceled-manual');
+  const activePkgs   = subs.filter(s => s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
+  const hasActive    = activePkgs.length >= 1;
+  const sameRecordReturn = canceledPkgs.length >= 1 && hasActive;
+
+  let returnCustomerLinkedTo = null;
+  let returnCustomerMatchedBy = null;
+  if (hasActive) {
+    const selfId = String(cust.customer_id);
+    const attempts = [
+      ['superuser_email', String(cust.superuser_email || '').trim().toLowerCase(), data.canceledBySuperuserEmail],
+      ['admin_email',     String(cust.admin_email     || '').trim().toLowerCase(), data.canceledByAdminEmail],
+      ['company_name',    normalizeCompanyKey(cust.company || ''),                data.canceledByCompanyKey],
+    ];
+    for (const [matchedBy, key, map] of attempts) {
+      if (!key || !map) continue;
+      const ids = map.get(key);
+      if (!ids) continue;
+      const otherId = ids.find(x => x !== selfId);
+      if (otherId) {
+        returnCustomerLinkedTo  = otherId;
+        returnCustomerMatchedBy = matchedBy;
+        break;
+      }
+    }
+  }
+  const isReturnCustomer = sameRecordReturn || !!returnCustomerLinkedTo;
+  // Look up the parent customer (if any) from the same prefetch map so
+  // MULTIPLE-category rows can group by their parent (see the MULTIPLE
+  // tab in the client). Also check the parent's subscription status —
+  // a child shouldn't flag "No subscription" if their parent is the one
+  // actually paying.
+  const parentId = cust.parent_customer_id ? String(cust.parent_customer_id) : null;
+  const parent = parentId ? data.customerById.get(parentId) : null;
+  let parentHasActiveSub = false;
+  if (parent) {
+    const parentSubs = data.packagesByCustomer.get(parentId) || [];
+    parentHasActiveSub = parentSubs.some(s =>
+      s.package_status_str === 'active-current' || s.package_status_str === 'active-overdue');
+  }
+
+  return {
+    tenant: t,
+    customerId: cust.customer_id,
+    company: cust.company || null,
+    email: cust.superuser_email || cust.email || null,
+    status: cust.customer_status_str || null,
+    subStatus: sub?.package_status_str || null,
+    canceledAt: sub?.cancel_datetime?.slice(0, 10) || null,
+    planMinutes: sub?.custom_2 ?? null,       // Allotted minutes plan
+    overageRate: sub?.custom_1 ?? null,       // $/min over plan
+    // Bill day comes from `next_invoice_datetime` — that's the day the
+    // subscription actually bills going forward. `holduntil_datetime` is
+    // the ORIGINAL hold date and doesn't update when a customer is later
+    // moved to a different billing day (e.g. package 672: hold anchored
+    // Feb 3 2015, current invoices land on the 1st). Falls back to
+    // `holduntil_datetime` only when next-invoice is unset (canceled subs).
+    billAnchorDate:  sub?.next_invoice_datetime || sub?.holduntil_datetime || null,
+    nextInvoiceDate: sub?.next_invoice_datetime || null,
+    // Sales-rep + linkage fields used by the HubSpot cross-check.
+    superuserName: [cust.superuser_first_name, cust.superuser_last_name].filter(Boolean).join(' ') || null,
+    adminName:     cust.admin_name  || null,
+    adminEmail:    cust.admin_email || null,
+    createdAt:     cust.write_datetime?.slice(0, 10) || null,
+    // Parent/child grouping for MULTIPLE accounts. parentCustomerId is
+    // null on parents (they have no parent) and populated on children.
+    // parentHasActiveSub suppresses the "No subscription" flag on
+    // children — if the parent is paying, the whole family is covered.
+    parentCustomerId:   parentId,
+    parentCompany:      parent?.company || null,
+    parentHasActiveSub,
+    isReturnCustomer,
+    // Populated only when the cross-record path matched. Same-record returns
+    // leave both null — there's no separate CO record to link to.
+    returnCustomerLinkedTo,
+    returnCustomerMatchedBy,
+    url: cust.url_self || null,
+  };
 }
 
 // Normalize a person name for map keys and fuzzy compare — lower, strip
@@ -5938,7 +6021,12 @@ async function runMinuteAuditorJob(jobId, rows) {
       result.error = 'No COCustomerId';
     } else {
       const tenantHint = ['AL', 'RS'].includes(row.clientType) ? row.clientType : null;
-      const co = resolveInPrefetched(prefetched, tenantHint, row.coCustomerId);
+      // Pass the CSV client name so resolveInPrefetched can disambiguate
+      // when the same coCustomerId exists in BOTH tenants (AL and RS share
+      // the numeric id space). Without this, the CSV's clientType could
+      // point at the wrong tenant and we'd surface an unrelated customer,
+      // showing up as a bogus "Name mismatch".
+      const co = resolveInPrefetched(prefetched, tenantHint, row.coCustomerId, row.client);
       result.chargeover = co;
       result.active = co ? isChargeoverActive(co) : false;
       if (!co) result.error = 'Not found in ChargeOver';
@@ -6011,11 +6099,17 @@ async function runMinuteAuditorJob(jobId, rows) {
             // "match" means the same thing everywhere. Each pair is null when
             // either side is missing a name — unknown, not mismatched.
             const pairScore = (a, b) => (a && b) ? Math.round(nameMatchScore(a, b) * 100) / 100 : null;
-            const hsName = result.hubspotDealCompany || deal.dealName || null;
+            // Split display from comparison. Comparison uses ONLY the deal's
+            // company/account name — falling back to deal.dealName (a person
+            // name on Onboarding 2 deals) would compare a firm name to a
+            // person name and false-flag CO↔HS mismatch. Display can still
+            // fall back to dealName so the row shows something.
+            const hsCompareName = result.hubspotDealCompany || null;
+            const hsDisplayName = result.hubspotDealCompany || deal.dealName || null;
             const sAnswerCo = pairScore(row.client, co.company);
-            const sCoHs     = pairScore(co.company,  hsName);
-            const sAnswerHs = pairScore(row.client,  hsName);
-            result.hubspotName        = hsName;
+            const sCoHs     = pairScore(co.company,  hsCompareName);
+            const sAnswerHs = pairScore(row.client,  hsCompareName);
+            result.hubspotName        = hsDisplayName;
             result.nameScoreAnswerCo  = sAnswerCo;
             result.nameScoreCoHs      = sCoHs;
             result.nameScoreAnswerHs  = sAnswerHs;
@@ -6039,6 +6133,11 @@ async function runMinuteAuditorJob(jobId, rows) {
             result.previouslyPayingProp     = prefetched.hubspot.previouslyPayingProp || null;
             result.previouslyPayingRequired = co.isReturnCustomer === true;
             result.previouslyPayingChecked  = deal.previouslyPaying === true;
+            // Cross-record return link (null on same-record returns). Lets the
+            // UI show "linked to CO#12345 (matched on email)" so ops can find
+            // the prior record without hunting.
+            result.returnCustomerLinkedTo   = co.returnCustomerLinkedTo || null;
+            result.returnCustomerMatchedBy  = co.returnCustomerMatchedBy || null;
             // Only flag when the property exists in HubSpot AND we required it
             // AND it wasn't checked. When the property couldn't be discovered
             // we can't judge — leave the flag off rather than false-positive
