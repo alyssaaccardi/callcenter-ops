@@ -305,9 +305,10 @@ export default function MinuteAuditor() {
       if (r.skipped) return false;
       if (tab === 'attention' && !r.flagged) return false;
       if (tab === 'matched'   && (r.flagged || r.active !== true)) return false;
+      if (tab === 'hubspot'   && !r.hubspotDealFound) return false;
       if (reasonFilter !== 'all' && r.reason !== reasonFilter) return false;
       if (q) {
-        const hay = `${r.client || ''} ${r.coCustomerId || ''} ${r.coCompany || ''}`.toLowerCase();
+        const hay = `${r.client || ''} ${r.coCustomerId || ''} ${r.coCompany || ''} ${r.hubspotDealName || ''} ${r.hubspotDealCompany || ''} ${r.hubspotSalesRep || ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -474,6 +475,7 @@ export default function MinuteAuditor() {
         tabs={[
           { id: 'attention', label: 'Needs attention', count: summary.flagged },
           { id: 'matched',   label: 'Matched',         count: summary.matched },
+          { id: 'hubspot',   label: 'HubSpot',         count: summary.hubspotMatched },
           { id: 'all',       label: 'All audited',     count: summary.audited },
         ]}
         value={tab}
@@ -504,16 +506,33 @@ export default function MinuteAuditor() {
                   Account
                   {sort.key === 'client' && <span className="ui-table__arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
                 </th>
-                <th data-align="center">Plan (Answer / CO)</th>
-                <th data-align="center">Bill day (Answer / CO)</th>
-                <th>Reason</th>
-                <th data-align="right" onClick={() => clickSort('answer')} data-sortable data-active={sort.key === 'answer' || undefined}>
-                  Used
-                  {sort.key === 'answer' && <span className="ui-table__arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
-                </th>
-                {showAllCols && <th>Category</th>}
-                {showAllCols && <th>Cycle</th>}
-                {showAllCols && <th data-align="right">Calls</th>}
+                {tab === 'hubspot' ? (
+                  <>
+                    <th>HubSpot Deal</th>
+                    <th data-align="center">Sales Rep (HubSpot / CO)</th>
+                    <th>Reason</th>
+                    <th data-align="right" onClick={() => clickSort('answer')} data-sortable data-active={sort.key === 'answer' || undefined}>
+                      Used
+                      {sort.key === 'answer' && <span className="ui-table__arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
+                    </th>
+                    {showAllCols && <th>Matched by</th>}
+                    {showAllCols && <th data-align="center">Plan (A / CO)</th>}
+                    {showAllCols && <th data-align="center">Bill day (A / CO)</th>}
+                  </>
+                ) : (
+                  <>
+                    <th data-align="center">Plan (Answer / CO)</th>
+                    <th data-align="center">Bill day (Answer / CO)</th>
+                    <th>Reason</th>
+                    <th data-align="right" onClick={() => clickSort('answer')} data-sortable data-active={sort.key === 'answer' || undefined}>
+                      Used
+                      {sort.key === 'answer' && <span className="ui-table__arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
+                    </th>
+                    {showAllCols && <th>Category</th>}
+                    {showAllCols && <th>Cycle</th>}
+                    {showAllCols && <th data-align="right">Calls</th>}
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -526,7 +545,9 @@ export default function MinuteAuditor() {
                       ? `No account matches "${search}" in this view.`
                       : tab === 'attention' && summary.flagged === 0
                         ? 'Every audited account agrees with ChargeOver.'
-                        : 'Try a different tab, or clear filters to widen the view.'}
+                        : tab === 'hubspot' && summary.hubspotMatched === 0
+                          ? 'No CSV rows resolved to a HubSpot deal in Onboarding 2 / PAID this run.'
+                          : 'Try a different tab, or clear filters to widen the view.'}
                     actions={search || reasonFilter !== 'all' || tab !== 'attention'
                       ? <Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button>
                       : null}
@@ -535,7 +556,7 @@ export default function MinuteAuditor() {
               ) : sorted.map(r => (
                 <TableRow key={r.id} r={r} expanded={expandedId === r.id}
                   onToggle={() => setExpandedId(id => id === r.id ? null : r.id)}
-                  colCount={colCount} showAllCols={showAllCols} />
+                  colCount={colCount} showAllCols={showAllCols} tab={tab} />
               ))}
             </tbody>
           </table>
@@ -597,7 +618,7 @@ function ReasonPill({ reason }) {
 }
 
 
-function TableRow({ r, expanded, onToggle, colCount, showAllCols }) {
+function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab }) {
   const rowState = (r.planMismatch || r.billDayMismatch) ? 'crit'
                  : r.flagged                             ? 'warn'
                                                          : undefined;
@@ -614,13 +635,34 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols }) {
             }
           </div>
         </td>
-        <td data-align="center"><CompareCell csv={r.csvPlan} co={r.coPlan} unit=" min" mismatch={r.planMismatch} /></td>
-        <td data-align="center"><CompareCell csv={r.csvBillDay} co={r.coBillDay} unit="" ordinal mismatch={r.billDayMismatch} /></td>
-        <td><ReasonPill reason={r.reason} /></td>
-        <td data-align="right" data-num>{fmtNum(r.answer)}</td>
-        {showAllCols && <td>{r.billingCategory || '—'}</td>}
-        {showAllCols && <td>{r.billingCycle || '—'}</td>}
-        {showAllCols && <td data-align="right" data-num>{fmtNum(r.totalCalls)}</td>}
+        {tab === 'hubspot' ? (
+          <>
+            <td>
+              <div className="ma-cell-name">{r.hubspotDealName || '—'}</div>
+              {r.hubspotDealCompany && (
+                <div className="ma-cell-meta">{r.hubspotDealCompany}</div>
+              )}
+            </td>
+            <td data-align="center">
+              <CompareCell csv={r.hubspotSalesRep} co={r.coAdminName} unit="" mismatch={r.salesRepMismatch} labels={{ csv: 'HS', co: 'CO' }} />
+            </td>
+            <td><ReasonPill reason={r.reason} /></td>
+            <td data-align="right" data-num>{fmtNum(r.answer)}</td>
+            {showAllCols && <td className="ma-cell-meta">{r.hubspotMatchedBy || '—'}</td>}
+            {showAllCols && <td data-align="center"><CompareCell csv={r.csvPlan} co={r.coPlan} unit=" min" mismatch={r.planMismatch} /></td>}
+            {showAllCols && <td data-align="center"><CompareCell csv={r.csvBillDay} co={r.coBillDay} unit="" ordinal mismatch={r.billDayMismatch} /></td>}
+          </>
+        ) : (
+          <>
+            <td data-align="center"><CompareCell csv={r.csvPlan} co={r.coPlan} unit=" min" mismatch={r.planMismatch} /></td>
+            <td data-align="center"><CompareCell csv={r.csvBillDay} co={r.coBillDay} unit="" ordinal mismatch={r.billDayMismatch} /></td>
+            <td><ReasonPill reason={r.reason} /></td>
+            <td data-align="right" data-num>{fmtNum(r.answer)}</td>
+            {showAllCols && <td>{r.billingCategory || '—'}</td>}
+            {showAllCols && <td>{r.billingCycle || '—'}</td>}
+            {showAllCols && <td data-align="right" data-num>{fmtNum(r.totalCalls)}</td>}
+          </>
+        )}
       </tr>
       {expanded && (
         <tr className="ma-detail">
@@ -675,18 +717,22 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols }) {
   );
 }
 
-// Side-by-side Answer / CO comparison cell. Matched = single value.
-// Mismatched = two lines, both bold, ChargeOver side in critical red.
-function CompareCell({ csv, co, unit = '', ordinal: asOrd = false, mismatch }) {
-  const fmt = v => v == null ? '—' : (asOrd ? ordinal(v) : v + unit);
+// Side-by-side comparison cell. Matched = single value.
+// Mismatched = two lines, both bold, second side in critical red.
+// Default labels are ANSWER / CO; override via `labels` for other pairs
+// (e.g. HubSpot rep vs CO admin uses HS / CO).
+function CompareCell({ csv, co, unit = '', ordinal: asOrd = false, mismatch, labels }) {
+  const fmt = v => v == null || v === '' ? '—' : (asOrd ? ordinal(v) : v + unit);
   const csvS = fmt(csv);
   const coS  = fmt(co);
   if (csvS === '—' && coS === '—') return <span className="ma-cmp-none">—</span>;
   if (!mismatch) return <span className="ma-cmp-match">{csvS === '—' ? coS : csvS}</span>;
+  const csvLabel = labels?.csv || 'Answer';
+  const coLabel  = labels?.co  || 'CO';
   return (
     <div className="ma-cmp">
-      <div className="ma-cmp-answer"><b>Answer</b> {csvS}</div>
-      <div className="ma-cmp-co"><b>CO</b> {coS}</div>
+      <div className="ma-cmp-answer"><b>{csvLabel}</b> {csvS}</div>
+      <div className="ma-cmp-co"><b>{coLabel}</b> {coS}</div>
     </div>
   );
 }

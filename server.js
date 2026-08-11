@@ -5637,11 +5637,24 @@ const HS_ONBOARDING_PAID_STAGE = '240513405';
 // before HubSpot became source of truth. Adjust as ops verify.
 const MINUTE_AUDITOR_LEGACY_CUTOFF = '2020-01-01';
 
+// Key a firm-style name for HubSpot ↔ CO ↔ Answer matching. Strips
+// LLC/PC/Law/Office/etc via NAME_STOPWORDS, then sorts the remaining
+// discriminating tokens alphabetically so "Law Office of Bruce Egert" and
+// "Bruce Egert Law Firm" hash to the same key.
+function normalizeCompanyKey(name) {
+  const norm = normalizeMatchText(name);
+  if (!norm) return '';
+  const tokens = norm.split(' ').filter(t => t.length >= 2 && !NAME_STOPWORDS.has(t));
+  const chosen = tokens.length > 0 ? tokens : norm.split(' ').filter(t => t.length >= 2);
+  return [...chosen].sort().join(' ');
+}
+
 async function prefetchHubspotPaidDeals(progressCb) {
   const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
   if (!token) return null;
-  const dealByName = new Map();  // norm(dealname) → { dealId, dealName, salesRep }
-  const activeRepSet = new Set();  // unique salesperson names across PAID deals
+  const dealByPerson  = new Map();   // norm(dealname) → deal (superuser fallback)
+  const dealByCompany = new Map();   // firm-key → deal (primary match path)
+  const activeRepSet  = new Set();
   let after;
   let count = 0;
   while (true) {
@@ -5651,7 +5664,7 @@ async function prefetchHubspotPaidDeals(progressCb) {
         { propertyName: 'dealstage', operator: 'EQ', value: HS_ONBOARDING_PAID_STAGE },
       ] }],
       limit: 100,
-      properties: ['dealname', 'sales_rep', 'chargeover_package_customer_id'],
+      properties: ['dealname', 'sales_rep', 'company_name', 'account_name', 'chargeover_package_customer_id'],
       after,
     };
     const resp = await axios.post(
@@ -5660,13 +5673,23 @@ async function prefetchHubspotPaidDeals(progressCb) {
       { headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, timeout: 15000 }
     );
     for (const d of resp.data.results || []) {
-      const key = normPersonName(d.properties.dealname);
-      if (key) dealByName.set(key, {
+      const record = {
         dealId:       d.id,
         dealName:     d.properties.dealname,
         salesRep:     d.properties.sales_rep || null,
+        companyName:  d.properties.company_name || null,
+        accountName:  d.properties.account_name || null,
         coCustomerId: d.properties.chargeover_package_customer_id || null,
-      });
+      };
+      const personKey = normPersonName(d.properties.dealname);
+      if (personKey) dealByPerson.set(personKey, record);
+      // Prefer company_name (92% populated) but also index account_name (32%)
+      // as a fallback. First writer wins on collisions — with ~2,400 deals
+      // in Onboarding 2 / PAID and firm names, dupes are rare.
+      for (const rawFirm of [d.properties.company_name, d.properties.account_name]) {
+        const firmKey = normalizeCompanyKey(rawFirm);
+        if (firmKey && !dealByCompany.has(firmKey)) dealByCompany.set(firmKey, record);
+      }
       if (d.properties.sales_rep) activeRepSet.add(d.properties.sales_rep);
       count++;
     }
@@ -5675,7 +5698,7 @@ async function prefetchHubspotPaidDeals(progressCb) {
     after = resp.data.paging.next.after;
     await new Promise(r => setTimeout(r, 100));
   }
-  return { dealByName, activeRepNames: [...activeRepSet] };
+  return { dealByPerson, dealByCompany, activeRepNames: [...activeRepSet] };
 }
 
 // True if `name` fuzzy-matches ANY current HubSpot sales rep. Used to detect
@@ -5769,7 +5792,8 @@ async function runMinuteAuditorJob(jobId, rows) {
       planMismatch: false,    csvPlan: null, coPlan: null,
       billDayMismatch: false, csvBillDay: null, coBillDay: null,
       // HubSpot cross-check fields
-      hubspotDealFound: false, hubspotDealId: null, hubspotDealName: null, hubspotSalesRep: null,
+      hubspotDealFound: false, hubspotDealId: null, hubspotDealName: null, hubspotDealCompany: null,
+      hubspotSalesRep: null, hubspotMatchedBy: null,
       coAdminName: null, coAdminEmail: null, coCreatedAt: null,
       salesRepMismatch: false, isLegacy: false, legacyReason: null,
     };
@@ -5806,13 +5830,33 @@ async function runMinuteAuditorJob(jobId, rows) {
         result.coAdminName  = co.adminName;
         result.coAdminEmail = co.adminEmail;
         result.coCreatedAt  = co.createdAt;
-        if (prefetched.hubspot && co.superuserName) {
-          const deal = prefetched.hubspot.dealByName.get(normPersonName(co.superuserName));
+        // HubSpot cross-check. Match strategies in preference order:
+        //   1. Firm name — CSV Client OR CO company vs deal's company_name
+        //      (92% populated) or account_name (32%). This is the primary
+        //      path and lifts coverage from ~5% to ~60-80%.
+        //   2. Person name — CO superuser first+last vs deal's dealname
+        //      (individual attorney). Fallback for firm-name misses.
+        if (prefetched.hubspot) {
+          let deal = null;
+          let matchedBy = null;
+          for (const candidate of [row.client, co.company]) {
+            const firmKey = normalizeCompanyKey(candidate);
+            if (firmKey) {
+              const hit = prefetched.hubspot.dealByCompany.get(firmKey);
+              if (hit) { deal = hit; matchedBy = 'firm'; break; }
+            }
+          }
+          if (!deal && co.superuserName) {
+            const hit = prefetched.hubspot.dealByPerson.get(normPersonName(co.superuserName));
+            if (hit) { deal = hit; matchedBy = 'person'; }
+          }
           if (deal) {
             result.hubspotDealFound = true;
-            result.hubspotDealId    = deal.dealId;
-            result.hubspotDealName  = deal.dealName;
-            result.hubspotSalesRep  = deal.salesRep;
+            result.hubspotDealId       = deal.dealId;
+            result.hubspotDealName     = deal.dealName;
+            result.hubspotDealCompany  = deal.companyName || deal.accountName || null;
+            result.hubspotSalesRep     = deal.salesRep;
+            result.hubspotMatchedBy    = matchedBy;
             const repsMatch = salesRepsMatch(deal.salesRep, co.adminName);
             // Only mark mismatched when we have both names to compare.
             result.salesRepMismatch = repsMatch === false;
