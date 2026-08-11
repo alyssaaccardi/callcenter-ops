@@ -5714,8 +5714,18 @@ function resolveInPrefetched(prefetched, tenantHint, coId, hintName) {
     nextInvoiceDate: sub?.next_invoice_datetime || null,
     // Sales-rep + linkage fields used by the HubSpot cross-check.
     superuserName: [cust.superuser_first_name, cust.superuser_last_name].filter(Boolean).join(' ') || null,
-    adminName:     cust.admin_name  || null,
+    adminName:     cust.admin_name  || null,   // account manager, not salesperson
     adminEmail:    cust.admin_email || null,
+    // Salesperson email — the CO custom field that holds the internal AL/RS
+    // salesperson. Slot differs by tenant (confirmed against sampled data):
+    // AL uses custom_6, RS uses custom_2. Values are @answeringlegal.com
+    // emails; anything else (short names, "Web", "Returning Customer") is
+    // legacy noise and gets nulled so the mismatch check can't false-fire.
+    salesperson: (() => {
+      const raw = t === 'AL' ? cust.custom_6 : cust.custom_2;
+      const s = String(raw || '').trim().toLowerCase();
+      return /@/.test(s) ? s : null;
+    })(),
     createdAt:     cust.write_datetime?.slice(0, 10) || null,
     // Parent/child grouping for MULTIPLE accounts. parentCustomerId is
     // null on parents (they have no parent) and populated on children.
@@ -5799,8 +5809,9 @@ async function fetchHubspotOwners(token) {
           timeout: 15000,
         });
         for (const o of resp.data.results || []) {
-          const name = [o.firstName, o.lastName].filter(Boolean).join(' ').trim();
-          if (name) owners.set(String(o.id), { name, isActive: !archived });
+          const name  = [o.firstName, o.lastName].filter(Boolean).join(' ').trim();
+          const email = String(o.email || '').trim().toLowerCase() || null;
+          if (name || email) owners.set(String(o.id), { name, email, isActive: !archived });
         }
         if (!resp.data.paging?.next?.after) break;
         after = resp.data.paging.next.after;
@@ -5925,8 +5936,9 @@ async function prefetchHubspotPaidDeals(progressCb) {
   const owners = await fetchHubspotOwners(token);
   for (const rec of allDeals) {
     const o = owners && rec.ownerId ? owners.get(String(rec.ownerId)) : null;
-    if (o) { rec.ownerName = o.name; rec.ownerActive = o.isActive; }
-    rec.rep       = rec.ownerName || null;
+    if (o) { rec.ownerName = o.name; rec.ownerEmail = o.email; rec.ownerActive = o.isActive; }
+    rec.rep       = rec.ownerName  || null;
+    rec.repEmail  = rec.ownerEmail || null;   // used for CO↔HS salesperson match
     rec.repSource = rec.ownerName ? 'deal owner' : null;
   }
 
@@ -6103,12 +6115,21 @@ async function runMinuteAuditorJob(jobId, rows) {
             // Deal Owner is the sales rep of record; sales_rep is the fallback
             // for deals with no owner. Informational only — the sales rep does
             // NOT flag a row. See the flag aggregation below.
-            result.hubspotSalesRep     = deal.rep;
-            result.hubspotRepSource    = deal.repSource;
-            result.hubspotOwnerActive  = deal.ownerActive;
-            result.hubspotMatchedBy    = matchedBy;
-            const repsMatch = salesRepsMatch(deal.rep, co.adminName);
-            result.salesRepMismatch = repsMatch === false;
+            result.hubspotSalesRep      = deal.rep;
+            result.hubspotSalesRepEmail = deal.repEmail || null;
+            result.hubspotRepSource     = deal.repSource;
+            result.hubspotOwnerActive   = deal.ownerActive;
+            result.hubspotMatchedBy     = matchedBy;
+            // Salesperson check: exact-email match between the HubSpot Deal
+            // Owner and the CO salesperson custom field. Both sides normalize
+            // to lowercase @answeringlegal.com emails, so no fuzzy name
+            // matching is needed (which was the old source of false flags —
+            // "Steve O" vs "Steve Ollmann" and admin_name/salesperson
+            // confusion). Missing on either side = unknown, no flag.
+            result.coSalesperson = co.salesperson || null;
+            result.salesRepMismatch = !!(result.coSalesperson
+              && result.hubspotSalesRepEmail
+              && result.coSalesperson !== result.hubspotSalesRepEmail);
 
             // ── The HubSpot tab's actual job: does the account name agree in
             // all three systems? Answer (CSV) ↔ ChargeOver ↔ HubSpot. Same

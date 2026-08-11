@@ -55,7 +55,7 @@ function describeReason(r) {
   if (r.reason === 'Trial with active sub') return `Answer marks this account as TRIAL, but ChargeOver has an active subscription. Trials shouldn't be paying — either Answer needs to update to STANDARD or ChargeOver needs to end the trial.`;
   if (r.reason === 'Name mismatch')      return `Answer client "${r.client}" doesn't match ChargeOver company "${r.chargeover?.company || ''}".`;
   if (r.reason === 'HubSpot name mismatch') return `ChargeOver company "${r.chargeover?.company || ''}" doesn't match the HubSpot deal "${r.hubspotName || ''}". HubSpot is source of truth — update ChargeOver to match.`;
-  if (r.reason === 'Sales rep mismatch') return `HubSpot lists rep "${r.hubspotSalesRep || '?'}" but ChargeOver has "${r.coAdminName || '?'}". HubSpot is source of truth — update ChargeOver.`;
+  if (r.reason === 'Sales rep mismatch') return `HubSpot Deal Owner is "${r.hubspotSalesRepEmail || r.hubspotSalesRep || '?'}" but the ChargeOver salesperson field is "${r.coSalesperson || '?'}". HubSpot is source of truth — update ChargeOver.`;
   if (r.reason === 'Previously paying unchecked') return `Customer has a canceled subscription AND an active one in ChargeOver (returning customer), but "Previously Paying Customer" isn't checked on the HubSpot deal.`;
   if (r.reason === 'Legacy')             return `Grandfathered — ${r.legacyReason || 'created before the cutoff'}. Name-drift flags suppressed; billing flags stay live.`;
   return r.error || '';
@@ -123,7 +123,7 @@ function toCsv(rows) {
       r.csvPlan ?? r.allotted, r.coPlan ?? '', yn(r.planMismatch),
       r.csvBillDay ?? '', r.coBillDay ?? '', yn(r.billDayMismatch), co.nextInvoiceDate || '',
       r.coCustomerId, r.clientType, co.tenant || '',
-      r.hubspotSalesRep || '', r.coAdminName || '', yn(r.salesRepMismatch),
+      r.hubspotSalesRepEmail || r.hubspotSalesRep || '', r.coSalesperson || '', yn(r.salesRepMismatch),
       yn(r.hsVsCoMismatch), yn(r.previouslyPayingRequired), yn(r.previouslyPayingChecked), yn(r.previouslyPayingMissing),
       r.hubspotDealId || '', r.hubspotDealName || '', yn(r.hubspotDealFound),
       r.coCreatedAt || '',
@@ -361,7 +361,7 @@ export default function MinuteAuditor() {
       if (tab === 'multiple'  && String(r.billingCategory || '').toUpperCase() !== 'MULTIPLE') return false;
       if (reasonFilter !== 'all' && r.reason !== reasonFilter) return false;
       if (q) {
-        const hay = `${r.client || ''} ${r.coCustomerId || ''} ${r.coCompany || ''} ${r.hubspotDealName || ''} ${r.hubspotDealCompany || ''} ${r.hubspotSalesRep || ''}`.toLowerCase();
+        const hay = `${r.client || ''} ${r.coCustomerId || ''} ${r.coCompany || ''} ${r.hubspotDealName || ''} ${r.hubspotDealCompany || ''} ${r.hubspotSalesRep || ''} ${r.hubspotSalesRepEmail || ''} ${r.coSalesperson || ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -875,7 +875,7 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole
             <td data-align="center"><NameAgreement r={r} /></td>
             <td data-align="right" data-num>{fmtNum(r.answer)}</td>
             {showAllCols && <td className="ma-cell-meta">{r.hubspotMatchedBy || '—'}</td>}
-            {showAllCols && <td data-align="center"><CompareCell csv={r.hubspotSalesRep} co={r.coAdminName} unit="" mismatch={r.salesRepMismatch} labels={{ csv: 'HS', co: 'CO' }} /></td>}
+            {showAllCols && <td data-align="center"><CompareCell csv={r.hubspotSalesRepEmail || r.hubspotSalesRep} co={r.coSalesperson} unit="" mismatch={r.salesRepMismatch} labels={{ csv: 'HS', co: 'CO' }} /></td>}
             {showAllCols && <td className="ma-cell-meta">{r.hubspotDealId || '—'}</td>}
           </>
         ) : tab === 'multiple' ? (
@@ -922,8 +922,9 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole
                 sub={r.chargeover?.nextInvoiceDate ? `next invoice ${r.chargeover.nextInvoiceDate}` : null} />
               {r.hubspotDealFound ? (
                 <DetailField label="Sales rep (HubSpot) — source of truth"
-                  value={r.hubspotSalesRep || '—'}
+                  value={r.hubspotSalesRepEmail || r.hubspotSalesRep || '—'}
                   sub={[
+                    r.hubspotSalesRep && r.hubspotSalesRepEmail ? r.hubspotSalesRep : null,
                     r.hubspotRepSource ? `from ${r.hubspotRepSource}` : null,
                     r.hubspotOwnerActive === false ? 'owner deactivated' : null,
                     r.hubspotPaidEnteredAt ? `moved to PAID ${r.hubspotPaidEnteredAt}` : null,
@@ -934,7 +935,10 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole
                   value={r.isLegacy ? 'none (legacy)' : 'no matching deal in last 90 days'}
                   sub={r.coCreatedAt ? `CO customer since ${r.coCreatedAt}` : null} />
               )}
-              <DetailField label={r.salesRepMismatch ? 'Sales rep (ChargeOver) — update to match' : 'Sales rep (ChargeOver)'}
+              <DetailField label={r.salesRepMismatch ? 'Salesperson (ChargeOver) — update to match' : 'Salesperson (ChargeOver)'}
+                value={r.coSalesperson || '— (not set on CO)'}
+                sub={r.chargeover?.tenant ? `${r.chargeover.tenant === 'AL' ? 'custom_6' : 'custom_2'} on the CO customer` : null} />
+              <DetailField label="Account manager (ChargeOver)"
                 value={r.coAdminName || '—'}
                 sub={r.coAdminEmail || null} />
 
