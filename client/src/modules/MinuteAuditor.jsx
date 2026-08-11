@@ -36,7 +36,7 @@ function describeReason(r) {
   if (r.reason === 'Plan mismatch')      return `Answer allotted ${r.csvPlan ?? '?'} min; ChargeOver plan is ${r.coPlan ?? '?'} min.`;
   if (r.reason === 'Bill day mismatch')  return `Answer bills on day ${r.csvBillDay ?? '?'}; ChargeOver next invoice is day ${r.coBillDay ?? '?'}.`;
   if (r.reason === 'No subscription')    return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
-  if (r.reason === 'Sales rep mismatch') return `HubSpot lists sales rep as "${r.hubspotSalesRep}", ChargeOver admin is "${r.coAdminName}".`;
+  if (r.reason === 'Sales rep mismatch') return `HubSpot (source of truth) has "${r.hubspotSalesRep}". Update ChargeOver admin from "${r.coAdminName}".`;
   if (r.reason === 'Name mismatch')      return `Answer client "${r.client}" doesn't match ChargeOver company "${r.coCompany}".`;
   if (r.reason === 'Legacy')             return `Grandfathered — created in ChargeOver ${r.coCreatedAt || 'before the cutoff'} with no matching HubSpot deal. CRM-drift flags suppressed.`;
   return r.error || '';
@@ -72,7 +72,7 @@ function toCsv(rows) {
     'Plan Answer (Allotted)','Plan ChargeOver','Plan Mismatch',
     'Bill Day Answer','Bill Day ChargeOver','Bill Day Mismatch','ChargeOver Next Invoice',
     'ChargeOver Customer ID','Tenant (Answer)','Tenant (ChargeOver)',
-    'Sales Rep (ChargeOver)','Sales Rep (HubSpot)','Sales Rep Mismatch',
+    'Sales Rep — HubSpot (source of truth)','Sales Rep — ChargeOver (to update on mismatch)','Sales Rep Mismatch',
     'HubSpot Deal ID','HubSpot Deal Name','HubSpot Deal Found',
     'CO Created At',
     'Billing Category (Answer)','Billing Cycle (Answer)',
@@ -93,7 +93,7 @@ function toCsv(rows) {
       r.csvPlan ?? r.allotted, r.coPlan ?? '', yn(r.planMismatch),
       r.csvBillDay ?? '', r.coBillDay ?? '', yn(r.billDayMismatch), co.nextInvoiceDate || '',
       r.coCustomerId, r.clientType, co.tenant || '',
-      r.coAdminName || '', r.hubspotSalesRep || '', yn(r.salesRepMismatch),
+      r.hubspotSalesRep || '', r.coAdminName || '', yn(r.salesRepMismatch),
       r.hubspotDealId || '', r.hubspotDealName || '', yn(r.hubspotDealFound),
       r.coCreatedAt || '',
       r.billingCategory, r.billingCycle,
@@ -638,18 +638,19 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols }) {
               <DetailField label="Bill day (ChargeOver)"
                 value={r.coBillDay != null ? ordinal(r.coBillDay) : '—'}
                 sub={r.chargeover?.nextInvoiceDate ? `next invoice ${r.chargeover.nextInvoiceDate}` : null} />
-              <DetailField label="Sales rep (ChargeOver)"
-                value={r.coAdminName || '—'}
-                sub={r.coAdminEmail || null} />
               {r.hubspotDealFound ? (
-                <DetailField label="Sales rep (HubSpot)"
+                <DetailField label="Sales rep (HubSpot) — source of truth"
                   value={r.hubspotSalesRep || '—'}
-                  sub={r.salesRepMismatch ? 'differs from ChargeOver' : `deal: ${r.hubspotDealName}`} />
+                  sub={`deal: ${r.hubspotDealName}`} />
               ) : (
                 <DetailField label="HubSpot deal"
                   value={r.isLegacy ? 'none (legacy)' : 'no matching deal'}
                   sub={r.coCreatedAt ? `CO customer since ${r.coCreatedAt}` : null} />
               )}
+              <DetailField label={r.salesRepMismatch ? 'Sales rep (ChargeOver) — update to match' : 'Sales rep (ChargeOver)'}
+                value={r.coAdminName || '—'}
+                sub={r.coAdminEmail || null} />
+
               <DetailField label="ChargeOver customer"
                 value={r.coCustomerId || '—'} mono
                 sub={r.resolvedTenant || null} />
