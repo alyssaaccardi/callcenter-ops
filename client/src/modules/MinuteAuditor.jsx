@@ -64,7 +64,6 @@ function computeAllReasons(r) {
   if (r.zeroUsageActiveSub)                      reasons.push('Zero usage');
   if (r.planMismatch && cat !== 'MULTIPLE')      reasons.push('Plan mismatch');
   if (r.billDayMismatch)                         reasons.push('Bill day mismatch');
-  if (r.rateMismatch)                            reasons.push('Rate mismatch');
   reasons.push(...universalTail);
   if (reasons.length === 0) return [r.isLegacy ? 'Legacy' : 'Matched'];
   return reasons;
@@ -78,7 +77,6 @@ function describeReason(r) {
   if (r.reason === 'Matched')            return 'Answer and ChargeOver agree on plan and bill day.';
   if (r.reason === 'Plan mismatch')      return `Answer allotted ${r.csvPlan ?? '?'} min; ChargeOver plan is ${r.coPlan ?? '?'} min.`;
   if (r.reason === 'Bill day mismatch')  return `Answer bills on day ${r.csvBillDay ?? '?'}; ChargeOver next invoice is day ${r.coBillDay ?? '?'}.`;
-  if (r.reason === 'Rate mismatch')      return `Answer has $${(r.csvOverageRate ?? '?')}/min but the ${r.chargeover?.tenant || r.clientType || '?'} ${r.csvPlan ?? '?'}-min tier on the pricing sheet is $${(r.pricingSheetOverageRate ?? '?')}/min.`;
   if (r.reason === 'No subscription')    return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
   if (r.reason === 'Zero usage')         return `Zero minutes and zero calls this cycle in Answer, but the ChargeOver subscription is still active — the customer likely deactivated in Answer or never went live, and CO wasn't caught up.`;
   if (r.reason === 'Trial with active sub') return `Answer marks this account as TRIAL, but ChargeOver has an active subscription. Trials shouldn't be paying — either Answer needs to update to STANDARD or ChargeOver needs to end the trial.`;
@@ -95,7 +93,6 @@ const REASON_TONE = {
   'Trial with active sub':         'crit',
   'Plan mismatch':                 'crit',
   'Bill day mismatch':             'crit',
-  'Rate mismatch':                 'crit',
   'Zero usage':                    'crit',
   'No subscription':               'warn',
   'HubSpot name mismatch':         'warn',
@@ -111,7 +108,6 @@ const REASON_OPTIONS = [
   { value: 'Trial with active sub',        label: 'Trial with active sub' },
   { value: 'Plan mismatch',                label: 'Plan mismatch' },
   { value: 'Bill day mismatch',            label: 'Bill day mismatch' },
-  { value: 'Rate mismatch',                label: 'Rate mismatch (Answer↔pricing)' },
   { value: 'Zero usage',                   label: 'Zero usage, active sub' },
   { value: 'No subscription',              label: 'No subscription' },
   { value: 'HubSpot name mismatch',        label: 'HubSpot name mismatch (CO↔HS)' },
@@ -130,7 +126,6 @@ function toCsv(rows) {
     'Name Score Answer-CO','Name Score CO-HubSpot','Name Score Answer-HubSpot','All 3 Names Match',
     'Plan Answer (Allotted)','Plan ChargeOver','Plan Mismatch',
     'Bill Day Answer','Bill Day ChargeOver','Bill Day Mismatch','ChargeOver Next Invoice',
-    'Overage Rate Answer','Overage Rate Pricing Sheet','Rate Mismatch',
     'ChargeOver Customer ID','Tenant (Answer)','Tenant (ChargeOver)',
     'Sales Rep — HubSpot (source of truth)','Sales Rep — ChargeOver (to update on mismatch)','Sales Rep Mismatch',
     'HubSpot Name Mismatch (CO↔HS)','Return Customer (CO)','Previously Paying Checked (HS)','Previously Paying Unchecked',
@@ -154,7 +149,6 @@ function toCsv(rows) {
       r.nameScoreAnswerCo ?? '', r.nameScoreCoHs ?? '', r.nameScoreAnswerHs ?? '', yn(r.nameAllThreeMatch),
       r.csvPlan ?? r.allotted, r.coPlan ?? '', yn(r.planMismatch),
       r.csvBillDay ?? '', r.coBillDay ?? '', yn(r.billDayMismatch), co.nextInvoiceDate || '',
-      r.csvOverageRate ?? '', r.pricingSheetOverageRate ?? '', yn(r.rateMismatch),
       r.coCustomerId, r.clientType, co.tenant || '',
       r.hubspotSalesRepEmail || r.hubspotSalesRep || '', r.coSalesperson || '', yn(r.salesRepMismatch),
       yn(r.hsVsCoMismatch), yn(r.previouslyPayingRequired), yn(r.previouslyPayingChecked), yn(r.previouslyPayingMissing),
@@ -354,7 +348,7 @@ export default function MinuteAuditor() {
     const s = {
       total: flat.length, audited: 0, flagged: 0, matched: 0, skipped: 0, legacy: 0,
       hubspotMatched: 0, multiple: 0,
-      reasonTrial: 0, reasonPlan: 0, reasonBillDay: 0, reasonRate: 0, reasonZeroUsage: 0, reasonNoSub: 0,
+      reasonTrial: 0, reasonPlan: 0, reasonBillDay: 0, reasonZeroUsage: 0, reasonNoSub: 0,
       hubspotNameAgree: 0, hubspotNameDisagree: 0,
     };
     for (const r of flat) {
@@ -372,7 +366,6 @@ export default function MinuteAuditor() {
         if      (r.reason === 'Trial with active sub')       s.reasonTrial++;
         else if (r.reason === 'Plan mismatch')               s.reasonPlan++;
         else if (r.reason === 'Bill day mismatch')           s.reasonBillDay++;
-        else if (r.reason === 'Rate mismatch')               s.reasonRate++;
         else if (r.reason === 'Zero usage')                  s.reasonZeroUsage++;
         else if (r.reason === 'No subscription')             s.reasonNoSub++;
         else if (r.reason === 'HubSpot name mismatch')       s.reasonHsName = (s.reasonHsName || 0) + 1;
@@ -612,7 +605,6 @@ export default function MinuteAuditor() {
                 {summary.reasonTrial      > 0 && <div style={{ flex: summary.reasonTrial,      background: 'var(--warn-600)' }} title={`Trial with active sub (${summary.reasonTrial})`} />}
                 {summary.reasonPlan       > 0 && <div style={{ flex: summary.reasonPlan,       background: 'var(--crit-600)' }} title={`Plan mismatch (${summary.reasonPlan})`} />}
                 {summary.reasonBillDay    > 0 && <div style={{ flex: summary.reasonBillDay,    background: 'var(--crit-500)' }} title={`Bill day mismatch (${summary.reasonBillDay})`} />}
-                {summary.reasonRate       > 0 && <div style={{ flex: summary.reasonRate,       background: 'var(--crit-100)' }} title={`Rate mismatch (${summary.reasonRate})`} />}
                 {summary.reasonZeroUsage  > 0 && <div style={{ flex: summary.reasonZeroUsage,  background: 'var(--crit-700)' }} title={`Zero usage, active sub (${summary.reasonZeroUsage})`} />}
                 {summary.reasonNoSub      > 0 && <div style={{ flex: summary.reasonNoSub,      background: 'var(--warn-500)' }} title={`No subscription (${summary.reasonNoSub})`} />}
                 {summary.reasonHsName     > 0 && <div style={{ flex: summary.reasonHsName,     background: 'var(--warn-100)' }} title={`HubSpot name mismatch (${summary.reasonHsName})`} />}
@@ -623,7 +615,6 @@ export default function MinuteAuditor() {
                 <LegendChip color="var(--warn-600)" label="Trial with active sub"    n={summary.reasonTrial} />
                 <LegendChip color="var(--crit-600)" label="Plan mismatch"            n={summary.reasonPlan} />
                 <LegendChip color="var(--crit-500)" label="Bill day mismatch"        n={summary.reasonBillDay} />
-                <LegendChip color="var(--crit-100)" label="Rate mismatch"            n={summary.reasonRate} />
                 <LegendChip color="var(--crit-700)" label="Zero usage, active sub"   n={summary.reasonZeroUsage} />
                 <LegendChip color="var(--warn-500)" label="No subscription"          n={summary.reasonNoSub} />
                 {summary.reasonHsName     > 0 && <LegendChip color="var(--warn-100)" label="HubSpot name mismatch"    n={summary.reasonHsName} />}
@@ -973,12 +964,6 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole
               <DetailField label="Bill day (ChargeOver)"
                 value={r.coBillDay != null ? ordinal(r.coBillDay) : '—'}
                 sub={r.chargeover?.nextInvoiceDate ? `next invoice ${r.chargeover.nextInvoiceDate}` : null} />
-              <DetailField label="Overage rate (Answer)"
-                value={r.csvOverageRate != null ? `$${r.csvOverageRate.toFixed(2)}/min` : '—'}
-                sub={r.rateMismatch ? 'differs from pricing sheet' : null} />
-              <DetailField label={`Overage rate (${r.chargeover?.tenant || r.clientType || '?'} pricing sheet)`}
-                value={r.pricingSheetOverageRate != null ? `$${r.pricingSheetOverageRate.toFixed(2)}/min` : (r.csvPlan != null ? 'no tier match' : '—')}
-                sub={r.csvPlan != null ? `${r.csvPlan}-min tier` : null} />
               {r.hubspotDealFound ? (
                 <DetailField label="Sales rep (HubSpot) — source of truth"
                   value={r.hubspotSalesRepEmail || r.hubspotSalesRep || '—'}

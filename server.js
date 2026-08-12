@@ -5984,53 +5984,6 @@ function parseNumericPlan(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-// Parse a per-minute rate string ("$2.65", "2.65", "$2.65/min", "2.65 per min")
-// into a Number. Returns null when the value isn't numeric.
-function parseRate(v) {
-  if (v == null || v === '') return null;
-  const cleaned = String(v).replace(/[$,]/g, '').match(/-?\d+(\.\d+)?/);
-  if (!cleaned) return null;
-  const n = parseFloat(cleaned[0]);
-  return Number.isFinite(n) ? n : null;
-}
-
-// ─── Pricing-sheet overage-rate table (2026) ────────────────────────────
-// Per-minute rates by tenant + plan tier — the source of truth for the
-// Minute Auditor's rate-mismatch check. When the pricing sheet changes,
-// update these tables and redeploy. AL has discrete plans up to 550 plus
-// two ranges; RS has four discrete plans.
-const AL_RATE_TABLE = [
-  { plan: 30,  rate: 5.07 }, { plan: 50,  rate: 4.21 }, { plan: 75,  rate: 4.19 },
-  { plan: 100, rate: 3.60 }, { plan: 150, rate: 3.49 }, { plan: 200, rate: 3.38 },
-  { plan: 250, rate: 3.25 }, { plan: 300, rate: 3.12 }, { plan: 350, rate: 3.00 },
-  { plan: 400, rate: 2.78 }, { plan: 450, rate: 2.72 }, { plan: 500, rate: 2.67 },
-  { plan: 550, rate: 2.64 },
-];
-const AL_RANGE_TIERS = [
-  { min: 600,  max: 1499,  rate: 2.60 },
-  { min: 1500, max: 20000, rate: 2.55 },
-];
-const RS_RATE_TABLE = [
-  { plan: 50,   rate: 2.65 },
-  { plan: 100,  rate: 2.40 },
-  { plan: 500,  rate: 2.15 },
-  { plan: 1000, rate: 2.05 },
-];
-function pricingSheetRate(tenant, planMinutes) {
-  if (planMinutes == null || !Number.isFinite(planMinutes)) return null;
-  if (tenant === 'AL') {
-    const exact = AL_RATE_TABLE.find(t => t.plan === planMinutes);
-    if (exact) return exact.rate;
-    const range = AL_RANGE_TIERS.find(t => planMinutes >= t.min && planMinutes <= t.max);
-    return range ? range.rate : null;
-  }
-  if (tenant === 'RS') {
-    const exact = RS_RATE_TABLE.find(t => t.plan === planMinutes);
-    return exact ? exact.rate : null;
-  }
-  return null;
-}
-
 async function runMinuteAuditorJob(jobId, rows) {
   const job = minuteAuditorJobs.get(jobId);
   if (!job) return;
@@ -6091,7 +6044,6 @@ async function runMinuteAuditorJob(jobId, rows) {
       nameMismatch: false,    nameMatchScore: null,
       planMismatch: false,    csvPlan: null, coPlan: null,
       billDayMismatch: false, csvBillDay: null, coBillDay: null,
-      rateMismatch: false,    csvOverageRate: null, pricingSheetOverageRate: null,
       zeroUsageActiveSub: false,
       // HubSpot cross-check fields
       hubspotDealFound: false, hubspotDealId: null, hubspotDealName: null, hubspotDealCompany: null,
@@ -6130,29 +6082,12 @@ async function runMinuteAuditorJob(jobId, rows) {
         result.coPlan     = parseNumericPlan(co.planMinutes);
         result.csvBillDay = parseCycleDay(row.billingCycle);
         result.coBillDay  = parseInvoiceDay(co.billAnchorDate);
-        // Overage-rate check: compare the CSV's per-minute rate against the
-        // AL/RS pricing sheet for this plan tier. Populated for display
-        // regardless; only flags when the sub is active (canceled subs have
-        // stale rates, same reasoning as plan/bill-day).
-        //
-        // Use the RESOLVED tenant (co.tenant), not row.clientType. The CSV
-        // clientType is just a hint — resolveInPrefetched may have picked
-        // the other tenant when both AL and RS had the coCustomerId, and
-        // we need to price against wherever the customer actually lives.
-        result.csvOverageRate          = parseRate(row.overageRate);
-        result.pricingSheetOverageRate = pricingSheetRate(co.tenant, result.csvPlan);
         if (result.active === true) {
           if (result.csvPlan != null && result.coPlan != null) {
             result.planMismatch = result.csvPlan !== result.coPlan;
           }
           if (result.csvBillDay != null && result.coBillDay != null) {
             result.billDayMismatch = result.csvBillDay !== result.coBillDay;
-          }
-          if (result.csvOverageRate != null && result.pricingSheetOverageRate != null) {
-            // 10-cent tolerance — anything within ±$0.10/min of the pricing
-            // sheet is treated as matching (rounding, legacy hand-entered
-            // rates, small negotiated variances).
-            result.rateMismatch = Math.abs(result.csvOverageRate - result.pricingSheetOverageRate) > 0.10;
           }
         }
         // HubSpot cross-check — match CO customer to a PAID deal by superuser
@@ -6310,7 +6245,6 @@ async function runMinuteAuditorJob(jobId, rows) {
       if (result.zeroUsageActiveSub)  result.flagReasons.push('Zero usage');
       if (result.planMismatch && !isMultiple) result.flagReasons.push('Plan mismatch');
       if (result.billDayMismatch)     result.flagReasons.push('Bill day mismatch');
-      if (result.rateMismatch)        result.flagReasons.push('Rate mismatch');
       // CSV(Answer)<->CO name divergence is informational only. Answer's display
       // name and the CO company can legitimately differ (d/b/a, rename, legal
       // entity vs client-facing name). The name check that matters is
