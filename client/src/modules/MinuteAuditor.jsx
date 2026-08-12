@@ -19,39 +19,37 @@ function fmtNum(v) {
 // HubSpot is deliberately absent here. It never contributes a reason and never
 // flags a row; it lives entirely in its own tab. The core audit is
 // Answer ↔ ChargeOver only.
-function computeReason(r) {
-  if (r.skipped) return 'Skipped';
+// Return every reason that applies to a row, ordered by priority. Rows
+// often have multiple simultaneous issues (e.g. Plan mismatch + Rate
+// mismatch + Sales rep mismatch); showing only the primary hides the
+// others. Ordering matches the old single-reason precedence so the first
+// element still counts as the "primary" for summary tallies.
+function computeAllReasons(r) {
+  if (r.skipped) return ['Skipped'];
   const cat = String(r.billingCategory || '').toUpperCase();
-  // TRIAL is audited inversely: no active sub is expected. Having one is
-  // the only thing that flags a trial.
-  if (cat === 'TRIAL') return r.active === true ? 'Trial with active sub' : 'Matched';
-  // MANUAL customers are billed manually — no subscription is expected,
-  // no plan / bill-day check applies.
-  if (cat === 'MANUAL') return 'Matched';
-  // Zero-usage-on-active-sub ranks ABOVE plan / bill-day drift: if the
-  // customer isn't using the service at all, any plan or bill-day mismatch
-  // is downstream noise — ops needs to reach out or cancel, not tune the
-  // sub. Previously this was ranked below Plan/Bill day, which masked the
-  // count entirely.
-  if (r.zeroUsageActiveSub) return 'Zero usage';
-  // MULTIPLE customers legitimately span different plans across their
-  // parent + child accounts, so plan mismatch alone isn't a real issue.
-  if (r.planMismatch && cat !== 'MULTIPLE') return 'Plan mismatch';
-  if (r.billDayMismatch) return 'Bill day mismatch';
-  if (r.rateMismatch)    return 'Rate mismatch';
+  if (cat === 'TRIAL') return [r.active === true ? 'Trial with active sub' : 'Matched'];
+  if (cat === 'MANUAL') return ['Matched'];
+
+  const reasons = [];
   const notInCO = r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
-  if (notInCO || r.active !== true) return 'No subscription';
-  // CSV(Answer)↔CO name divergence is informational only — the required
-  // name check is CO↔HubSpot, evaluated below. The alias display in the
-  // row cell still calls out the divergence for context.
-  // HubSpot cross-check flags. These only fire when a HubSpot deal was
-  // matched — no false negatives from missing HubSpot coverage.
-  if (r.previouslyPayingMissing)            return 'Previously paying unchecked';
-  if (r.hsVsCoMismatch && !r.isLegacy)      return 'HubSpot name mismatch';
-  if (r.salesRepMismatch && !r.isLegacy)    return 'Sales rep mismatch';
-  if (r.isLegacy)         return 'Legacy';
-  return 'Matched';
+  const parentCovers = r.chargeover?.parentHasActiveSub === true;
+  // No-subscription outranks the drift checks (zero usage / plan / bill /
+  // rate) because those are downstream noise when there's no sub at all.
+  if ((notInCO || r.active !== true) && !parentCovers) reasons.push('No subscription');
+  if (r.zeroUsageActiveSub)                      reasons.push('Zero usage');
+  if (r.planMismatch && cat !== 'MULTIPLE')      reasons.push('Plan mismatch');
+  if (r.billDayMismatch)                         reasons.push('Bill day mismatch');
+  if (r.rateMismatch)                            reasons.push('Rate mismatch');
+  if (r.previouslyPayingMissing)                 reasons.push('Previously paying unchecked');
+  if (r.hsVsCoMismatch && !r.isLegacy)           reasons.push('HubSpot name mismatch');
+  if (r.salesRepMismatch && !r.isLegacy)         reasons.push('Sales rep mismatch');
+  if (reasons.length === 0) return [r.isLegacy ? 'Legacy' : 'Matched'];
+  return reasons;
 }
+
+// Primary reason kept for summary/legend counts + reason filter. The row
+// display uses the full list.
+function computeReason(r) { return computeAllReasons(r)[0]; }
 
 function describeReason(r) {
   if (r.reason === 'Matched')            return 'Answer and ChargeOver agree on plan and bill day.';
@@ -313,9 +311,11 @@ export default function MinuteAuditor() {
     const answer = parseInt(String(r.used || '').replace(/,/g, ''), 10) || parseInt(String(r.totalCalls || '').replace(/,/g, ''), 10) || 0;
     const billed = r.active === true ? (r.coPlan != null ? r.coPlan : null) : null;
     const gap = billed == null ? answer : answer - billed;
+    const allReasons = computeAllReasons(r);
     return {
       ...r, id: i, answer, billed, gap,
-      reason: computeReason(r),
+      reason: allReasons[0],
+      allReasons,
       coCompany: co.company || '',
       coUrl: co.url || '',
       resolvedTenant: co.tenant || r.clientType || '',
@@ -849,6 +849,19 @@ function ReasonPill({ reason }) {
   return <Badge tone={tone} dot={tone !== 'neutral'}>{reason}</Badge>;
 }
 
+// Stack every applicable reason so ops sees the full picture, not just
+// the top-precedence one. "Matched" / "Skipped" / "Legacy" collapse to a
+// single pill.
+function ReasonPills({ reasons }) {
+  if (!reasons || reasons.length === 0) return <ReasonPill reason="Matched" />;
+  if (reasons.length === 1) return <ReasonPill reason={reasons[0]} />;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+      {reasons.map(r => <ReasonPill key={r} reason={r} />)}
+    </div>
+  );
+}
+
 
 function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole }) {
   const rowState = (r.planMismatch || r.billDayMismatch) ? 'crit'
@@ -896,7 +909,7 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole
             </td>
             <td data-align="center"><CompareCell csv={r.csvPlan} co={r.coPlan} unit=" min" mismatch={r.planMismatch} /></td>
             <td data-align="center"><CompareCell csv={r.csvBillDay} co={r.coBillDay} unit="" ordinal mismatch={r.billDayMismatch} /></td>
-            <td><ReasonPill reason={r.reason} /></td>
+            <td><ReasonPills reasons={r.allReasons} /></td>
             <td data-align="right" data-num>{fmtNum(r.answer)}</td>
             {showAllCols && <td>{r.billingCategory || '—'}</td>}
             {showAllCols && <td>{r.billingCycle || '—'}</td>}
@@ -906,7 +919,7 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole
             <td>{r.billingCategory || '—'}</td>
             <td data-align="center"><CompareCell csv={r.csvPlan} co={r.coPlan} unit=" min" mismatch={r.planMismatch} /></td>
             <td data-align="center"><CompareCell csv={r.csvBillDay} co={r.coBillDay} unit="" ordinal mismatch={r.billDayMismatch} /></td>
-            <td><ReasonPill reason={r.reason} /></td>
+            <td><ReasonPills reasons={r.allReasons} /></td>
             <td data-align="right" data-num>{fmtNum(r.answer)}</td>
             {showAllCols && <td>{r.billingCycle || '—'}</td>}
             {showAllCols && <td data-align="right" data-num>{fmtNum(r.totalCalls)}</td>}
