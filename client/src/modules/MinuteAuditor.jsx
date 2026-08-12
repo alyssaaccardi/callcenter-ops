@@ -27,30 +27,45 @@ function fmtNum(v) {
 function computeAllReasons(r) {
   if (r.skipped) return ['Skipped'];
   const cat = String(r.billingCategory || '').toUpperCase();
-  // Name drift (Answer<->CO) is INFORMATIONAL only — doesn't count as a
-  // real flag (see server: no flagReasons push), doesn't send rows to
-  // Needs attention, but appears as a neutral pill so ops can filter and
-  // see the divergence. Attached to every category so it's visible on
-  // TRIAL / MANUAL / Matched rows too.
-  const nameDrift = r.nameMismatch && !r.isLegacy ? ['Name drift (Answer↔CO)'] : [];
-
-  if (cat === 'TRIAL') return [r.active === true ? 'Trial with active sub' : 'Matched', ...nameDrift];
-  if (cat === 'MANUAL') return ['Matched', ...nameDrift];
-
-  const reasons = [];
   const notInCO = r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
   const parentCovers = r.chargeover?.parentHasActiveSub === true;
+  // Mirror the server's hasUsage check so "No subscription" pill only
+  // shows when the row has actual usage — otherwise a deactivated CO
+  // customer would carry the pill without being flagged, which reads as a
+  // false positive.
+  const hasUsage = (Number(String(r.used || '').replace(/,/g, '')) > 0) ||
+                   (parseInt(String(r.totalCalls || '').replace(/,/g, ''), 10) > 0);
+  // Name drift + HubSpot cross-check flags apply to EVERY category. Server
+  // flags salesRepMismatch / hsVsCoMismatch / previouslyPayingMissing
+  // outside the trial/manual branch, so the client must too — otherwise a
+  // MANUAL return-customer with an unchecked "Previously Paying" box is
+  // flagged server-side but shows only "Matched" in the pill column.
+  const universalTail = [];
+  if (r.previouslyPayingMissing)         universalTail.push('Previously paying unchecked');
+  if (r.hsVsCoMismatch && !r.isLegacy)   universalTail.push('HubSpot name mismatch');
+  if (r.salesRepMismatch && !r.isLegacy) universalTail.push('Sales rep mismatch');
+  // Name drift (Answer<->CO) is INFORMATIONAL only — doesn't count as a
+  // real flag (server never pushes it), but shows as a neutral pill so
+  // ops can filter and see the divergence.
+  if (r.nameMismatch && !r.isLegacy)     universalTail.push('Name drift (Answer↔CO)');
+
+  if (cat === 'TRIAL') {
+    const primary = r.active === true ? 'Trial with active sub' : 'Matched';
+    return [primary, ...universalTail];
+  }
+  if (cat === 'MANUAL') {
+    return ['Matched', ...universalTail];
+  }
+
+  const reasons = [];
   // No-subscription outranks the drift checks (zero usage / plan / bill /
   // rate) because those are downstream noise when there's no sub at all.
-  if ((notInCO || r.active !== true) && !parentCovers) reasons.push('No subscription');
+  if (hasUsage && (notInCO || r.active !== true) && !parentCovers) reasons.push('No subscription');
   if (r.zeroUsageActiveSub)                      reasons.push('Zero usage');
   if (r.planMismatch && cat !== 'MULTIPLE')      reasons.push('Plan mismatch');
   if (r.billDayMismatch)                         reasons.push('Bill day mismatch');
   if (r.rateMismatch)                            reasons.push('Rate mismatch');
-  if (r.previouslyPayingMissing)                 reasons.push('Previously paying unchecked');
-  if (r.hsVsCoMismatch && !r.isLegacy)           reasons.push('HubSpot name mismatch');
-  if (r.salesRepMismatch && !r.isLegacy)         reasons.push('Sales rep mismatch');
-  reasons.push(...nameDrift);
+  reasons.push(...universalTail);
   if (reasons.length === 0) return [r.isLegacy ? 'Legacy' : 'Matched'];
   return reasons;
 }
