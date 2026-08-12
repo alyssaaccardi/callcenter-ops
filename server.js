@@ -5607,12 +5607,14 @@ function resolveInPrefetched(prefetched, tenantHint, coId, hintName) {
   const id = String(coId).trim();
   if (!id) return null;
   // ChargeOver customer_ids overlap between AL and RS — the same numeric id
-  // exists in both tenants pointing to unrelated customers. Always look in
-  // both and pick the tenant whose company best matches the CSV client name.
-  // Previously we early-returned on the first hit (or on the hinted tenant),
-  // which surfaced the wrong customer whenever the CSV clientType pointed at
-  // the wrong tenant — that's the root cause of unexplained "Name mismatch"
-  // flags. tenantHint is now only a tiebreaker for the no-name case.
+  // exists in both tenants pointing to unrelated customers. Resolution order:
+  //   1. Trust the CSV Client Type (tenantHint) — look up coId in that tenant.
+  //   2. Verify by name: if the hinted tenant's company doesn't match the CSV
+  //      client name, fall back to the other tenant.
+  //   3. No hint → fuzzy name match picks the winner.
+  // Name-first (the previous behavior) mis-picked the AL customer for
+  // short/acronym client names like "FLAC" where AL#N happened to fuzzy-score
+  // higher against the acronym than the real RS#N did.
   const candidates = [];
   for (const tt of ['AL', 'RS']) {
     const dd = prefetched[tt];
@@ -5622,30 +5624,46 @@ function resolveInPrefetched(prefetched, tenantHint, coId, hintName) {
     candidates.push({ t: tt, data: dd, cust: cc });
   }
   if (candidates.length === 0) return null;
+  const HARD_MISS_THRESHOLD = 0.3;
+  const scoreOf = c => (hintName && c?.cust?.company) ? nameMatchScore(hintName, c.cust.company) : null;
   let winner;
   if (candidates.length === 1) {
     winner = candidates[0];
+  } else if (tenantHint && ['AL', 'RS'].includes(tenantHint)) {
+    const hinted = candidates.find(c => c.t === tenantHint);
+    const other  = candidates.find(c => c.t !== tenantHint);
+    if (!hinted) {
+      winner = other;
+    } else {
+      const hintedScore = scoreOf(hinted);
+      const otherScore  = scoreOf(other);
+      // Trust the hint unless its name is a hard miss AND the other tenant is
+      // a clearly better match. Otherwise stick with the hinted tenant.
+      if (hintedScore != null && hintedScore < HARD_MISS_THRESHOLD &&
+          otherScore  != null && otherScore  >= HARD_MISS_THRESHOLD) {
+        winner = other;
+      } else {
+        winner = hinted;
+      }
+    }
   } else if (hintName) {
     winner = candidates
       .map(c => ({ c, s: c.cust.company ? nameMatchScore(hintName, c.cust.company) : 0 }))
       .sort((a, b) => b.s - a.s)[0].c;
-  } else if (tenantHint && ['AL', 'RS'].includes(tenantHint)) {
-    winner = candidates.find(c => c.t === tenantHint) || candidates[0];
   } else {
     winner = candidates[0];
   }
   // Hard-miss guard applies ONLY when we had to CHOOSE between candidates
-  // (both AL and RS have this id). In that case a hard-miss on the winner
-  // means the picker landed on the wrong tenant AND neither is a good match
-  // — safer to return null than reconcile against an unrelated customer.
+  // AND we had no tenant hint to trust. When the CSV tenant is set, we defer
+  // to it (that's the whole point of the new priority); the alias display
+  // still surfaces any name divergence to ops.
   //
   // With a single candidate, the id is authoritative. A low name score is
   // either a CO typo ("Liston PLLC" vs CSV "Litson PLLC") or a genuinely
   // wrong id, but either way ops needs to see the row — the alias display
   // already surfaces the divergence. Silently rejecting hides both real
   // billing issues and CO data-quality problems.
-  const HARD_MISS_THRESHOLD = 0.3;
-  if (candidates.length > 1 && hintName && winner.cust.company) {
+  if (candidates.length > 1 && !tenantHint && hintName && winner.cust.company) {
     const winnerScore = nameMatchScore(hintName, winner.cust.company);
     if (winnerScore < HARD_MISS_THRESHOLD) return null;
   }
