@@ -368,7 +368,7 @@ export default function MinuteAuditor() {
       if (tab === 'matched'   && (r.flagged || r.active !== true)) return false;
       if (tab === 'hubspot'   && !r.hubspotDealFound) return false;
       if (tab === 'multiple'  && String(r.billingCategory || '').toUpperCase() !== 'MULTIPLE') return false;
-      if (reasonFilter !== 'all' && r.reason !== reasonFilter) return false;
+      if (reasonFilter !== 'all' && !(r.allReasons || [r.reason]).includes(reasonFilter)) return false;
       if (q) {
         const hay = `${r.client || ''} ${r.coCustomerId || ''} ${r.coCompany || ''} ${r.hubspotDealName || ''} ${r.hubspotDealCompany || ''} ${r.hubspotSalesRep || ''} ${r.hubspotSalesRepEmail || ''} ${r.coSalesperson || ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -613,6 +613,10 @@ export default function MinuteAuditor() {
             value={`${summary.reconciledPct}%`} tone="ok" hint={String(summary.matched)} />
           <Tile eyebrow="Flagged" sub={summary.flagged > 0 ? 'need review' : 'nothing to review'}
             value={String(summary.flagged)} tone={summary.flagged > 0 ? 'crit' : undefined} />
+          {summary.reasonZeroUsage > 0 && (
+            <Tile eyebrow="Zero usage" sub="paying, not using"
+              value={String(summary.reasonZeroUsage)} tone="crit" />
+          )}
           {summary.legacy > 0 && (
             <Tile eyebrow="Legacy" sub="created before 2020"
               value={String(summary.legacy)} hint="name-drift flags suppressed" />
@@ -851,12 +855,13 @@ function ReasonPill({ reason }) {
 
 // Stack every applicable reason so ops sees the full picture, not just
 // the top-precedence one. "Matched" / "Skipped" / "Legacy" collapse to a
-// single pill.
+// single pill. Vertical stack keeps row heights predictable and pills
+// left-aligned (flex-wrap made them looked ragged when a row had 3-4).
 function ReasonPills({ reasons }) {
   if (!reasons || reasons.length === 0) return <ReasonPill reason="Matched" />;
   if (reasons.length === 1) return <ReasonPill reason={reasons[0]} />;
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+    <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3 }}>
       {reasons.map(r => <ReasonPill key={r} reason={r} />)}
     </div>
   );
