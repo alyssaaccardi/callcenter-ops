@@ -27,8 +27,15 @@ function fmtNum(v) {
 function computeAllReasons(r) {
   if (r.skipped) return ['Skipped'];
   const cat = String(r.billingCategory || '').toUpperCase();
-  if (cat === 'TRIAL') return [r.active === true ? 'Trial with active sub' : 'Matched'];
-  if (cat === 'MANUAL') return ['Matched'];
+  // Name drift (Answer<->CO) is INFORMATIONAL only — doesn't count as a
+  // real flag (see server: no flagReasons push), doesn't send rows to
+  // Needs attention, but appears as a neutral pill so ops can filter and
+  // see the divergence. Attached to every category so it's visible on
+  // TRIAL / MANUAL / Matched rows too.
+  const nameDrift = r.nameMismatch && !r.isLegacy ? ['Name drift (Answer↔CO)'] : [];
+
+  if (cat === 'TRIAL') return [r.active === true ? 'Trial with active sub' : 'Matched', ...nameDrift];
+  if (cat === 'MANUAL') return ['Matched', ...nameDrift];
 
   const reasons = [];
   const notInCO = r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
@@ -43,6 +50,7 @@ function computeAllReasons(r) {
   if (r.previouslyPayingMissing)                 reasons.push('Previously paying unchecked');
   if (r.hsVsCoMismatch && !r.isLegacy)           reasons.push('HubSpot name mismatch');
   if (r.salesRepMismatch && !r.isLegacy)         reasons.push('Sales rep mismatch');
+  reasons.push(...nameDrift);
   if (reasons.length === 0) return [r.isLegacy ? 'Legacy' : 'Matched'];
   return reasons;
 }
@@ -60,6 +68,7 @@ function describeReason(r) {
   if (r.reason === 'Zero usage')         return `Zero minutes and zero calls this cycle in Answer, but the ChargeOver subscription is still active — the customer likely deactivated in Answer or never went live, and CO wasn't caught up.`;
   if (r.reason === 'Trial with active sub') return `Answer marks this account as TRIAL, but ChargeOver has an active subscription. Trials shouldn't be paying — either Answer needs to update to STANDARD or ChargeOver needs to end the trial.`;
   if (r.reason === 'HubSpot name mismatch') return `ChargeOver company "${r.chargeover?.company || ''}" doesn't match the HubSpot deal "${r.hubspotName || ''}". HubSpot is source of truth — update ChargeOver to match.`;
+  if (r.reason === 'Name drift (Answer↔CO)') return `Answer client "${r.client}" and ChargeOver company "${r.chargeover?.company || ''}" diverge. Informational only — CO↔HubSpot is the required match.`;
   if (r.reason === 'Sales rep mismatch') return `HubSpot Deal Owner is "${r.hubspotSalesRepEmail || r.hubspotSalesRep || '?'}" but the ChargeOver salesperson field is "${r.coSalesperson || '?'}". HubSpot is source of truth — update ChargeOver.`;
   if (r.reason === 'Previously paying unchecked') return `Customer has a canceled subscription AND an active one in ChargeOver (returning customer), but "Previously Paying Customer" isn't checked on the HubSpot deal.`;
   if (r.reason === 'Legacy')             return `Grandfathered — ${r.legacyReason || 'created before the cutoff'}. Name-drift flags suppressed; billing flags stay live.`;
@@ -75,6 +84,7 @@ const REASON_TONE = {
   'Zero usage':                    'crit',
   'No subscription':               'warn',
   'HubSpot name mismatch':         'warn',
+  'Name drift (Answer↔CO)':        'neutral',
   'Sales rep mismatch':            'warn',
   'Previously paying unchecked':   'warn',
   'Legacy':                        'neutral',
@@ -90,6 +100,7 @@ const REASON_OPTIONS = [
   { value: 'Zero usage',                   label: 'Zero usage, active sub' },
   { value: 'No subscription',              label: 'No subscription' },
   { value: 'HubSpot name mismatch',        label: 'HubSpot name mismatch (CO↔HS)' },
+  { value: 'Name drift (Answer↔CO)',       label: 'Name drift (Answer↔CO) — informational' },
   { value: 'Sales rep mismatch',           label: 'Sales rep mismatch (HubSpot↔CO)' },
   { value: 'Previously paying unchecked',  label: 'Previously paying unchecked (HS)' },
   { value: 'Legacy',                       label: 'Legacy (grandfathered)' },
