@@ -5634,15 +5634,18 @@ function resolveInPrefetched(prefetched, tenantHint, coId, hintName) {
   } else {
     winner = candidates[0];
   }
-  // Hard-miss guard: when the CSV supplied a name and the winner's company is
-  // completely unrelated, treat as "wrong id". Otherwise the CSV row would
-  // reconcile against an unrelated customer (Neil Flit's canceled sub
-  // producing a bogus Plan mismatch against F.L.A.C. Services, etc.). 0.3 is
-  // well below NAME_MATCH_THRESHOLD (0.7) — d/b/a and rename variations still
-  // pass through and hit the normal name-mismatch flag; only true unrelated
-  // customers get rejected here.
+  // Hard-miss guard applies ONLY when we had to CHOOSE between candidates
+  // (both AL and RS have this id). In that case a hard-miss on the winner
+  // means the picker landed on the wrong tenant AND neither is a good match
+  // — safer to return null than reconcile against an unrelated customer.
+  //
+  // With a single candidate, the id is authoritative. A low name score is
+  // either a CO typo ("Liston PLLC" vs CSV "Litson PLLC") or a genuinely
+  // wrong id, but either way ops needs to see the row — the alias display
+  // already surfaces the divergence. Silently rejecting hides both real
+  // billing issues and CO data-quality problems.
   const HARD_MISS_THRESHOLD = 0.3;
-  if (hintName && winner.cust.company) {
+  if (candidates.length > 1 && hintName && winner.cust.company) {
     const winnerScore = nameMatchScore(hintName, winner.cust.company);
     if (winnerScore < HARD_MISS_THRESHOLD) return null;
   }
