@@ -57,7 +57,7 @@ function describeReason(r) {
   if (r.reason === 'Matched')            return 'Answer and ChargeOver agree on plan and bill day.';
   if (r.reason === 'Plan mismatch')      return `Answer allotted ${r.csvPlan ?? '?'} min; ChargeOver plan is ${r.coPlan ?? '?'} min.`;
   if (r.reason === 'Bill day mismatch')  return `Answer bills on day ${r.csvBillDay ?? '?'}; ChargeOver next invoice is day ${r.coBillDay ?? '?'}.`;
-  if (r.reason === 'Rate mismatch')      return `Answer has $${(r.csvOverageRate ?? '?')}/min but the ${r.clientType || '?'} ${r.csvPlan ?? '?'}-min tier on the pricing sheet is $${(r.pricingSheetOverageRate ?? '?')}/min.`;
+  if (r.reason === 'Rate mismatch')      return `Answer has $${(r.csvOverageRate ?? '?')}/min but the ${r.chargeover?.tenant || r.clientType || '?'} ${r.csvPlan ?? '?'}-min tier on the pricing sheet is $${(r.pricingSheetOverageRate ?? '?')}/min.`;
   if (r.reason === 'No subscription')    return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
   if (r.reason === 'Zero usage')         return `Zero minutes and zero calls this cycle in Answer, but the ChargeOver subscription is still active — the customer likely deactivated in Answer or never went live, and CO wasn't caught up.`;
   if (r.reason === 'Trial with active sub') return `Answer marks this account as TRIAL, but ChargeOver has an active subscription. Trials shouldn't be paying — either Answer needs to update to STANDARD or ChargeOver needs to end the trial.`;
@@ -932,7 +932,7 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole
               <DetailField label="Overage rate (Answer)"
                 value={r.csvOverageRate != null ? `$${r.csvOverageRate.toFixed(2)}/min` : '—'}
                 sub={r.rateMismatch ? 'differs from pricing sheet' : null} />
-              <DetailField label={`Overage rate (${r.clientType || '?'} pricing sheet)`}
+              <DetailField label={`Overage rate (${r.chargeover?.tenant || r.clientType || '?'} pricing sheet)`}
                 value={r.pricingSheetOverageRate != null ? `$${r.pricingSheetOverageRate.toFixed(2)}/min` : (r.csvPlan != null ? 'no tier match' : '—')}
                 sub={r.csvPlan != null ? `${r.csvPlan}-min tier` : null} />
               {r.hubspotDealFound ? (

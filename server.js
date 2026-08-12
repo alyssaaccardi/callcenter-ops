@@ -6134,8 +6134,13 @@ async function runMinuteAuditorJob(jobId, rows) {
         // AL/RS pricing sheet for this plan tier. Populated for display
         // regardless; only flags when the sub is active (canceled subs have
         // stale rates, same reasoning as plan/bill-day).
-        result.csvOverageRate         = parseRate(row.overageRate);
-        result.pricingSheetOverageRate = pricingSheetRate(row.clientType, result.csvPlan);
+        //
+        // Use the RESOLVED tenant (co.tenant), not row.clientType. The CSV
+        // clientType is just a hint — resolveInPrefetched may have picked
+        // the other tenant when both AL and RS had the coCustomerId, and
+        // we need to price against wherever the customer actually lives.
+        result.csvOverageRate          = parseRate(row.overageRate);
+        result.pricingSheetOverageRate = pricingSheetRate(co.tenant, result.csvPlan);
         if (result.active === true) {
           if (result.csvPlan != null && result.coPlan != null) {
             result.planMismatch = result.csvPlan !== result.coPlan;
