@@ -6228,28 +6228,33 @@ async function runMinuteAuditorJob(jobId, rows) {
     const isManual   = catUpper === 'MANUAL';
     const isMultiple = catUpper === 'MULTIPLE';
 
-    if (isTrial) {
-      // Only check: trials shouldn't have active subscriptions.
-      if (result.active === true) result.flagReasons.push('Trial with active sub');
-    } else if (isManual) {
-      // Manuals aren't subscription-billed. Nothing to audit here.
-    } else {
-      // Children of a paying parent are covered by the parent's sub —
-      // don't flag them individually for missing their own subscription.
+    // Flag pipeline runs every applicable check for every row. Category
+    // exemptions are per-check, not per-row, so a TRIAL with an active sub
+    // AND a plan drift now flags both, and a MANUAL customer with a bill-day
+    // drift still surfaces. Previous version early-returned on category and
+    // silently dropped downstream flags.
+    //
+    // Exemptions:
+    //   - "Trial with active sub" only meaningful for TRIAL.
+    //   - "No CO match" / "Not paying" (usage without sub) is skipped for
+    //     TRIAL and MANUAL — trials don't pay by design and manuals are
+    //     invoiced outside CO subs.
+    //   - "Plan mismatch" skipped for MULTIPLE (parent + child span
+    //     different plans legitimately).
+    if (isTrial && result.active === true) result.flagReasons.push('Trial with active sub');
+    if (!isTrial && !isManual) {
       const parentCovers = result.chargeover?.parentHasActiveSub === true;
       const usageIssue   = hasUsage(row) && result.active !== true && !parentCovers;
       if (usageIssue) {
         result.flagReasons.push(result.error === 'Not found in ChargeOver' || result.error === 'No COCustomerId'
           ? 'No CO match' : 'Not paying');
       }
-      if (result.zeroUsageActiveSub)  result.flagReasons.push('Zero usage');
-      if (result.planMismatch && !isMultiple) result.flagReasons.push('Plan mismatch');
-      if (result.billDayMismatch)     result.flagReasons.push('Bill day mismatch');
-      // CSV(Answer)<->CO name divergence is informational only. Answer's display
-      // name and the CO company can legitimately differ (d/b/a, rename, legal
-      // entity vs client-facing name). The name check that matters is
-      // CO<->HubSpot, handled below in the HubSpot cross-check block.
     }
+    if (result.zeroUsageActiveSub)  result.flagReasons.push('Zero usage');
+    if (result.planMismatch && !isMultiple) result.flagReasons.push('Plan mismatch');
+    if (result.billDayMismatch)     result.flagReasons.push('Bill day mismatch');
+    // CSV(Answer)<->CO name divergence is informational only — the required
+    // name check is CO<->HubSpot, handled in the HubSpot cross-check block.
     // HubSpot cross-check flags apply to every category (including TRIAL and
     // MANUAL) once a deal is matched. Legacy accounts still suppress CRM-drift
     // flags but a missing "previously paying" tick is a data-entry gap that

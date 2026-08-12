@@ -24,47 +24,51 @@ function fmtNum(v) {
 // mismatch + Sales rep mismatch); showing only the primary hides the
 // others. Ordering matches the old single-reason precedence so the first
 // element still counts as the "primary" for summary tallies.
+// Return EVERY applicable reason. Category exemptions are per-check
+// (matching server), not per-row -- previous versions early-returned on
+// TRIAL/MANUAL and silently dropped drift + HubSpot flags. Ordering
+// defines the "primary" (first element) used only by the reason filter
+// and describeReason lookup; the pill column renders the whole list.
 function computeAllReasons(r) {
   if (r.skipped) return ['Skipped'];
   const cat = String(r.billingCategory || '').toUpperCase();
+  const isTrial    = cat === 'TRIAL';
+  const isManual   = cat === 'MANUAL';
+  const isMultiple = cat === 'MULTIPLE';
   const notInCO = r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
   const parentCovers = r.chargeover?.parentHasActiveSub === true;
-  // Mirror the server's hasUsage check so "No subscription" pill only
-  // shows when the row has actual usage — otherwise a deactivated CO
-  // customer would carry the pill without being flagged, which reads as a
-  // false positive.
+  // Mirror the server's hasUsage check.
   const hasUsage = (Number(String(r.used || '').replace(/,/g, '')) > 0) ||
                    (parseInt(String(r.totalCalls || '').replace(/,/g, ''), 10) > 0);
-  // Name drift + HubSpot cross-check flags apply to EVERY category. Server
-  // flags salesRepMismatch / hsVsCoMismatch / previouslyPayingMissing
-  // outside the trial/manual branch, so the client must too — otherwise a
-  // MANUAL return-customer with an unchecked "Previously Paying" box is
-  // flagged server-side but shows only "Matched" in the pill column.
-  const universalTail = [];
-  if (r.previouslyPayingMissing)         universalTail.push('Previously paying unchecked');
-  if (r.hsVsCoMismatch && !r.isLegacy)   universalTail.push('HubSpot name mismatch');
-  if (r.salesRepMismatch && !r.isLegacy) universalTail.push('Sales rep mismatch');
-  // Name drift (Answer<->CO) is INFORMATIONAL only — doesn't count as a
-  // real flag (server never pushes it), but shows as a neutral pill so
-  // ops can filter and see the divergence.
-  if (r.nameMismatch && !r.isLegacy)     universalTail.push('Name drift (Answer↔CO)');
-
-  if (cat === 'TRIAL') {
-    const primary = r.active === true ? 'Trial with active sub' : 'Matched';
-    return [primary, ...universalTail];
-  }
-  if (cat === 'MANUAL') {
-    return ['Matched', ...universalTail];
-  }
 
   const reasons = [];
-  // No-subscription outranks the drift checks (zero usage / plan / bill /
-  // rate) because those are downstream noise when there's no sub at all.
-  if (hasUsage && (notInCO || r.active !== true) && !parentCovers) reasons.push('No subscription');
-  if (r.zeroUsageActiveSub)                      reasons.push('Zero usage');
-  if (r.planMismatch && cat !== 'MULTIPLE')      reasons.push('Plan mismatch');
-  if (r.billDayMismatch)                         reasons.push('Bill day mismatch');
-  reasons.push(...universalTail);
+
+  // "Trial with active sub" — inverse rule, only for TRIAL.
+  if (isTrial && r.active === true) reasons.push('Trial with active sub');
+
+  // Usage without sub: skipped for TRIAL / MANUAL (per rule); everyone
+  // else gets it when they have usage and no active sub and no parent
+  // covering them.
+  if (!isTrial && !isManual && hasUsage && (notInCO || r.active !== true) && !parentCovers) {
+    reasons.push('No subscription');
+  }
+
+  // Drift checks fire regardless of category. Server only sets these
+  // when the sub is active, so TRIAL / MANUAL rows without an active
+  // sub naturally have them false.
+  if (r.zeroUsageActiveSub)                 reasons.push('Zero usage');
+  if (r.planMismatch && !isMultiple)        reasons.push('Plan mismatch');
+  if (r.billDayMismatch)                    reasons.push('Bill day mismatch');
+
+  // HubSpot cross-check flags apply to every category — server does the
+  // same.
+  if (r.previouslyPayingMissing)            reasons.push('Previously paying unchecked');
+  if (r.hsVsCoMismatch && !r.isLegacy)      reasons.push('HubSpot name mismatch');
+  if (r.salesRepMismatch && !r.isLegacy)    reasons.push('Sales rep mismatch');
+
+  // Informational-only — server never flags this.
+  if (r.nameMismatch && !r.isLegacy)        reasons.push('Name drift (Answer↔CO)');
+
   if (reasons.length === 0) return [r.isLegacy ? 'Legacy' : 'Matched'];
   return reasons;
 }
@@ -348,7 +352,12 @@ export default function MinuteAuditor() {
     const s = {
       total: flat.length, audited: 0, flagged: 0, matched: 0, skipped: 0, legacy: 0,
       hubspotMatched: 0, multiple: 0,
+      // Reason tallies count EACH reason independently: a row with 3 pills
+      // increments 3 counters. Under-counting by primary-only made the
+      // reason bar under-represent secondary issues (a row flagged
+      // Plan + Bill day only bumped Plan).
       reasonTrial: 0, reasonPlan: 0, reasonBillDay: 0, reasonZeroUsage: 0, reasonNoSub: 0,
+      reasonHsName: 0, reasonSalesRep: 0, reasonPrevPaying: 0, reasonNameDrift: 0,
       hubspotNameAgree: 0, hubspotNameDisagree: 0,
     };
     for (const r of flat) {
@@ -361,18 +370,19 @@ export default function MinuteAuditor() {
         if      (r.nameAllThreeMatch === true)  s.hubspotNameAgree++;
         else if (r.nameAllThreeMatch === false) s.hubspotNameDisagree++;
       }
-      if (r.flagged) {
-        s.flagged++;
-        if      (r.reason === 'Trial with active sub')       s.reasonTrial++;
-        else if (r.reason === 'Plan mismatch')               s.reasonPlan++;
-        else if (r.reason === 'Bill day mismatch')           s.reasonBillDay++;
-        else if (r.reason === 'Zero usage')                  s.reasonZeroUsage++;
-        else if (r.reason === 'No subscription')             s.reasonNoSub++;
-        else if (r.reason === 'HubSpot name mismatch')       s.reasonHsName = (s.reasonHsName || 0) + 1;
-        else if (r.reason === 'Sales rep mismatch')          s.reasonSalesRep = (s.reasonSalesRep || 0) + 1;
-        else if (r.reason === 'Previously paying unchecked') s.reasonPrevPaying = (s.reasonPrevPaying || 0) + 1;
-      } else if (r.active === true) {
-        s.matched++;
+      if (r.flagged) s.flagged++;
+      else if (r.active === true) s.matched++;
+      // Count every pill (including on unflagged rows for Name drift).
+      for (const reason of r.allReasons || []) {
+        if      (reason === 'Trial with active sub')       s.reasonTrial++;
+        else if (reason === 'Plan mismatch')               s.reasonPlan++;
+        else if (reason === 'Bill day mismatch')           s.reasonBillDay++;
+        else if (reason === 'Zero usage')                  s.reasonZeroUsage++;
+        else if (reason === 'No subscription')             s.reasonNoSub++;
+        else if (reason === 'HubSpot name mismatch')       s.reasonHsName++;
+        else if (reason === 'Sales rep mismatch')          s.reasonSalesRep++;
+        else if (reason === 'Previously paying unchecked') s.reasonPrevPaying++;
+        else if (reason === 'Name drift (Answer↔CO)')      s.reasonNameDrift++;
       }
     }
     s.reconciledPct = s.audited > 0 ? Math.round(100 * s.matched / s.audited) : 0;
@@ -620,6 +630,7 @@ export default function MinuteAuditor() {
                 {summary.reasonHsName     > 0 && <LegendChip color="var(--warn-100)" label="HubSpot name mismatch"    n={summary.reasonHsName} />}
                 {summary.reasonSalesRep   > 0 && <LegendChip color="var(--ink-500)" label="Sales rep mismatch"       n={summary.reasonSalesRep} />}
                 {summary.reasonPrevPaying > 0 && <LegendChip color="var(--warn-700)" label="Previously paying unchecked" n={summary.reasonPrevPaying} />}
+                {summary.reasonNameDrift  > 0 && <LegendChip color="var(--ink-300)" label="Name drift (informational)" n={summary.reasonNameDrift} />}
               </div>
             </div>
           )}
