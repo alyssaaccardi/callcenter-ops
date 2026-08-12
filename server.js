@@ -5994,11 +5994,11 @@ function parseRate(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-// ─── Canonical overage-rate table (2026) ────────────────────────────────
-// Per-minute rates by tenant + plan tier. When pricing changes, update
-// these tables and redeploy — they're the source of truth for the
-// Minute Auditor's rate-mismatch check. AL has discrete plans up to 550
-// plus two ranges; RS has four discrete plans.
+// ─── Pricing-sheet overage-rate table (2026) ────────────────────────────
+// Per-minute rates by tenant + plan tier — the source of truth for the
+// Minute Auditor's rate-mismatch check. When the pricing sheet changes,
+// update these tables and redeploy. AL has discrete plans up to 550 plus
+// two ranges; RS has four discrete plans.
 const AL_RATE_TABLE = [
   { plan: 30,  rate: 5.07 }, { plan: 50,  rate: 4.21 }, { plan: 75,  rate: 4.19 },
   { plan: 100, rate: 3.60 }, { plan: 150, rate: 3.49 }, { plan: 200, rate: 3.38 },
@@ -6016,7 +6016,7 @@ const RS_RATE_TABLE = [
   { plan: 500,  rate: 2.15 },
   { plan: 1000, rate: 2.05 },
 ];
-function canonicalOverageRate(tenant, planMinutes) {
+function pricingSheetRate(tenant, planMinutes) {
   if (planMinutes == null || !Number.isFinite(planMinutes)) return null;
   if (tenant === 'AL') {
     const exact = AL_RATE_TABLE.find(t => t.plan === planMinutes);
@@ -6091,7 +6091,7 @@ async function runMinuteAuditorJob(jobId, rows) {
       nameMismatch: false,    nameMatchScore: null,
       planMismatch: false,    csvPlan: null, coPlan: null,
       billDayMismatch: false, csvBillDay: null, coBillDay: null,
-      rateMismatch: false,    csvOverageRate: null, canonicalOverageRate: null,
+      rateMismatch: false,    csvOverageRate: null, pricingSheetOverageRate: null,
       zeroUsageActiveSub: false,
       // HubSpot cross-check fields
       hubspotDealFound: false, hubspotDealId: null, hubspotDealName: null, hubspotDealCompany: null,
@@ -6131,11 +6131,11 @@ async function runMinuteAuditorJob(jobId, rows) {
         result.csvBillDay = parseCycleDay(row.billingCycle);
         result.coBillDay  = parseInvoiceDay(co.billAnchorDate);
         // Overage-rate check: compare the CSV's per-minute rate against the
-        // canonical AL/RS rate table for this plan tier. Populated for
-        // display regardless; only flags when the sub is active (canceled
-        // subs have stale rates, same reasoning as plan/bill-day).
-        result.csvOverageRate       = parseRate(row.overageRate);
-        result.canonicalOverageRate = canonicalOverageRate(row.clientType, result.csvPlan);
+        // AL/RS pricing sheet for this plan tier. Populated for display
+        // regardless; only flags when the sub is active (canceled subs have
+        // stale rates, same reasoning as plan/bill-day).
+        result.csvOverageRate         = parseRate(row.overageRate);
+        result.pricingSheetOverageRate = pricingSheetRate(row.clientType, result.csvPlan);
         if (result.active === true) {
           if (result.csvPlan != null && result.coPlan != null) {
             result.planMismatch = result.csvPlan !== result.coPlan;
@@ -6143,9 +6143,11 @@ async function runMinuteAuditorJob(jobId, rows) {
           if (result.csvBillDay != null && result.coBillDay != null) {
             result.billDayMismatch = result.csvBillDay !== result.coBillDay;
           }
-          if (result.csvOverageRate != null && result.canonicalOverageRate != null) {
-            // Half-cent tolerance for floating-point comparison.
-            result.rateMismatch = Math.abs(result.csvOverageRate - result.canonicalOverageRate) > 0.005;
+          if (result.csvOverageRate != null && result.pricingSheetOverageRate != null) {
+            // 10-cent tolerance — anything within ±$0.10/min of the pricing
+            // sheet is treated as matching (rounding, legacy hand-entered
+            // rates, small negotiated variances).
+            result.rateMismatch = Math.abs(result.csvOverageRate - result.pricingSheetOverageRate) > 0.10;
           }
         }
         // HubSpot cross-check — match CO customer to a PAID deal by superuser

@@ -57,7 +57,7 @@ function describeReason(r) {
   if (r.reason === 'Matched')            return 'Answer and ChargeOver agree on plan and bill day.';
   if (r.reason === 'Plan mismatch')      return `Answer allotted ${r.csvPlan ?? '?'} min; ChargeOver plan is ${r.coPlan ?? '?'} min.`;
   if (r.reason === 'Bill day mismatch')  return `Answer bills on day ${r.csvBillDay ?? '?'}; ChargeOver next invoice is day ${r.coBillDay ?? '?'}.`;
-  if (r.reason === 'Rate mismatch')      return `Answer has $${(r.csvOverageRate ?? '?')}/min but the ${r.clientType || '?'} ${r.csvPlan ?? '?'}-min tier is $${(r.canonicalOverageRate ?? '?')}/min.`;
+  if (r.reason === 'Rate mismatch')      return `Answer has $${(r.csvOverageRate ?? '?')}/min but the ${r.clientType || '?'} ${r.csvPlan ?? '?'}-min tier on the pricing sheet is $${(r.pricingSheetOverageRate ?? '?')}/min.`;
   if (r.reason === 'No subscription')    return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
   if (r.reason === 'Zero usage')         return `Zero minutes and zero calls this cycle in Answer, but the ChargeOver subscription is still active — the customer likely deactivated in Answer or never went live, and CO wasn't caught up.`;
   if (r.reason === 'Trial with active sub') return `Answer marks this account as TRIAL, but ChargeOver has an active subscription. Trials shouldn't be paying — either Answer needs to update to STANDARD or ChargeOver needs to end the trial.`;
@@ -106,7 +106,7 @@ function toCsv(rows) {
     'Name Score Answer-CO','Name Score CO-HubSpot','Name Score Answer-HubSpot','All 3 Names Match',
     'Plan Answer (Allotted)','Plan ChargeOver','Plan Mismatch',
     'Bill Day Answer','Bill Day ChargeOver','Bill Day Mismatch','ChargeOver Next Invoice',
-    'Overage Rate Answer','Overage Rate Canonical','Rate Mismatch',
+    'Overage Rate Answer','Overage Rate Pricing Sheet','Rate Mismatch',
     'ChargeOver Customer ID','Tenant (Answer)','Tenant (ChargeOver)',
     'Sales Rep — HubSpot (source of truth)','Sales Rep — ChargeOver (to update on mismatch)','Sales Rep Mismatch',
     'HubSpot Name Mismatch (CO↔HS)','Return Customer (CO)','Previously Paying Checked (HS)','Previously Paying Unchecked',
@@ -130,7 +130,7 @@ function toCsv(rows) {
       r.nameScoreAnswerCo ?? '', r.nameScoreCoHs ?? '', r.nameScoreAnswerHs ?? '', yn(r.nameAllThreeMatch),
       r.csvPlan ?? r.allotted, r.coPlan ?? '', yn(r.planMismatch),
       r.csvBillDay ?? '', r.coBillDay ?? '', yn(r.billDayMismatch), co.nextInvoiceDate || '',
-      r.csvOverageRate ?? '', r.canonicalOverageRate ?? '', yn(r.rateMismatch),
+      r.csvOverageRate ?? '', r.pricingSheetOverageRate ?? '', yn(r.rateMismatch),
       r.coCustomerId, r.clientType, co.tenant || '',
       r.hubspotSalesRepEmail || r.hubspotSalesRep || '', r.coSalesperson || '', yn(r.salesRepMismatch),
       yn(r.hsVsCoMismatch), yn(r.previouslyPayingRequired), yn(r.previouslyPayingChecked), yn(r.previouslyPayingMissing),
@@ -931,9 +931,9 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole
                 sub={r.chargeover?.nextInvoiceDate ? `next invoice ${r.chargeover.nextInvoiceDate}` : null} />
               <DetailField label="Overage rate (Answer)"
                 value={r.csvOverageRate != null ? `$${r.csvOverageRate.toFixed(2)}/min` : '—'}
-                sub={r.rateMismatch ? 'differs from canonical' : null} />
-              <DetailField label={`Overage rate (${r.clientType || '?'} canonical)`}
-                value={r.canonicalOverageRate != null ? `$${r.canonicalOverageRate.toFixed(2)}/min` : (r.csvPlan != null ? 'no tier match' : '—')}
+                sub={r.rateMismatch ? 'differs from pricing sheet' : null} />
+              <DetailField label={`Overage rate (${r.clientType || '?'} pricing sheet)`}
+                value={r.pricingSheetOverageRate != null ? `$${r.pricingSheetOverageRate.toFixed(2)}/min` : (r.csvPlan != null ? 'no tier match' : '—')}
                 sub={r.csvPlan != null ? `${r.csvPlan}-min tier` : null} />
               {r.hubspotDealFound ? (
                 <DetailField label="Sales rep (HubSpot) — source of truth"
