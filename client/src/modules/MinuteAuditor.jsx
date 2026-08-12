@@ -28,11 +28,16 @@ function computeReason(r) {
   // MANUAL customers are billed manually — no subscription is expected,
   // no plan / bill-day check applies.
   if (cat === 'MANUAL') return 'Matched';
+  // Zero-usage-on-active-sub ranks ABOVE plan / bill-day drift: if the
+  // customer isn't using the service at all, any plan or bill-day mismatch
+  // is downstream noise — ops needs to reach out or cancel, not tune the
+  // sub. Previously this was ranked below Plan/Bill day, which masked the
+  // count entirely.
+  if (r.zeroUsageActiveSub) return 'Zero usage';
   // MULTIPLE customers legitimately span different plans across their
   // parent + child accounts, so plan mismatch alone isn't a real issue.
   if (r.planMismatch && cat !== 'MULTIPLE') return 'Plan mismatch';
   if (r.billDayMismatch) return 'Bill day mismatch';
-  if (r.zeroUsageActiveSub) return 'Zero usage';
   const notInCO = r.error === 'Not found in ChargeOver' || r.error === 'No COCustomerId';
   if (notInCO || r.active !== true) return 'No subscription';
   // CSV(Answer)↔CO name divergence is informational only — the required
