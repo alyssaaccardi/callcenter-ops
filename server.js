@@ -2793,7 +2793,14 @@ async function zdAuditorGet(url, params = {}, attempt = 0) {
 function normalizeMatchText(s) {
   return String(s || '')
     .toLowerCase()
-    .replace(/[&,.()"'\/\\\-]/g, ' ')
+    // Possessive 's -> s so "Oakey's LLC" collapses to "oakeys llc" and
+    // matches the CSV's punctuation-stripped "OAKEYS LLC". Without this the
+    // apostrophe becomes a space, leaving the standalone "s" which gets
+    // dropped as too-short, and the base token ("oakey") diverges from the
+    // plural spelling ("oakeys"). Handles regular ('s) and typographic (’s)
+    // apostrophes.
+    .replace(/[’']s\b/g, 's')
+    .replace(/[&,.()"'’\/\\\-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
