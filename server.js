@@ -4321,7 +4321,13 @@ async function runAuditJob(jobId, rows) {
       // Exit date: prefer ChargeOver's canceled_at (authoritative), then AI, then last ticket.
       const sortedTickets = tickets.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       const latestTicket = sortedTickets[0];
-      if (chargeover?.canceledAt) {
+      // Stale CO guard: some customers cancelled years ago, came back, and cancelled
+      // again — CO retains the original canceledAt. If the latest ticket is >90 days
+      // newer than CO's canceledAt, treat CO as stale and fall through to AI/ticket.
+      const latestTicketMs = latestTicket?.created_at ? new Date(latestTicket.created_at).getTime() : null;
+      const coMs = chargeover?.canceledAt ? new Date(chargeover.canceledAt + 'T00:00:00').getTime() : null;
+      const coCanceledAtIsStale = latestTicketMs != null && coMs != null && (latestTicketMs - coMs) > 90 * 24 * 60 * 60 * 1000;
+      if (chargeover?.canceledAt && !coCanceledAtIsStale) {
         baseResult.estimatedCancellationDate = chargeover.canceledAt;
         baseResult.exitDateSource = 'chargeover';
       } else if (analysis.estimatedCancellationDate) {
@@ -4552,10 +4558,16 @@ app.post('/api/zendesk-auditor/lookup', requireRole('super_admin', 'call_center_
 
     const sortedLookup = tickets.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     const latestLookup = sortedLookup[0];
-    // Exit date preference: ChargeOver's canceled_at (authoritative) > AI-extracted > last ticket
+    // Exit date preference: ChargeOver's canceled_at (authoritative) > AI-extracted > last ticket.
+    // Stale CO guard: some customers cancelled years ago, came back, and cancelled again —
+    // CO retains the original canceledAt. If the latest ticket is >90 days newer than CO's
+    // canceledAt, treat CO as stale and fall through to AI/ticket.
+    const latestLookupMs = latestLookup?.created_at ? new Date(latestLookup.created_at).getTime() : null;
+    const coLookupMs = chargeover?.canceledAt ? new Date(chargeover.canceledAt + 'T00:00:00').getTime() : null;
+    const coCanceledAtIsStale = latestLookupMs != null && coLookupMs != null && (latestLookupMs - coLookupMs) > 90 * 24 * 60 * 60 * 1000;
     let exitDate = null;
     let exitDateSource = null;
-    if (chargeover?.canceledAt) {
+    if (chargeover?.canceledAt && !coCanceledAtIsStale) {
       exitDate = chargeover.canceledAt;
       exitDateSource = 'chargeover';
     } else if (analysis.estimatedCancellationDate) {
@@ -6051,7 +6063,7 @@ async function runMinuteAuditorJob(jobId, rows) {
   for (const row of rows) {
     const cat = String(row.billingCategory || '').toUpperCase();
     if (MINUTE_AUDITOR_SKIP_CATEGORIES.has(cat)) {
-      job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true, flagged: false, nameMismatch: false, nameMatchScore: null, isLegacy: false, legacyReason: null, hubspotDealFound: false, zeroUsageActiveSub: false });
+      job.results.push({ ...row, chargeover: null, active: null, error: null, skipped: true, flagged: false, nameMismatch: false, nameMatchScore: null, isLegacy: false, legacyReason: null, hubspotDealFound: false, zeroUsageActiveSub: false, ctiClosedActiveSub: false });
       job.done++;
       continue;
     }
@@ -6063,6 +6075,7 @@ async function runMinuteAuditorJob(jobId, rows) {
       planMismatch: false,    csvPlan: null, coPlan: null,
       billDayMismatch: false, csvBillDay: null, coBillDay: null,
       zeroUsageActiveSub: false,
+      ctiClosedActiveSub: false,
       // HubSpot cross-check fields
       hubspotDealFound: false, hubspotDealId: null, hubspotDealName: null, hubspotDealCompany: null,
       hubspotSalesRep: null, hubspotMatchedBy: null,
@@ -6236,6 +6249,11 @@ async function runMinuteAuditorJob(jobId, rows) {
     // and never went live — either way it's a billing issue worth surfacing.
     result.zeroUsageActiveSub = !hasUsage(row) && result.active === true;
 
+    // CTI-closed rule: Answer exports closed/retired customers in their own
+    // section ("CLOSED/RETIRED" etc.). If CO still shows an active sub for one
+    // of those rows, we're billing a closed account — CO needs to catch up.
+    result.ctiClosedActiveSub = /closed|retired/i.test(row.csvSection || '') && result.active === true;
+
     // Aggregate reasons and set the flag. Legacy suppresses name + sales-rep
     // mismatches (both are CRM-drift issues, not billing issues).
     // Category-aware flag rules. TRIAL is audited inversely (should NOT
@@ -6269,6 +6287,7 @@ async function runMinuteAuditorJob(jobId, rows) {
       }
     }
     if (result.zeroUsageActiveSub)  result.flagReasons.push('Zero usage');
+    if (result.ctiClosedActiveSub)  result.flagReasons.push('CTI closed with active sub');
     if (result.planMismatch && !isMultiple) result.flagReasons.push('Plan mismatch');
     if (result.billDayMismatch)     result.flagReasons.push('Bill day mismatch');
     // CSV(Answer)<->CO name divergence is informational only — the required

@@ -57,6 +57,7 @@ function computeAllReasons(r) {
   // when the sub is active, so TRIAL / MANUAL rows without an active
   // sub naturally have them false.
   if (r.zeroUsageActiveSub)                 reasons.push('Zero usage');
+  if (r.ctiClosedActiveSub)                 reasons.push('CTI closed with active sub');
   if (r.planMismatch && !isMultiple)        reasons.push('Plan mismatch');
   if (r.billDayMismatch)                    reasons.push('Bill day mismatch');
 
@@ -83,6 +84,7 @@ function describeReason(r) {
   if (r.reason === 'Bill day mismatch')  return `Answer bills on day ${r.csvBillDay ?? '?'}; ChargeOver next invoice is day ${r.coBillDay ?? '?'}.`;
   if (r.reason === 'No subscription')    return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
   if (r.reason === 'Zero usage')         return `Zero minutes and zero calls this cycle in Answer, but the ChargeOver subscription is still active — the customer likely deactivated in Answer or never went live, and CO wasn't caught up.`;
+  if (r.reason === 'CTI closed with active sub') return `Answer exported this account in a CLOSED/RETIRED section, but ChargeOver still has an active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''} — CO needs to cancel to stop billing a closed account.`;
   if (r.reason === 'Trial with active sub') return `Answer marks this account as TRIAL, but ChargeOver has an active subscription. Trials shouldn't be paying — either Answer needs to update to STANDARD or ChargeOver needs to end the trial.`;
   if (r.reason === 'HubSpot name mismatch') return `ChargeOver company "${r.chargeover?.company || ''}" doesn't match the HubSpot deal "${r.hubspotName || ''}". HubSpot is source of truth — update ChargeOver to match.`;
   if (r.reason === 'Name drift (Answer↔CO)') return `Answer client "${r.client}" and ChargeOver company "${r.chargeover?.company || ''}" diverge. Informational only — CO↔HubSpot is the required match.`;
@@ -98,6 +100,7 @@ const REASON_TONE = {
   'Plan mismatch':                 'crit',
   'Bill day mismatch':             'crit',
   'Zero usage':                    'crit',
+  'CTI closed with active sub':    'crit',
   'No subscription':               'warn',
   'HubSpot name mismatch':         'warn',
   'Name drift (Answer↔CO)':        'neutral',
@@ -113,6 +116,7 @@ const REASON_OPTIONS = [
   { value: 'Plan mismatch',                label: 'Plan mismatch' },
   { value: 'Bill day mismatch',            label: 'Bill day mismatch' },
   { value: 'Zero usage',                   label: 'Zero usage, active sub' },
+  { value: 'CTI closed with active sub',   label: 'CTI closed, active sub' },
   { value: 'No subscription',              label: 'No subscription' },
   { value: 'HubSpot name mismatch',        label: 'HubSpot name mismatch (CO↔HS)' },
   { value: 'Name drift (Answer↔CO)',       label: 'Name drift (Answer↔CO) — informational' },
