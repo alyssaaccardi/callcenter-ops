@@ -458,7 +458,7 @@ export default function AdminDashboard() {
     setOutstandingLoading(true);
     setOutstandingError(null);
     try {
-      const r = await api.get('/api/chargeover/outstanding');
+      const r = await api.get('/api/outstanding');
       setOutstanding(r.data);
     } catch (e) {
       setOutstandingError(e.response?.data?.error || e.message);
@@ -563,11 +563,17 @@ export default function AdminDashboard() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 16 }}>
-        {/* Billing column */}
+        {/* Billing column — pulled from the "Daily Declines" Monday board
+            (source of truth for ops collections work). */}
         <Card
-          title="ChargeOver — Outstanding"
+          title="Outstanding — Daily Declines Board"
           headerRight={
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, color: 'var(--muted)' }}>
+              {outstanding?.combined && (
+                <span style={{ fontWeight: 700, color: 'var(--danger)' }}>
+                  {usd(outstanding.combined.totalOverdue)} across {outstanding.combined.count}
+                </span>
+              )}
               {outstanding?.generatedAt && <span>updated {fmtTime(outstanding.generatedAt)}</span>}
               <button
                 onClick={fetchOutstanding}
@@ -580,7 +586,9 @@ export default function AdminDashboard() {
           {outstandingError && <div style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 8 }}>Error: {outstandingError}</div>}
           <div style={{ display: 'grid', gap: 16 }}>
             <OutstandingTenant label="AL — Answering Legal"  tenant={outstanding?.AL} />
-            <OutstandingTenant label="RS — Ring Savvy" tenant={outstanding?.RS} />
+            <OutstandingTenant label="RS — Ring Savvy"       tenant={outstanding?.RS} />
+            <OutstandingTenant label="ARE"                   tenant={outstanding?.ARE} />
+            <OutstandingTenant label="TS"                    tenant={outstanding?.TS} />
           </div>
         </Card>
 

@@ -4725,84 +4725,138 @@ async function hydrateCancellationCompanies(rows) {
   return rows;
 }
 
-// ─── ChargeOver outstanding balances (AL + RS) ────────────────────────────────
-// Aggregates active-overdue subscriptions and joins to the customer record.
-// Cached 60s to keep the admin dashboard cheap.
-const chargeoverOutstandingCache = { data: null, expires: 0 };
+// ─── Outstanding balances — sourced from Monday "Daily Declines" board ───────
+// Ops manages collections on the "Daily Declines" Monday board (8265660040),
+// not directly in ChargeOver — so the board is the source of truth for what's
+// actually being worked. ChargeOver's `active-overdue` package status misses
+// accounts that were suspended, cancelled, or have prior-cycle balances but
+// aren't currently overdue on the active package. Balance/tenant/status columns
+// on the board are hand-maintained; we exclude rows already marked "Paid".
+const DAILY_DECLINES_BOARD_ID = '8265660040';
+const DAILY_DECLINES_COLS = {
+  balance:      'numbers_mkm9wp6z',
+  company:      'company_mkm92cpy',
+  status:       'status_mkm9kp4v',
+  contact:      'contact_mkm9ygh7',
+  email:        'email_mkt4kngd',
+  phone:        'phone_mkm9n762',
+  paymentLink:  'link_mkmagxyg',
+  weekOf:       'date_mknapcya',
+};
+const DAILY_DECLINES_TENANTS = ['AL', 'RS', 'ARE', 'TS'];
+const DAILY_DECLINES_EXCLUDED_STATUSES = new Set(['paid']);
 
-async function fetchTenantOutstanding(tenant) {
-  const cfg = CHARGEOVER_TENANTS[tenant];
-  if (!cfg?.url || !cfg?.auth) return { count: 0, totalOverdue: 0, customers: [], configured: false };
+async function fetchDailyDeclinesOutstanding() {
+  const apiKey = process.env.MONDAY_API_KEY;
+  if (!apiKey) throw new Error('MONDAY_API_KEY not configured');
 
-  const subs = [];
-  let offset = 0;
-  const pageSize = 100;
-  while (true) {
-    let batch;
-    try {
-      batch = await chargeoverGet(tenant, '/package', {
-        where: 'package_status_str:EQUALS:active-overdue',
-        limit: pageSize,
-        offset,
-      }) || [];
-    } catch (e) {
-      console.warn(`[co-outstanding:${tenant}] page ${offset} failed: ${e.message}`);
-      break;
+  const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
+  const colIds = Object.values(DAILY_DECLINES_COLS).map(id => `"${id}"`).join(',');
+  const itemFields = `id name column_values(ids:[${colIds}]) { id text value }`;
+
+  const items = [];
+  let cursor = null;
+  do {
+    const query = cursor
+      ? `query { next_items_page(limit:200, cursor:"${cursor}") { cursor items { ${itemFields} } } }`
+      : `query { boards(ids:[${DAILY_DECLINES_BOARD_ID}]) { items_page(limit:200) { cursor items { ${itemFields} } } } }`;
+    const r = await axios.post('https://api.monday.com/v2', { query }, { headers });
+    if (r.data?.errors) throw new Error(r.data.errors[0]?.message || 'Monday query failed');
+    const page = cursor ? r.data?.data?.next_items_page : r.data?.data?.boards?.[0]?.items_page;
+    items.push(...(page?.items || []));
+    cursor = page?.cursor || null;
+  } while (cursor);
+
+  const buckets = {};
+  for (const t of DAILY_DECLINES_TENANTS) {
+    buckets[t] = { count: 0, totalOverdue: 0, customers: [], configured: true };
+  }
+
+  const todayMs = Date.now();
+  for (const item of items) {
+    const cv = Object.fromEntries(item.column_values.map(c => [c.id, c]));
+    const status = cv[DAILY_DECLINES_COLS.status]?.text || '';
+    if (DAILY_DECLINES_EXCLUDED_STATUSES.has(status.toLowerCase())) continue;
+
+    const tenant = cv[DAILY_DECLINES_COLS.company]?.text || '';
+    if (!buckets[tenant]) continue;
+
+    const amountOverdue = parseFloat(cv[DAILY_DECLINES_COLS.balance]?.text || '0') || 0;
+    if (amountOverdue <= 0) continue;
+
+    const weekOfText = cv[DAILY_DECLINES_COLS.weekOf]?.text || '';
+    let daysOverdue = null;
+    if (weekOfText) {
+      const wkMs = new Date(weekOfText + 'T00:00:00').getTime();
+      if (!Number.isNaN(wkMs)) daysOverdue = Math.max(0, Math.floor((todayMs - wkMs) / 86400000));
     }
-    if (!batch.length) break;
-    subs.push(...batch);
-    offset += pageSize;
-    if (batch.length < pageSize) break;
-    if (offset > 2000) break; // safety
+
+    // Payment link column value is JSON: {"url":"...","text":"..."}; text
+    // column returns the display text. Prefer the link URL for pulse target.
+    let paymentUrl = null;
+    try {
+      const raw = cv[DAILY_DECLINES_COLS.paymentLink]?.value;
+      if (raw) paymentUrl = JSON.parse(raw)?.url || null;
+    } catch { /* ignore */ }
+
+    buckets[tenant].customers.push({
+      customerId:    item.id,
+      company:       item.name || null,
+      email:         cv[DAILY_DECLINES_COLS.email]?.text || null,
+      admin:         cv[DAILY_DECLINES_COLS.contact]?.text || null,
+      phone:         cv[DAILY_DECLINES_COLS.phone]?.text || null,
+      daysOverdue,
+      amountOverdue,
+      status,
+      planTier:      null,
+      url:           paymentUrl || `https://answeringlegal-unit.monday.com/boards/${DAILY_DECLINES_BOARD_ID}/pulses/${item.id}`,
+    });
+    buckets[tenant].count += 1;
+    buckets[tenant].totalOverdue += amountOverdue;
   }
 
-  const customerIds = [...new Set(subs.map(s => s.customer_id).filter(Boolean))];
-  const companyById = new Map();
-  const adminById   = new Map();
-  const emailById   = new Map();
-  const urlById     = new Map();
-  for (let i = 0; i < customerIds.length; i += 10) {
-    await Promise.all(customerIds.slice(i, i + 10).map(async id => {
-      try {
-        const r = await chargeoverGet(tenant, `/customer/${id}`);
-        const c = Array.isArray(r) ? r[0] : r;
-        if (!c) return;
-        companyById.set(id, c.company || null);
-        adminById.set(id, c.admin_name || null);
-        emailById.set(id, c.superuser_email || c.email || null);
-        urlById.set(id, c.url_self || null);
-      } catch (e) { /* skip */ }
-    }));
+  for (const t of DAILY_DECLINES_TENANTS) {
+    buckets[t].customers.sort((a, b) => (b.amountOverdue || 0) - (a.amountOverdue || 0));
   }
 
-  const customers = subs.map(s => ({
-    customerId:    s.customer_id,
-    company:       companyById.get(s.customer_id) || null,
-    email:         emailById.get(s.customer_id) || null,
-    admin:         adminById.get(s.customer_id) || null,
-    daysOverdue:   s.days_overdue ?? 0,
-    amountOverdue: s.amount_overdue ?? 0,
-    planTier:      s.custom_2 || null,
-    url:           urlById.get(s.customer_id) || null,
-  })).sort((a, b) => (b.amountOverdue || 0) - (a.amountOverdue || 0));
+  const combined = {
+    count:        DAILY_DECLINES_TENANTS.reduce((s, t) => s + buckets[t].count, 0),
+    totalOverdue: DAILY_DECLINES_TENANTS.reduce((s, t) => s + buckets[t].totalOverdue, 0),
+  };
 
-  const totalOverdue = customers.reduce((sum, c) => sum + (Number(c.amountOverdue) || 0), 0);
-  return { count: customers.length, totalOverdue, customers, configured: true };
+  return {
+    ...buckets,
+    combined,
+    source: 'monday:daily-declines',
+    boardId: DAILY_DECLINES_BOARD_ID,
+    generatedAt: new Date().toISOString(),
+  };
 }
 
+const outstandingCache = { data: null, expires: 0 };
+
+async function getCachedOutstanding() {
+  if (outstandingCache.data && outstandingCache.expires > Date.now()) return outstandingCache.data;
+  const payload = await fetchDailyDeclinesOutstanding();
+  outstandingCache.data    = payload;
+  outstandingCache.expires = Date.now() + 60_000;
+  return payload;
+}
+
+app.get('/api/outstanding', tvOrRole('super_admin', 'call_center_ops', 'zendesk_auditor'), async (req, res) => {
+  try {
+    res.json(await getCachedOutstanding());
+  } catch (e) {
+    console.error('[outstanding]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Legacy alias — kept so any older TV sessions / cached clients keep working.
+// Same Monday-sourced payload as /api/outstanding.
 app.get('/api/chargeover/outstanding', tvOrRole('super_admin', 'call_center_ops', 'zendesk_auditor'), async (req, res) => {
   try {
-    if (chargeoverOutstandingCache.data && chargeoverOutstandingCache.expires > Date.now()) {
-      return res.json(chargeoverOutstandingCache.data);
-    }
-    const [AL, RS] = await Promise.all([
-      fetchTenantOutstanding('AL'),
-      fetchTenantOutstanding('RS'),
-    ]);
-    const payload = { AL, RS, generatedAt: new Date().toISOString() };
-    chargeoverOutstandingCache.data    = payload;
-    chargeoverOutstandingCache.expires = Date.now() + 60_000;
-    res.json(payload);
+    res.json(await getCachedOutstanding());
   } catch (e) {
     console.error('[chargeover-outstanding]', e.message);
     res.status(500).json({ error: e.message });

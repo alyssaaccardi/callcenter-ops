@@ -57,6 +57,16 @@ function fmtHourEst(iso) {
   return `${short} · ${hour}`;
 }
 
+// Tenant color chips for the Top Outstanding Accounts row — AL/RS are the
+// heavy-volume tenants and get the strongest colors; ARE/TS are shown for
+// completeness when they occasionally have declines.
+const TENANT_CHIP = {
+  AL:  { bg: 'rgba(26,111,232,0.2)',  fg: '#60a5fa' },
+  RS:  { bg: 'rgba(0,201,177,0.2)',   fg: '#5eead4' },
+  ARE: { bg: 'rgba(251,191,36,0.2)',  fg: '#fbbf24' },
+  TS:  { bg: 'rgba(168,85,247,0.2)',  fg: '#c4b5fd' },
+};
+
 function StatusPill({ label, state }) {
   const isUp = state !== 'DOWN';
   return (
@@ -198,7 +208,7 @@ export default function AdminTVPage() {
   }, [tokenValid, get]);
   useEffect(() => {
     if (!tokenValid) return;
-    const run = () => get('/api/chargeover/outstanding').then(r => setOutstanding(r.data)).catch(() => {});
+    const run = () => get('/api/outstanding').then(r => setOutstanding(r.data)).catch(() => {});
     run(); const id = setInterval(run, CHARGEOVER_POLL_MS); return () => clearInterval(id);
   }, [tokenValid, get]);
   useEffect(() => {
@@ -252,9 +262,13 @@ export default function AdminTVPage() {
     );
   }
 
-  // Derived summary numbers
-  const totalOverdue = (outstanding?.AL?.totalOverdue || 0) + (outstanding?.RS?.totalOverdue || 0);
-  const totalOverdueCount = (outstanding?.AL?.count || 0) + (outstanding?.RS?.count || 0);
+  // Derived summary numbers — sourced from the "Daily Declines" Monday board.
+  // AL/RS have volume today; ARE/TS are billed but rarely appear.
+  const TENANTS = ['AL', 'RS', 'ARE', 'TS'];
+  const totalOverdue = outstanding?.combined?.totalOverdue
+    ?? TENANTS.reduce((s, t) => s + (outstanding?.[t]?.totalOverdue || 0), 0);
+  const totalOverdueCount = outstanding?.combined?.count
+    ?? TENANTS.reduce((s, t) => s + (outstanding?.[t]?.count || 0), 0);
 
   const overdueTasks  = supportTasks?.overdue  || [];
   const upcomingTasks = supportTasks?.upcoming || [];
@@ -262,11 +276,10 @@ export default function AdminTVPage() {
   const csat = quality?.csat || {};
   const sla  = quality?.sla  || {};
 
-  // Combine + rank top-outstanding across both tenants for a single unified table
-  const allOutstanding = [
-    ...(outstanding?.AL?.customers || []).map(c => ({ ...c, tenant: 'AL' })),
-    ...(outstanding?.RS?.customers || []).map(c => ({ ...c, tenant: 'RS' })),
-  ].sort((a, b) => (b.amountOverdue || 0) - (a.amountOverdue || 0));
+  // Combine + rank top-outstanding across all 4 tenants for a single unified table
+  const allOutstanding = TENANTS.flatMap(t =>
+    (outstanding?.[t]?.customers || []).map(c => ({ ...c, tenant: t }))
+  ).sort((a, b) => (b.amountOverdue || 0) - (a.amountOverdue || 0));
 
   const mitelQ = mitelQueues?.queues || [];
   const hasHourly = mitelQ.some(q => Array.isArray(q.hourly) && q.hourly.length > 0);
@@ -323,21 +336,44 @@ export default function AdminTVPage() {
         <DidChip label="Instant" val={hubspotDids?.instantDidPool} />
       </div>
 
-      {/* KPI row — 7 tiles, each clickable to its source */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 10, marginBottom: 14 }}>
+      {/* KPI row — 10 tiles, each clickable to its source. Outstanding numbers
+          come from the Daily Declines Monday board (source of truth for ops
+          collections). */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, minmax(0, 1fr))', gap: 10, marginBottom: 14 }}>
+        <KpiTile
+          label="Outstanding · Combined"
+          value={usd(totalOverdue)}
+          sub={`${totalOverdueCount} accounts`}
+          danger={totalOverdue > 0}
+          href="https://answeringlegal-unit.monday.com/boards/8265660040/views/176819971"
+        />
         <KpiTile
           label="AL Outstanding"
           value={usd(outstanding?.AL?.totalOverdue || 0)}
           sub={`${outstanding?.AL?.count || 0} accounts`}
           danger={(outstanding?.AL?.totalOverdue || 0) > 0}
-          href="https://answeringlegal.chargeover.com/admin"
+          href="https://answeringlegal-unit.monday.com/boards/8265660040/views/176819971"
         />
         <KpiTile
           label="RS Outstanding"
           value={usd(outstanding?.RS?.totalOverdue || 0)}
           sub={`${outstanding?.RS?.count || 0} accounts`}
           danger={(outstanding?.RS?.totalOverdue || 0) > 0}
-          href="https://ringsavvy.chargeover.com/admin"
+          href="https://answeringlegal-unit.monday.com/boards/8265660040/views/176819971"
+        />
+        <KpiTile
+          label="ARE Outstanding"
+          value={usd(outstanding?.ARE?.totalOverdue || 0)}
+          sub={`${outstanding?.ARE?.count || 0} accounts`}
+          danger={(outstanding?.ARE?.totalOverdue || 0) > 0}
+          href="https://answeringlegal-unit.monday.com/boards/8265660040/views/176819971"
+        />
+        <KpiTile
+          label="TS Outstanding"
+          value={usd(outstanding?.TS?.totalOverdue || 0)}
+          sub={`${outstanding?.TS?.count || 0} accounts`}
+          danger={(outstanding?.TS?.totalOverdue || 0) > 0}
+          href="https://answeringlegal-unit.monday.com/boards/8265660040/views/176819971"
         />
         <KpiTile
           label="Mitel Agents Logged In"
@@ -454,11 +490,11 @@ export default function AdminTVPage() {
                     <div>
                       <span style={{
                         fontSize: 10, padding: '1px 6px', borderRadius: 4,
-                        background: c.tenant === 'AL' ? 'rgba(26,111,232,0.2)' : 'rgba(0,201,177,0.2)',
-                        color: c.tenant === 'AL' ? '#60a5fa' : '#5eead4',
+                        background: TENANT_CHIP[c.tenant]?.bg || 'rgba(255,255,255,0.1)',
+                        color:      TENANT_CHIP[c.tenant]?.fg || 'rgba(240,244,255,0.7)',
                       }}>{c.tenant}</span>
                     </div>
-                    <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{c.daysOverdue}</div>
+                    <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{c.daysOverdue ?? '—'}</div>
                     <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#f87171', fontWeight: 700 }}>{usd(c.amountOverdue)}</div>
                   </a>
                 ))}
