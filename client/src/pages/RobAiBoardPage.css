@@ -347,3 +347,117 @@
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* Updates panel */
+.rai-updates {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rai-updates-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted, #94a3b8);
+}
+.rai-updates-loading,
+.rai-updates-empty {
+  font-size: 12px;
+  color: var(--muted, #94a3b8);
+  font-style: italic;
+  padding: 6px 0;
+}
+.rai-updates-err {
+  background: rgba(239,68,68,0.15);
+  color: #f87171;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.rai-updates-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.rai-update {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.rai-update-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.rai-update-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.rai-update-avatar-fallback {
+  background: rgba(249,115,22,0.25);
+  color: #fb923c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+.rai-update-author {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text, #f0f4ff);
+}
+.rai-update-time {
+  font-size: 10px;
+  color: var(--muted, #94a3b8);
+  margin-left: auto;
+}
+.rai-update-body {
+  font-size: 12px;
+  color: rgba(240,244,255,0.85);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.rai-updates-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rai-updates-form textarea {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text, #f0f4ff);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+.rai-updates-form textarea:focus {
+  outline: none;
+  border-color: rgba(249,115,22,0.5);
+}
+.rai-updates-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.rai-updates-hint {
+  font-size: 10px;
+  color: var(--muted, #94a3b8);
+  font-style: italic;
+}

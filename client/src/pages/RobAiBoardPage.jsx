@@ -98,6 +98,106 @@ function EditField({ label, children }) {
   );
 }
 
+function stripHtml(html) {
+  if (!html) return '';
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  return tmp.textContent || tmp.innerText || '';
+}
+
+function fmtUpdateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function UpdatesPanel({ itemId }) {
+  const [updates, setUpdates] = useState(null); // null=loading, []=loaded
+  const [body, setBody]       = useState('');
+  const [posting, setPosting] = useState(false);
+  const [err, setErr]         = useState('');
+  const listEndRef = useRef(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api.get(`/api/rob-ai-board/updates/${itemId}`);
+      // Monday returns newest-first; reverse so newest is at the BOTTOM
+      const list = (r.data?.updates || []).slice().reverse();
+      setUpdates(list);
+    } catch (e) {
+      setUpdates([]);
+      setErr(e.response?.data?.error || 'Failed to load updates');
+    }
+  }, [itemId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    // Scroll to bottom whenever a new update lands
+    listEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [updates]);
+
+  async function submit(e) {
+    e?.preventDefault();
+    const trimmed = body.trim();
+    if (!trimmed || posting) return;
+    setPosting(true); setErr('');
+    try {
+      const r = await api.post('/api/rob-ai-board/updates', { itemId, body: trimmed });
+      setBody('');
+      // Append new one at the bottom; reload after to get canonical creator info
+      if (r.data?.update) setUpdates(u => [...(u || []), r.data.update]);
+      load();
+    } catch (e) {
+      setErr(e.response?.data?.error || 'Failed to post update');
+    } finally {
+      setPosting(false);
+    }
+  }
+
+  return (
+    <div className="rai-updates">
+      <div className="rai-updates-title">Updates</div>
+      {updates === null && <div className="rai-updates-loading">Loading…</div>}
+      {updates && updates.length === 0 && <div className="rai-updates-empty">No updates yet.</div>}
+      {updates && updates.length > 0 && (
+        <div className="rai-updates-list">
+          {updates.map(u => (
+            <div key={u.id} className="rai-update">
+              <div className="rai-update-head">
+                {u.creator?.photo_thumb
+                  ? <img className="rai-update-avatar" src={u.creator.photo_thumb} alt={u.creator.name} />
+                  : <div className="rai-update-avatar rai-update-avatar-fallback">{(u.creator?.name || '?')[0]}</div>
+                }
+                <span className="rai-update-author">{u.creator?.name || 'Unknown'}</span>
+                <span className="rai-update-time">{fmtUpdateTime(u.created_at)}</span>
+              </div>
+              <div className="rai-update-body">{u.text_body || stripHtml(u.body)}</div>
+            </div>
+          ))}
+          <div ref={listEndRef} />
+        </div>
+      )}
+      {err && <div className="rai-updates-err">{err}</div>}
+      <form className="rai-updates-form" onSubmit={submit}>
+        <textarea
+          rows={2}
+          value={body}
+          onChange={e => setBody(e.target.value)}
+          placeholder="Add an update…"
+          onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') submit(e); }}
+        />
+        <div className="rai-updates-form-actions">
+          <span className="rai-updates-hint">⌘/Ctrl+Enter to post</span>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={posting || !body.trim()}>
+            {posting ? 'Posting…' : 'Post Update'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function CardModal({ item, mondayUsers, groups, onClose, onSave }) {
   const [form, setForm] = useState(() => ({
     name:      item.name || '',
@@ -258,6 +358,7 @@ function CardModal({ item, mondayUsers, groups, onClose, onSave }) {
             <span>Hubspot ID: {colText(item, 'text_mm5rkkb5') || '—'}</span>
             <a href={`https://answeringlegal-unit.monday.com/boards/18424304525/pulses/${item.id}`} target="_blank" rel="noreferrer">Open in Monday ↗</a>
           </div>
+          <UpdatesPanel itemId={item.id} />
         </div>
         <div className="rai-modal-footer">
           <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>

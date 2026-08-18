@@ -2542,6 +2542,43 @@ app.post('/api/rob-ai-board/update', requireRole('super_admin', 'rob_ai_board'),
   }
 });
 
+// Fetch Monday "updates" (activity feed) for a single item. Fetched on-demand
+// rather than in the poll so we don't hammer the API for every item every 10s.
+app.get('/api/rob-ai-board/updates/:itemId', requireRole('super_admin', 'rob_ai_board'), async (req, res) => {
+  const apiKey = process.env.MONDAY_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'Monday.com not configured' });
+  const itemId = String(req.params.itemId).replace(/[^0-9]/g, '');
+  if (!itemId) return res.status(400).json({ error: 'Invalid itemId' });
+  const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
+  const query = `query { items(ids: [${itemId}]) { updates(limit: 100) { id body text_body created_at creator { id name photo_thumb } } } }`;
+  try {
+    const r = await axios.post('https://api.monday.com/v2', { query }, { headers, timeout: 15000 });
+    if (r.data?.errors) return res.status(400).json({ error: r.data.errors[0]?.message || 'Monday error' });
+    const updates = r.data?.data?.items?.[0]?.updates || [];
+    res.json({ updates });
+  } catch (err) {
+    console.error('Rob AI updates fetch error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch updates', details: err.message });
+  }
+});
+
+app.post('/api/rob-ai-board/updates', requireRole('super_admin', 'rob_ai_board'), async (req, res) => {
+  const apiKey = process.env.MONDAY_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'Monday.com not configured' });
+  const { itemId, body } = req.body || {};
+  if (!itemId || !body?.trim()) return res.status(400).json({ error: 'itemId and body required' });
+  const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
+  const mutation = `mutation { create_update(item_id: ${Number(itemId)}, body: ${JSON.stringify(body)}) { id body created_at creator { id name photo_thumb } } }`;
+  try {
+    const r = await axios.post('https://api.monday.com/v2', { query: mutation }, { headers, timeout: 15000 });
+    if (r.data?.errors) return res.status(400).json({ error: r.data.errors[0]?.message || 'Monday error' });
+    res.json({ update: r.data?.data?.create_update });
+  } catch (err) {
+    console.error('Rob AI update-post error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to post update', details: err.message });
+  }
+});
+
 // ─── Xcally Realtime Queue ───────────────────────────────────────────────────
 const XCALLY_QUEUE_NAME  = 'Answering_Legal';
 const XCALLY_BUFFER_MS   = 4 * 60 * 60 * 1000; // 4 hours — covers 3 completed + boundary
