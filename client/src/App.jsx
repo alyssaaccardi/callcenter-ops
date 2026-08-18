@@ -32,6 +32,7 @@ import MitelLeaderboard from './modules/MitelLeaderboard';
 import RingLeader from './modules/RingLeader';
 import Scriptor from './modules/Scriptor';
 import RobStonePage, { RobStoneApp } from './pages/RobStonePage';
+import RobAiBoardPage from './pages/RobAiBoardPage';
 
 // Single source of truth for which "experience" a user gets at the root URL.
 // scriptor-only users get the chrome-less Rob-osetta Stone app (no sidebar);
@@ -50,6 +51,7 @@ function Dashboard() {
     user?.role === 'minute_auditor'         ? 'minute-auditor'   :
     user?.role === 'newsletter_contributor' ? 'ring-leader'      :
     user?.role === 'scriptor'               ? 'scriptor'         :
+    user?.role === 'rob_ai_board'           ? 'rob-ai-board'     :
     'status';
   return <DashboardInner user={user} defaultModule={defaultModule} />;
 }
@@ -67,6 +69,7 @@ function DashboardInner({ user, defaultModule }) {
   const isAnalytics = hasRole('super_admin', 'call_center_ops', 'zendesk_auditor'); // gates the Analytics section (Admin Dashboard + Farewell Reporter — tied together)
   const isNewsletter = hasRole('super_admin', 'newsletter_contributor');
   const isScribe     = hasRole('super_admin', 'scriptor');
+  const isRobAiBoard = hasRole('super_admin', 'rob_ai_board');
 
   const moduleMap = {
     'admin-dashboard':  isAnalytics ? <AdminDashboard />        : null,
@@ -88,9 +91,10 @@ function DashboardInner({ user, defaultModule }) {
     'minute-auditor':   isMinuteAuditor ? <MinuteAuditor /> : null,
     'ring-leader':      isNewsletter ? <RingLeader /> : null,
     scriptor:           isScribe    ? <Scriptor /> : null,
+    'rob-ai-board':     isRobAiBoard ? <RobAiBoardPage /> : null,
   };
 
-  const fallback = isOps ? <StatusBoard /> : isSupport ? <SupportCenter /> : isTech ? <TechCenter /> : isNewsletter ? <RingLeader /> : isScribe ? <Scriptor /> : isMinuteAuditor ? <MinuteAuditor /> : <StatusBoard />;
+  const fallback = isOps ? <StatusBoard /> : isSupport ? <SupportCenter /> : isTech ? <TechCenter /> : isNewsletter ? <RingLeader /> : isScribe ? <Scriptor /> : isRobAiBoard ? <RobAiBoardPage /> : isMinuteAuditor ? <MinuteAuditor /> : <StatusBoard />;
 
   const isPortal = activeModule === 'app-portal';
 

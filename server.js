@@ -2395,6 +2395,153 @@ app.get('/api/monday/account-review', requireAuth, async (req, res) => {
   }
 });
 
+// ─── Monday.com: Rob's AI Board ──────────────────────────────────────────────
+const ROB_AI_BOARD_ID = '18424304525';
+const ROB_AI_POLL_MS  = 10_000;
+
+const ROB_AI_COL_IDS = [
+  'person','status','date4','text_mm5qhveb','dropdown_mm5qvrnf','link_mm5qd6fd',
+  'location_mm5qqqav','text_mm5q18yn','text_mm5q1f9s','text_mm5rse7y',
+  'dropdown_mm5qsgmy','text_mm5r1w34','text_mm5rkkb5','phone_mm5q78nv',
+  'email_mm5rh2bj','date_mm5rmtn5','long_text_mm5r5gd',
+];
+
+let robAiBoardCache = null; // { items, groups, mondayUsers, updatedAt }
+const robAiBoardSseClients = new Set();
+
+async function fetchRobAiBoardOnce() {
+  const apiKey = process.env.MONDAY_API_KEY;
+  if (!apiKey) throw new Error('MONDAY_API_KEY not configured');
+  const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
+  const colIds  = JSON.stringify(ROB_AI_COL_IDS);
+  const itemFields = `id name updated_at group { id title } column_values(ids: ${colIds}) { id type text value }`;
+
+  // First page + board meta
+  const initial = `query {
+    boards(ids: [${ROB_AI_BOARD_ID}]) {
+      groups { id title }
+      items_page(limit: 500) { cursor items { ${itemFields} } }
+    }
+  }`;
+  const first = await axios.post('https://api.monday.com/v2', { query: initial }, { headers, timeout: 25000 });
+  if (first.data?.errors) throw new Error(first.data.errors[0]?.message || 'Monday GraphQL error');
+  const board  = first.data?.data?.boards?.[0] || {};
+  const groups = board.groups || [];
+  let items    = board.items_page?.items || [];
+  let cursor   = board.items_page?.cursor;
+
+  while (cursor) {
+    const nextQ = `query { next_items_page(limit: 500, cursor: "${cursor}") { cursor items { ${itemFields} } } }`;
+    const next  = await axios.post('https://api.monday.com/v2', { query: nextQ }, { headers, timeout: 25000 });
+    if (next.data?.errors) throw new Error(next.data.errors[0]?.message || 'Monday pagination error');
+    items = items.concat(next.data?.data?.next_items_page?.items || []);
+    cursor = next.data?.data?.next_items_page?.cursor;
+  }
+
+  return { items, groups };
+}
+
+async function fetchMondayUsers() {
+  const apiKey = process.env.MONDAY_API_KEY;
+  if (!apiKey) return [];
+  const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
+  try {
+    const r = await axios.post('https://api.monday.com/v2', {
+      query: `query { users(kind: non_guests) { id name email photo_thumb } }`,
+    }, { headers, timeout: 10000 });
+    return (r.data?.data?.users || []).map(u => ({
+      id: u.id, name: u.name, email: u.email || null, photoThumb: u.photo_thumb || null,
+    }));
+  } catch { return []; }
+}
+
+let robAiUsersCache = { users: [], fetchedAt: 0 };
+async function getMondayUsersCached() {
+  if (Date.now() - robAiUsersCache.fetchedAt < 5 * 60 * 1000 && robAiUsersCache.users.length) {
+    return robAiUsersCache.users;
+  }
+  const users = await fetchMondayUsers();
+  if (users.length) robAiUsersCache = { users, fetchedAt: Date.now() };
+  return users;
+}
+
+function broadcastRobAiBoard() {
+  if (!robAiBoardCache) return;
+  const payload = `data: ${JSON.stringify(robAiBoardCache)}\n\n`;
+  for (const c of robAiBoardSseClients) c.write(payload);
+}
+
+let robAiPolling = false;
+async function pollRobAiBoard() {
+  if (robAiPolling) return;
+  robAiPolling = true;
+  try {
+    const [{ items, groups }, mondayUsers] = await Promise.all([
+      fetchRobAiBoardOnce(),
+      getMondayUsersCached(),
+    ]);
+    robAiBoardCache = { items, groups, mondayUsers, updatedAt: new Date().toISOString() };
+    broadcastRobAiBoard();
+  } catch (err) {
+    console.error('Rob AI board poll error:', err.response?.data || err.message);
+  } finally {
+    robAiPolling = false;
+  }
+}
+
+if (process.env.MONDAY_API_KEY) {
+  pollRobAiBoard();
+  setInterval(pollRobAiBoard, ROB_AI_POLL_MS);
+}
+
+app.get('/api/rob-ai-board/items', requireRole('super_admin', 'rob_ai_board'), (req, res) => {
+  if (!process.env.MONDAY_API_KEY) return res.status(500).json({ error: 'Monday.com not configured' });
+  if (!robAiBoardCache) return res.status(503).json({ error: 'Board not yet loaded' });
+  res.json(robAiBoardCache);
+});
+
+app.get('/api/rob-ai-board/stream', requireRole('super_admin', 'rob_ai_board'), (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders();
+  if (robAiBoardCache) res.write(`data: ${JSON.stringify(robAiBoardCache)}\n\n`);
+  robAiBoardSseClients.add(res);
+  const heartbeat = setInterval(() => res.write(':heartbeat\n\n'), 25000);
+  req.on('close', () => { clearInterval(heartbeat); robAiBoardSseClients.delete(res); });
+});
+
+// Write a single column value. `value` may be a plain string (uses change_simple_column_value)
+// or a JSON object (serialized and passed to change_column_value). Client shapes the value
+// per Monday's column-type schema.
+app.post('/api/rob-ai-board/update', requireRole('super_admin', 'rob_ai_board'), async (req, res) => {
+  const apiKey = process.env.MONDAY_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'Monday.com not configured' });
+  const { itemId, columnId, value } = req.body || {};
+  if (!itemId || !columnId) return res.status(400).json({ error: 'itemId and columnId required' });
+  if (columnId === 'text_mm5rkkb5') return res.status(403).json({ error: 'Hubspot ID is read-only' });
+
+  const headers = { Authorization: apiKey, 'Content-Type': 'application/json' };
+  const isString = typeof value === 'string' || value === null || value === '';
+  const mutation = isString
+    ? `mutation { change_simple_column_value(board_id: ${ROB_AI_BOARD_ID}, item_id: ${itemId}, column_id: "${columnId}", value: ${JSON.stringify(value ?? '')}) { id } }`
+    : `mutation { change_column_value(board_id: ${ROB_AI_BOARD_ID}, item_id: ${itemId}, column_id: "${columnId}", value: ${JSON.stringify(JSON.stringify(value))}) { id } }`;
+
+  try {
+    const r = await axios.post('https://api.monday.com/v2', { query: mutation }, { headers, timeout: 15000 });
+    if (r.data?.errors) return res.status(400).json({ error: r.data.errors[0]?.message || 'Monday error' });
+    // Refresh cache soon so other clients see the change quickly
+    setTimeout(pollRobAiBoard, 500);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Rob AI update error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to update Monday item', details: err.message });
+  }
+});
+
 // ─── Xcally Realtime Queue ───────────────────────────────────────────────────
 const XCALLY_QUEUE_NAME  = 'Answering_Legal';
 const XCALLY_BUFFER_MS   = 4 * 60 * 60 * 1000; // 4 hours — covers 3 completed + boundary

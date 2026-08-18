@@ -11,6 +11,7 @@ const ROLES = [
   { value: 'minute_auditor',         label: 'Minute Usage Auditor' },
   { value: 'newsletter_contributor', label: 'Newsletter Contributor' },
   { value: 'scriptor',               label: 'The Rob-osetta Stone' },
+  { value: 'rob_ai_board',           label: "Rob's AI Board" },
 ];
 
 const ROLE_STYLE = {
@@ -23,6 +24,7 @@ const ROLE_STYLE = {
   minute_auditor:         { background: 'rgba(168,85,247,0.15)', color: '#c4b5fd' },
   newsletter_contributor: { background: 'rgba(236,72,153,0.15)', color: '#f472b6' },
   scriptor:               { background: 'rgba(139,92,246,0.15)', color: '#c4b5fd' },
+  rob_ai_board:           { background: 'rgba(249,115,22,0.15)', color: '#fb923c' },
 };
 
 const ROLE_LABEL = {
@@ -36,6 +38,7 @@ const ROLE_LABEL = {
   minute_auditor:         'Minute Usage Auditor',
   newsletter_contributor: 'Newsletter Contributor',
   scriptor:               'The Rob-osetta Stone',
+  rob_ai_board:           "Rob's AI Board",
 };
 
 function TutorialRow({ t, onToggle, onReset }) {
