@@ -112,8 +112,6 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-app.get(/^\/ring-leader(\.html|-assets\/.*)?$/, (req, res) => res.status(404).send('Not found'));
-
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── Embeddable Widget (allow iframing from any origin) ───────────────────────
@@ -236,7 +234,7 @@ app.get('/api/users', requireRole('super_admin'), (req, res) => {
   res.json({ users: Object.entries(users).map(([email, u]) => ({ email, ...u })) });
 });
 
-const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor', 'minute_auditor', 'newsletter_contributor', 'scriptor'];
+const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor', 'minute_auditor', 'scriptor'];
 const ADDITIONAL_ROLES = ['zendesk_auditor', 'minute_auditor'];
 
 app.post('/api/users', requireRole('super_admin'), (req, res) => {
@@ -309,8 +307,6 @@ app.post('/api/tv-session', requireAuth, (req, res) => {
 // ─── TV Display Routes (token validated client-side by React) ─────────────────
 app.get('/dialed-in',       (req, res) => res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
 app.get('/dialed-in-pulse', (req, res) => res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
-
-app.get('/ring-leader', (req, res) => res.status(404).send('Not found'));
 
 // ─── Status Store (persisted to disk) ────────────────────────────────────────
 const STATUS_FILE = path.join(__dirname, 'status-store.json');
@@ -5352,123 +5348,6 @@ app.delete('/api/mitel-leaderboard/:id', requireRole('super_admin', 'call_center
   res.json({ ok: true });
 });
 
-// ─── The Ring Leader — Monthly Newsletter ────────────────────────────────────
-const NEWSLETTER_FILE = path.join(__dirname, 'newsletter-store.json');
-
-function loadNewsletters() {
-  try { return JSON.parse(fs.readFileSync(NEWSLETTER_FILE, 'utf8')); } catch { return {}; }
-}
-function saveNewsletters(store) {
-  fs.writeFileSync(NEWSLETTER_FILE, JSON.stringify(store, null, 2));
-}
-
-function buildNewsletterPrompt(month, data) {
-  return `You are the communications lead for a company called Answering Legal. Your job is to transform raw monthly submissions from department leaders into ONE polished internal newsletter called "The Ring Leader — Your Monthly Pulse on Everything Ring Savvy."
-
-Voice: warm, energetic, professional. Celebrate wins, keep momentum, keep it human. No corporate jargon.
-
-Rules:
-- Preserve the JSON shape of the input exactly (same keys, same array element shapes).
-- Polish every string: better writing, tighter phrasing, consistent voice.
-- Merge obvious duplicates or near-duplicates within arrays; keep distinct entries separate.
-- Do NOT fabricate facts, names, numbers, or dates. Only rewrite what's given.
-- If a field is empty in the input, leave it empty in the output.
-- Add ONE new field at the top level: "coverIntro" — a 2 to 3 sentence opening paragraph that sets up the month.
-
-Return ONLY valid JSON. No markdown fences, no prose commentary.
-
-Month: ${month}
-
-Raw submissions:
-${JSON.stringify(data, null, 2)}`;
-}
-
-async function callGeminiForNewsletter(prompt) {
-  const resp = await axios.post(
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
-    {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        maxOutputTokens: 8192,
-        temperature: 0.4,
-        responseMimeType: 'application/json',
-        thinkingConfig: { thinkingBudget: 0 },
-      },
-    },
-    { headers: { 'X-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, timeout: 60000 }
-  );
-  const raw = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-  return JSON.parse(raw);
-}
-
-app.post('/api/newsletter/generate', requireRole('super_admin', 'newsletter_contributor'), async (req, res) => {
-  const { month, data } = req.body || {};
-  if (!month || !data) return res.status(400).json({ error: 'month and data required' });
-  if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'AI temporarily unavailable — GEMINI_API_KEY not configured' });
-
-  try {
-    const prompt = buildNewsletterPrompt(month, data);
-    const delays = [1000, 3000, 8000];
-    let generated, lastErr;
-    for (let attempt = 0; attempt <= delays.length; attempt++) {
-      try { generated = await callGeminiForNewsletter(prompt); break; }
-      catch (e) {
-        lastErr = e;
-        const status = e?.response?.status;
-        const transient = status === 429 || (status >= 500 && status < 600) || !status;
-        if (!transient || attempt === delays.length) throw e;
-        console.warn(`[ring-leader] gemini ${status || e.message}, retry ${attempt + 1}/${delays.length}`);
-        await new Promise(r => setTimeout(r, delays[attempt]));
-      }
-    }
-    if (!generated) throw lastErr;
-
-    const store = loadNewsletters();
-    const record = {
-      month,
-      generatedAt: new Date().toISOString(),
-      generatedBy: req.user?.email,
-      generatedByName: req.user?.name,
-      raw: data,
-      newsletter: generated,
-    };
-    store[month] = record;
-    saveNewsletters(store);
-    res.json(record);
-  } catch (err) {
-    console.error('[ring-leader] generation failed:', err.message);
-    const status = err?.response?.status;
-    res.status(500).json({
-      error: status === 429
-        ? 'Gemini rate limit — retries exhausted. Try again in a minute.'
-        : `Newsletter generation failed: ${err.message}`,
-    });
-  }
-});
-
-app.get('/api/newsletter', requireRole('super_admin', 'newsletter_contributor'), (req, res) => {
-  const store = loadNewsletters();
-  const list = Object.values(store)
-    .map(({ month, generatedAt, generatedBy, generatedByName }) => ({ month, generatedAt, generatedBy, generatedByName }))
-    .sort((a, b) => b.month.localeCompare(a.month));
-  res.json(list);
-});
-
-app.get('/api/newsletter/:month', requireRole('super_admin', 'newsletter_contributor'), (req, res) => {
-  const store = loadNewsletters();
-  const record = store[req.params.month];
-  if (!record) return res.status(404).json({ error: 'Not found' });
-  res.json(record);
-});
-
-app.delete('/api/newsletter/:month', requireRole('super_admin'), (req, res) => {
-  const store = loadNewsletters();
-  if (!store[req.params.month]) return res.status(404).json({ error: 'Not found' });
-  delete store[req.params.month];
-  saveNewsletters(store);
-  res.json({ ok: true });
-});
-
 // ─── The Rob-osetta Stone — handwriting → clean text ─────────────────────────
 // Deciphers a handwritten note (phone photo or PDF scan) into typed, cleaned-up
 // text. Uses Gemini vision (handles images AND PDFs natively, long context for
@@ -6252,6 +6131,12 @@ function parseNumericPlan(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Parse a $/min overage rate. Accepts "$3.25", "3.25", " 3.2500 " → 3.25.
+function parseRate(v) {
+  const n = parseFloat(String(v ?? '').replace(/[^\d.-]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
 async function runMinuteAuditorJob(jobId, rows) {
   const job = minuteAuditorJobs.get(jobId);
   if (!job) return;
@@ -6312,6 +6197,7 @@ async function runMinuteAuditorJob(jobId, rows) {
       nameMismatch: false,    nameMatchScore: null,
       planMismatch: false,    csvPlan: null, coPlan: null,
       billDayMismatch: false, csvBillDay: null, coBillDay: null,
+      rateMismatch: false,    csvRate: null, coRate: null,
       zeroUsageActiveSub: false,
       ctiClosedActiveSub: false,
       // HubSpot cross-check fields
@@ -6351,12 +6237,18 @@ async function runMinuteAuditorJob(jobId, rows) {
         result.coPlan     = parseNumericPlan(co.planMinutes);
         result.csvBillDay = parseCycleDay(row.billingCycle);
         result.coBillDay  = parseInvoiceDay(co.billAnchorDate);
+        result.csvRate    = parseRate(row.overageRate);
+        result.coRate     = parseRate(co.overageRate);
         if (result.active === true) {
           if (result.csvPlan != null && result.coPlan != null) {
             result.planMismatch = result.csvPlan !== result.coPlan;
           }
           if (result.csvBillDay != null && result.coBillDay != null) {
             result.billDayMismatch = result.csvBillDay !== result.coBillDay;
+          }
+          if (result.csvRate != null && result.coRate != null) {
+            // Rates are $/min; treat differences under half a cent as equal.
+            result.rateMismatch = Math.abs(result.csvRate - result.coRate) > 0.005;
           }
         }
         // HubSpot cross-check — match CO customer to a PAID deal by superuser
@@ -6527,6 +6419,7 @@ async function runMinuteAuditorJob(jobId, rows) {
     if (result.zeroUsageActiveSub)  result.flagReasons.push('Zero usage');
     if (result.ctiClosedActiveSub)  result.flagReasons.push('CTI closed with active sub');
     if (result.planMismatch && !isMultiple) result.flagReasons.push('Plan mismatch');
+    if (result.rateMismatch && !isMultiple) result.flagReasons.push('Rate mismatch');
     if (result.billDayMismatch)     result.flagReasons.push('Bill day mismatch');
     // CSV(Answer)<->CO name divergence is informational only — the required
     // name check is CO<->HubSpot, handled in the HubSpot cross-check block.
@@ -6545,67 +6438,8 @@ async function runMinuteAuditorJob(jobId, rows) {
     job.done++;
   }
 
-  // ── Phase 3: verify plan mismatches against invoice line items ──
-  // `custom_2` on the CO package is a manually-entered field that goes
-  // stale (e.g. Comfortable Carla's says 120 there, but the actual invoice
-  // line reads "100 minutes -"). The truth lives in the most recent
-  // invoice's base recurring line-item description. Only re-verify rows
-  // we already flagged for plan mismatch — bounded and targeted.
-  const toVerify = job.results.filter(r =>
-    r.planMismatch && r.coCustomerId && r.chargeover?.tenant);
-  if (toVerify.length > 0) {
-    job.phase = 'verifying';
-    job.verifyTotal = toVerify.length;
-    job.verifyDone  = 0;
-    const CONCURRENCY_VERIFY = 3;
-    for (let i = 0; i < toVerify.length; i += CONCURRENCY_VERIFY) {
-      await Promise.all(toVerify.slice(i, i + CONCURRENCY_VERIFY).map(async (r) => {
-        try {
-          const truePlan = await fetchInvoicePlanMinutes(r.chargeover.tenant, r.coCustomerId);
-          if (truePlan != null) {
-            r.coPlan = truePlan;
-            r.planVerifiedFromInvoice = true;
-            const csvPlanNum = r.csvPlan;
-            if (csvPlanNum != null && csvPlanNum === truePlan) {
-              // Now matches — remove the Plan mismatch flag.
-              r.planMismatch = false;
-              const idx = r.flagReasons.indexOf('Plan mismatch');
-              if (idx >= 0) r.flagReasons.splice(idx, 1);
-              r.flagged = r.flagReasons.length > 0;
-            }
-          }
-        } catch { /* leave the pre-verification value in place */ }
-        job.verifyDone++;
-      }));
-    }
-  }
-
   job.status = 'done';
   job.finishedAt = Date.now();
-}
-
-// Look up a customer's true plan by parsing the "N minutes" prefix from
-// the base recurring line item on their most recent invoice. Two API
-// calls: one to find the newest invoice id, one to pull its line items.
-async function fetchInvoicePlanMinutes(tenant, customerId) {
-  const list = await chargeoverGet(tenant, '/invoice', {
-    where: `customer_id:EQUALS:${customerId}`,
-    order: 'invoice_date:desc',
-    limit: 3,
-  });
-  if (!Array.isArray(list) || list.length === 0) return null;
-  // Some months a customer only has an overage-only invoice; walk back
-  // a few invoices to find one that carries a base recurring line.
-  for (const summary of list) {
-    const full = await chargeoverGet(tenant, `/invoice/${summary.invoice_id}`);
-    const lines = full?.line_items || [];
-    const base = lines.find(l => l.is_base && l.is_recurring)
-              || lines.find(l => l.is_recurring);
-    if (!base) continue;
-    const m = String(base.descrip || '').match(/^\s*(\d+)\s*minutes?\b/i);
-    if (m) return parseInt(m[1], 10);
-  }
-  return null;
 }
 
 app.post('/api/minute-auditor/upload', requireRole(...MINUTE_AUDITOR_ROLES), minuteAuditorUpload.single('file'), (req, res) => {

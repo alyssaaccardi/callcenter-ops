@@ -59,6 +59,7 @@ function computeAllReasons(r) {
   if (r.zeroUsageActiveSub)                 reasons.push('Zero usage');
   if (r.ctiClosedActiveSub)                 reasons.push('CTI closed with active sub');
   if (r.planMismatch && !isMultiple)        reasons.push('Plan mismatch');
+  if (r.rateMismatch && !isMultiple)        reasons.push('Rate mismatch');
   if (r.billDayMismatch)                    reasons.push('Bill day mismatch');
 
   // HubSpot cross-check flags apply to every category — server does the
@@ -81,6 +82,7 @@ function computeReason(r) { return computeAllReasons(r)[0]; }
 function describeReason(r) {
   if (r.reason === 'Matched')            return 'Answer and ChargeOver agree on plan and bill day.';
   if (r.reason === 'Plan mismatch')      return `Answer allotted ${r.csvPlan ?? '?'} min; ChargeOver plan is ${r.coPlan ?? '?'} min.`;
+  if (r.reason === 'Rate mismatch')      return `Answer overage rate is $${r.csvRate != null ? r.csvRate.toFixed(2) : '?'}/min; ChargeOver rate is $${r.coRate != null ? r.coRate.toFixed(2) : '?'}/min.`;
   if (r.reason === 'Bill day mismatch')  return `Answer bills on day ${r.csvBillDay ?? '?'}; ChargeOver next invoice is day ${r.coBillDay ?? '?'}.`;
   if (r.reason === 'No subscription')    return `Answer shows this account but ChargeOver has no active subscription${r.chargeover?.subStatus ? ` (status: ${r.chargeover.subStatus})` : ''}.`;
   if (r.reason === 'Zero usage')         return `Zero minutes and zero calls this cycle in Answer, but the ChargeOver subscription is still active — the customer likely deactivated in Answer or never went live, and CO wasn't caught up.`;
@@ -98,6 +100,7 @@ const REASON_TONE = {
   'Matched':                       'ok',
   'Trial with active sub':         'crit',
   'Plan mismatch':                 'crit',
+  'Rate mismatch':                 'crit',
   'Bill day mismatch':             'crit',
   'Zero usage':                    'crit',
   'CTI closed with active sub':    'crit',
@@ -114,6 +117,7 @@ const REASON_OPTIONS = [
   { value: 'all',                          label: 'All reasons' },
   { value: 'Trial with active sub',        label: 'Trial with active sub' },
   { value: 'Plan mismatch',                label: 'Plan mismatch' },
+  { value: 'Rate mismatch',                label: 'Overage rate mismatch' },
   { value: 'Bill day mismatch',            label: 'Bill day mismatch' },
   { value: 'Zero usage',                   label: 'Zero usage, active sub' },
   { value: 'CTI closed with active sub',   label: 'CTI closed, active sub' },
@@ -133,6 +137,7 @@ function toCsv(rows) {
     'Client (Answer)','Company (ChargeOver)','Account (HubSpot)','Name Match Score',
     'Name Score Answer-CO','Name Score CO-HubSpot','Name Score Answer-HubSpot','All 3 Names Match',
     'Plan Answer (Allotted)','Plan ChargeOver','Plan Mismatch',
+    'Overage Rate Answer','Overage Rate ChargeOver','Rate Mismatch',
     'Bill Day Answer','Bill Day ChargeOver','Bill Day Mismatch','ChargeOver Next Invoice',
     'ChargeOver Customer ID','Tenant (Answer)','Tenant (ChargeOver)',
     'Sales Rep — HubSpot (source of truth)','Sales Rep — ChargeOver (to update on mismatch)','Sales Rep Mismatch',
@@ -156,6 +161,7 @@ function toCsv(rows) {
       r.client, co.company || '', r.hubspotName || '', r.nameMatchScore ?? '',
       r.nameScoreAnswerCo ?? '', r.nameScoreCoHs ?? '', r.nameScoreAnswerHs ?? '', yn(r.nameAllThreeMatch),
       r.csvPlan ?? r.allotted, r.coPlan ?? '', yn(r.planMismatch),
+      r.csvRate != null ? r.csvRate.toFixed(2) : '', r.coRate != null ? r.coRate.toFixed(2) : '', yn(r.rateMismatch),
       r.csvBillDay ?? '', r.coBillDay ?? '', yn(r.billDayMismatch), co.nextInvoiceDate || '',
       r.coCustomerId, r.clientType, co.tenant || '',
       r.hubspotSalesRepEmail || r.hubspotSalesRep || '', r.coSalesperson || '', yn(r.salesRepMismatch),
@@ -360,7 +366,7 @@ export default function MinuteAuditor() {
       // increments 3 counters. Under-counting by primary-only made the
       // reason bar under-represent secondary issues (a row flagged
       // Plan + Bill day only bumped Plan).
-      reasonTrial: 0, reasonPlan: 0, reasonBillDay: 0, reasonZeroUsage: 0, reasonNoSub: 0,
+      reasonTrial: 0, reasonPlan: 0, reasonRate: 0, reasonBillDay: 0, reasonZeroUsage: 0, reasonNoSub: 0,
       reasonHsName: 0, reasonSalesRep: 0, reasonPrevPaying: 0, reasonNameDrift: 0,
       hubspotNameAgree: 0, hubspotNameDisagree: 0,
     };
@@ -380,6 +386,7 @@ export default function MinuteAuditor() {
       for (const reason of r.allReasons || []) {
         if      (reason === 'Trial with active sub')       s.reasonTrial++;
         else if (reason === 'Plan mismatch')               s.reasonPlan++;
+        else if (reason === 'Rate mismatch')               s.reasonRate++;
         else if (reason === 'Bill day mismatch')           s.reasonBillDay++;
         else if (reason === 'Zero usage')                  s.reasonZeroUsage++;
         else if (reason === 'No subscription')             s.reasonNoSub++;
@@ -546,7 +553,6 @@ export default function MinuteAuditor() {
   if (view === 'running') {
     const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
     const isPrefetch = progress.phase === 'prefetching';
-    const isVerify   = progress.phase === 'verifying';
     return (
       <div className="ma-root">
         <PageHead subtitle="Comparing Answer usage against ChargeOver…" />
@@ -554,20 +560,16 @@ export default function MinuteAuditor() {
           <div className="ma-run-label">
             {isPrefetch
               ? 'Loading ChargeOver customer & subscription data…'
-              : isVerify
-                ? <>Verifying plan mismatches against invoices…</>
-                : <>Matching Answer rows against ChargeOver… <b>{progress.done}</b> / {progress.total}</>
+              : <>Matching Answer rows against ChargeOver… <b>{progress.done}</b> / {progress.total}</>
             }
           </div>
-          <div className={`ma-progress${(isPrefetch || isVerify) ? ' ma-progress--indeterminate' : ''}`}>
-            <div className="ma-progress-fill" style={(isPrefetch || isVerify) ? undefined : { width: `${pct}%` }} />
+          <div className={`ma-progress${isPrefetch ? ' ma-progress--indeterminate' : ''}`}>
+            <div className="ma-progress-fill" style={isPrefetch ? undefined : { width: `${pct}%` }} />
           </div>
           <div className="ma-run-hint">
             {isPrefetch && progress.prefetch && Object.keys(progress.prefetch).length > 0
               ? Object.entries(progress.prefetch).map(([k, v]) => `${k}: ${v}`).join(' · ')
-              : isVerify
-                ? 'Re-checking each flagged row against its most recent CO invoice to filter out stale package data.'
-                : 'Streaming results as each row is resolved.'}
+              : 'Streaming results as each row is resolved.'}
           </div>
         </Card>
       </div>
@@ -618,6 +620,7 @@ export default function MinuteAuditor() {
               <div className="ma-reason-bar">
                 {summary.reasonTrial      > 0 && <div style={{ flex: summary.reasonTrial,      background: 'var(--warn-600)' }} title={`Trial with active sub (${summary.reasonTrial})`} />}
                 {summary.reasonPlan       > 0 && <div style={{ flex: summary.reasonPlan,       background: 'var(--crit-600)' }} title={`Plan mismatch (${summary.reasonPlan})`} />}
+                {summary.reasonRate       > 0 && <div style={{ flex: summary.reasonRate,       background: 'var(--crit-400)' }} title={`Rate mismatch (${summary.reasonRate})`} />}
                 {summary.reasonBillDay    > 0 && <div style={{ flex: summary.reasonBillDay,    background: 'var(--crit-500)' }} title={`Bill day mismatch (${summary.reasonBillDay})`} />}
                 {summary.reasonZeroUsage  > 0 && <div style={{ flex: summary.reasonZeroUsage,  background: 'var(--crit-700)' }} title={`Zero usage, active sub (${summary.reasonZeroUsage})`} />}
                 {summary.reasonNoSub      > 0 && <div style={{ flex: summary.reasonNoSub,      background: 'var(--warn-500)' }} title={`No subscription (${summary.reasonNoSub})`} />}
@@ -628,6 +631,7 @@ export default function MinuteAuditor() {
               <div className="ma-reason-legend">
                 <LegendChip color="var(--warn-600)" label="Trial with active sub"    n={summary.reasonTrial} />
                 <LegendChip color="var(--crit-600)" label="Plan mismatch"            n={summary.reasonPlan} />
+                <LegendChip color="var(--crit-400)" label="Rate mismatch"            n={summary.reasonRate} />
                 <LegendChip color="var(--crit-500)" label="Bill day mismatch"        n={summary.reasonBillDay} />
                 <LegendChip color="var(--crit-700)" label="Zero usage, active sub"   n={summary.reasonZeroUsage} />
                 <LegendChip color="var(--warn-500)" label="No subscription"          n={summary.reasonNoSub} />
@@ -972,6 +976,12 @@ function TableRow({ r, expanded, onToggle, colCount, showAllCols, tab, groupRole
                 sub={r.planMismatch ? 'differs from CO' : null} />
               <DetailField label="Plan (ChargeOver)"
                 value={r.coPlan != null ? `${r.coPlan} min` : '—'}
+                sub={r.chargeover?.subStatus || 'no active subscription'} />
+              <DetailField label="Overage rate (Answer)"
+                value={r.csvRate != null ? `$${r.csvRate.toFixed(2)}/min` : '—'}
+                sub={r.rateMismatch ? 'differs from CO' : null} />
+              <DetailField label="Overage rate (ChargeOver)"
+                value={r.coRate != null ? `$${r.coRate.toFixed(2)}/min` : '—'}
                 sub={r.chargeover?.subStatus || 'no active subscription'} />
               <DetailField label="Bill day (Answer)"
                 value={r.csvBillDay != null ? ordinal(r.csvBillDay) : '—'}
