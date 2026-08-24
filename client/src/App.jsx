@@ -28,6 +28,7 @@ import AdminTVPage from './pages/AdminTVPage';
 import WhatsNew from './components/WhatsNew';
 import ZendeskAuditor from './modules/ZendeskAuditor';
 import MinuteAuditor from './modules/MinuteAuditor';
+import SalespersonAuditor from './modules/SalespersonAuditor';
 import MitelLeaderboard from './modules/MitelLeaderboard';
 import RingLeader from './modules/RingLeader';
 import Scriptor from './modules/Scriptor';
@@ -89,6 +90,7 @@ function DashboardInner({ user, defaultModule }) {
     'user-management':  user?.role === 'super_admin' ? <UserManagementModule /> : null,
     'zendesk-auditor':  isAnalytics ? <ZendeskAuditor /> : null,
     'minute-auditor':   isMinuteAuditor ? <MinuteAuditor /> : null,
+    'salesperson-auditor': isMinuteAuditor ? <SalespersonAuditor /> : null,
     'ring-leader':      isNewsletter ? <RingLeader /> : null,
     scriptor:           isScribe    ? <Scriptor /> : null,
     'rob-ai-board':     isRobAiBoard ? <RobAiBoardPage /> : null,

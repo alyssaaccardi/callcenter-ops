@@ -6529,6 +6529,215 @@ app.get('/api/minute-auditor/results/:jobId', requireRole(...MINUTE_AUDITOR_ROLE
   res.json(job);
 });
 
+// ─── Salesperson Auditor ─────────────────────────────────────────────────────
+// Same CSV as the minute auditor, different question: is the CO salesperson
+// field on the matched customer a real salesperson? Real salespeople in CO
+// are admins with login_count === 0 (they cannot log in) — anything else in
+// the field (Karla/Debbie/other logged-in staff, Salesforce IDs, numeric
+// junk, blanks) is a misassignment and gets flagged. Only customers created
+// within the last SALESPERSON_AUDITOR_WINDOW_YEARS are checked; older
+// customers predate the salesperson concept.
+const SALESPERSON_AUDITOR_ROLES = ['super_admin', 'call_center_ops', 'minute_auditor'];
+const SALESPERSON_AUDITOR_WINDOW_YEARS = 4;
+const salespersonAuditorUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const salespersonAuditorJobs = new Map();
+
+async function fetchSalespersonAllowlist(progressCb) {
+  const allow = new Set();
+  const adminsByTenant = { AL: [], RS: [] };
+  for (const tenant of ['AL', 'RS']) {
+    if (!CHARGEOVER_TENANTS[tenant]?.auth) continue;
+    const list = await chargeoverListAll(tenant, '/admin', {}, n => progressCb?.(tenant + ' admins', n));
+    adminsByTenant[tenant] = list;
+    for (const a of list) {
+      if (Number(a.login_count) === 0) {
+        const email = String(a.email || '').trim().toLowerCase();
+        if (email) allow.add(email);
+      }
+    }
+  }
+  return { allow, adminsByTenant };
+}
+
+// Read the raw salesperson custom-field value straight off the customer
+// record — NOT resolveInPrefetched's `salesperson`, which nulls anything
+// without an @. Non-email junk (numeric IDs, Salesforce IDs) is exactly
+// what this auditor is supposed to surface.
+function rawSalespersonValue(cust, tenant) {
+  if (!cust) return '';
+  const raw = tenant === 'AL' ? cust.custom_6 : cust.custom_2;
+  return String(raw || '').trim();
+}
+
+async function runSalespersonAuditorJob(jobId, rows) {
+  const job = salespersonAuditorJobs.get(jobId);
+  if (!job) return;
+
+  job.phase = 'prefetching';
+  job.prefetch = {};
+  const prefetched = { AL: null, RS: null };
+  let allowlist = new Set();
+  try {
+    const updateProgress = (label, n) => { job.prefetch[label] = n; };
+    const [al, rs, allowRes] = await Promise.all([
+      prefetchTenantData('AL', updateProgress),
+      prefetchTenantData('RS', updateProgress),
+      fetchSalespersonAllowlist(updateProgress),
+    ]);
+    prefetched.AL = al;
+    prefetched.RS = rs;
+    allowlist = allowRes.allow;
+    job.allowlistSize = allowlist.size;
+    job.allowlist = [...allowlist].sort();
+  } catch (e) {
+    console.error('[salesperson-auditor] prefetch failed:', e.message);
+    job.status = 'error';
+    job.error = 'ChargeOver prefetch failed: ' + e.message;
+    job.finishedAt = Date.now();
+    return;
+  }
+
+  // Rolling window: (today - N years). Any customer whose CO write_datetime
+  // is at or after this date must have a real salesperson assigned.
+  const cutoffDate = new Date();
+  cutoffDate.setFullYear(cutoffDate.getFullYear() - SALESPERSON_AUDITOR_WINDOW_YEARS);
+  const cutoffStr = cutoffDate.toISOString().slice(0, 10);
+  job.cutoffDate = cutoffStr;
+
+  job.phase = 'matching';
+  for (const row of rows) {
+    const result = {
+      client: row.client,
+      coCustomerId: row.coCustomerId,
+      clientType: row.clientType,
+      billingCategory: row.billingCategory,
+      tenant: null,
+      customerId: null,
+      coCompany: null,
+      createdAt: null,
+      salesperson: '',
+      inWindow: null,
+      flagged: false,
+      flagReason: null,
+      error: null,
+      coUrl: null,
+    };
+
+    if (!row.coCustomerId) {
+      result.error = 'No COCustomerId';
+      job.results.push(result);
+      job.done++;
+      continue;
+    }
+
+    const tenantHint = ['AL', 'RS'].includes(row.clientType) ? row.clientType : null;
+    const co = resolveInPrefetched(prefetched, tenantHint, row.coCustomerId, row.client);
+    if (!co) {
+      result.error = 'Not found in ChargeOver';
+      job.results.push(result);
+      job.done++;
+      continue;
+    }
+    result.tenant       = co.tenant;
+    result.customerId   = co.customerId;
+    result.coCompany    = co.company;
+    result.createdAt    = co.createdAt;
+    result.coUrl        = co.url;
+
+    const cust = prefetched[co.tenant]?.customerById.get(String(co.customerId));
+    const raw  = rawSalespersonValue(cust, co.tenant);
+    result.salesperson = raw;
+
+    result.inWindow = !!(co.createdAt && co.createdAt >= cutoffStr);
+
+    if (result.inWindow) {
+      if (!raw) {
+        result.flagged = true;
+        result.flagReason = 'Unassigned';
+      } else if (!allowlist.has(raw.toLowerCase())) {
+        result.flagged = true;
+        result.flagReason = 'Not a salesperson';
+      }
+    }
+
+    job.results.push(result);
+    job.done++;
+  }
+
+  job.status = 'done';
+  job.finishedAt = Date.now();
+}
+
+app.post('/api/salesperson-auditor/upload', requireRole(...SALESPERSON_AUDITOR_ROLES), salespersonAuditorUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  let text;
+  try { text = req.file.buffer.toString('utf8'); }
+  catch (e) { return res.status(400).json({ error: 'Could not read file as text' }); }
+  let rows;
+  try { rows = parsePercentageCsv(text); }
+  catch (e) { return res.status(400).json({ error: 'Failed to parse CSV: ' + e.message }); }
+  if (rows.length === 0) return res.status(400).json({ error: 'No data rows found in CSV' });
+
+  const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  salespersonAuditorJobs.set(jobId, {
+    status: 'running',
+    results: [],
+    total: rows.length,
+    done: 0,
+    startedAt: Date.now(),
+    finishedAt: null,
+    filename: req.file.originalname || 'upload.csv',
+  });
+
+  runSalespersonAuditorJob(jobId, rows).catch(err => {
+    const job = salespersonAuditorJobs.get(jobId);
+    if (job) { job.status = 'error'; job.error = err.message; }
+  });
+
+  const cutoff = Date.now() - 2 * 60 * 60 * 1000;
+  for (const [id, j] of salespersonAuditorJobs.entries()) {
+    if ((j.finishedAt || j.startedAt) < cutoff) salespersonAuditorJobs.delete(id);
+  }
+
+  res.json({ jobId, total: rows.length });
+});
+
+app.get('/api/salesperson-auditor/stream/:jobId', requireRole(...SALESPERSON_AUDITOR_ROLES), (req, res) => {
+  const { jobId } = req.params;
+  const job = salespersonAuditorJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  let sent = 0;
+  const interval = setInterval(() => {
+    const current = salespersonAuditorJobs.get(jobId);
+    if (!current) { clearInterval(interval); res.end(); return; }
+    while (sent < current.results.length) {
+      res.write(`data: ${JSON.stringify({ type: 'result', result: current.results[sent], done: current.done, total: current.total })}\n\n`);
+      sent++;
+    }
+    res.write(`data: ${JSON.stringify({ type: 'progress', done: current.done, total: current.total, status: current.status, phase: current.phase || null, prefetch: current.prefetch || null })}\n\n`);
+    if (current.status === 'done' || current.status === 'error') {
+      res.write(`data: ${JSON.stringify({ type: 'done', done: current.done, total: current.total, status: current.status, phase: current.phase || null, prefetch: current.prefetch || null, cutoffDate: current.cutoffDate || null, allowlistSize: current.allowlistSize || null, error: current.error || null })}\n\n`);
+      clearInterval(interval);
+      res.end();
+    }
+  }, 700);
+
+  req.on('close', () => clearInterval(interval));
+});
+
+app.get('/api/salesperson-auditor/results/:jobId', requireRole(...SALESPERSON_AUDITOR_ROLES), (req, res) => {
+  const { jobId } = req.params;
+  const job = salespersonAuditorJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job);
+});
+
 // ─── React SPA Catch-All ─────────────────────────────────────────────────────
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'app', 'index.html'));
