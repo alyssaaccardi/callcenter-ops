@@ -6,45 +6,49 @@
 <style type="text/css">
 body {
   margin: 0;
-  padding: 12px;
+  padding: 8px;
   font-family: Arial, Helvetica, sans-serif;
   background: #ffffff;
   color: #222222;
 }
 table.status {
   border-collapse: collapse;
-  width: 100%;
+  width: 220px;
   border: 2px solid #999999;
 }
 table.status td {
-  padding: 14px 16px;
+  padding: 8px 10px;
   vertical-align: middle;
 }
 td.swatch {
-  width: 28px;
+  width: 16px;
   background: #cccccc;
 }
 td.swatch-up    { background: #1f9d55; }
 td.swatch-down  { background: #c0392b; }
 td.swatch-warn  { background: #999999; }
-td.label {
-  font-size: 22px;
+td.info {
+  line-height: 1.25;
+}
+.label {
+  font-size: 15px;
   font-weight: bold;
 }
-td.label-up    { color: #1f6b3e; }
-td.label-down  { color: #a02318; }
-td.label-warn  { color: #555555; font-size: 16px; }
-td.updated {
+.label-up    { color: #1f6b3e; }
+.label-down  { color: #a02318; }
+.label-warn  { color: #555555; font-size: 13px; }
+.updated {
   font-family: "Courier New", Courier, monospace;
-  font-size: 12px;
+  font-size: 11px;
   color: #666666;
-  text-align: right;
   white-space: nowrap;
+  margin-top: 2px;
 }
 .msg {
-  margin-top: 8px;
-  font-size: 13px;
+  margin-top: 6px;
+  font-size: 11px;
   color: #444444;
+  width: 220px;
 }
 </style>
 </head>
@@ -53,8 +57,10 @@ td.updated {
 <table class="status" id="statusTable">
   <tr>
     <td class="swatch swatch-warn" id="swatch">&nbsp;</td>
-    <td class="label label-warn" id="label">Checking status...</td>
-    <td class="updated" id="updated">&nbsp;</td>
+    <td class="info">
+      <div class="label label-warn" id="label">Checking...</div>
+      <div class="updated" id="updated">&nbsp;</div>
+    </td>
   </tr>
 </table>
 <div class="msg" id="msg">&nbsp;</div>
