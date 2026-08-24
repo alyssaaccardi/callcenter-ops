@@ -127,6 +127,12 @@ app.get('/site-widget', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'CCOB_SiteWidget.html'));
 });
 
+app.get('/mitel-widget', (req, res) => {
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('Content-Security-Policy', "frame-ancestors *");
+  res.sendFile(path.join(__dirname, 'public', 'CCOB_MitelWidget_Legacy.html'));
+});
+
 // ─── TV Session Token Store ───────────────────────────────────────────────────
 const TV_SESSIONS_FILE = path.join(__dirname, 'tv-sessions.json');
 
