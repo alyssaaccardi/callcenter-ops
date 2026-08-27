@@ -965,10 +965,19 @@ function ManualOutageForm({ onClose, onSaved }) {
   const [start, setStart] = useState(nowLocal);
   const [end, setEnd] = useState("");
   const [cause, setCause] = useState("");
+  const [files, setFiles] = useState([]);
+  const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
+  const fileInputRef = useRef(null);
 
   const toggle = (d) => setDistricts((s) => s.includes(d) ? s.filter((x) => x !== d) : [...s, d]);
+
+  const addFiles = (list) => {
+    const arr = Array.from(list || []).slice(0, 10 - files.length);
+    setFiles((prev) => [...prev, ...arr]);
+  };
+  const removeFile = (i) => setFiles((prev) => prev.filter((_, idx) => idx !== i));
 
   // datetime-local input gives no offset — treat it as Belize local time.
   const toBelizeIso = (v) => v ? `${v}:00-06:00` : null;
@@ -993,6 +1002,22 @@ function ManualOutageForm({ onClose, onSaved }) {
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || `Save failed (${r.status})`);
+
+      // Upload any attached files after the outage entry exists.
+      if (files.length && data.entry?.id) {
+        const fd = new FormData();
+        for (const f of files) fd.append("files", f);
+        const ur = await fetch(`${API}/manual-outages/${encodeURIComponent(data.entry.id)}/attachments`, {
+          method: "POST",
+          credentials: "include",
+          body: fd,
+        });
+        if (!ur.ok) {
+          const ud = await ur.json().catch(() => ({}));
+          throw new Error(ud.error || `Attachment upload failed (${ur.status})`);
+        }
+      }
+
       onSaved();
       onClose();
     } catch (e) { setErr(e.message); } finally { setSaving(false); }
@@ -1057,6 +1082,46 @@ function ManualOutageForm({ onClose, onSaved }) {
             <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">Cause / note</span>
             <input type="text" value={cause} onChange={(e) => setCause(e.target.value)} maxLength={200} style={{ background: C.ink, borderColor: C.line, color: C.text }} className="w-full mt-1 px-2.5 py-2 rounded-lg border text-sm" />
           </label>
+
+          <div>
+            <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">Evidence (screenshots, PDFs)</span>
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                background: dragging ? "rgba(201,162,39,0.10)" : C.ink,
+                borderColor: dragging ? C.gold : C.line,
+                borderStyle: "dashed",
+              }}
+              className="mt-1 rounded-lg border p-3 text-center cursor-pointer transition-colors"
+            >
+              <div style={{ color: C.dim }} className="text-xs">
+                {dragging ? "Drop to attach" : files.length ? `${files.length} file${files.length !== 1 ? "s" : ""} ready` : "Drag files here or click to browse"}
+              </div>
+              <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] mt-0.5">Up to 10 files, 10 MB each</div>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/*,.pdf,.txt,.csv,.log"
+              className="hidden"
+              onChange={(e) => addFiles(e.target.files)}
+            />
+            {files.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {files.map((f, i) => (
+                  <span key={i} style={{ background: C.ink, borderColor: C.line, color: C.text }} className="text-[11px] px-2 py-1 rounded border flex items-center gap-1.5">
+                    <span className="truncate max-w-[180px]">{f.name}</span>
+                    <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px]">{(f.size / 1024).toFixed(0)}k</span>
+                    <button onClick={(e) => { e.stopPropagation(); removeFile(i); }} style={{ color: C.dim }}><X size={11} /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
 
           {err && <div style={{ color: C.red }} className="text-xs">{err}</div>}
         </div>
@@ -1319,6 +1384,24 @@ export default function BelizeGridWatch() {
                         <div style={{ color: C.dim, fontFamily: MONO }} className="text-[11px] mt-1">{windowLabel(o)}</div>
                         {o.areaPlaces?.length > 0 && <div style={{ color: C.dim }} className="text-xs mt-1.5 leading-relaxed">{o.areaPlaces.slice(0, 6).map((p) => p.raw).join(", ")}{o.areaPlaces.length > 6 ? ` +${o.areaPlaces.length - 6}` : ""}</div>}
                         {o.cause && <div style={{ color: C.dim }} className="text-[11px] mt-1 italic">{o.cause}</div>}
+                        {o.attachments?.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {o.attachments.map((a) => {
+                              const url = `${API}/attachments/${encodeURIComponent(a.storedName)}`;
+                              const isImg = a.mime?.startsWith("image/");
+                              return isImg ? (
+                                <a key={a.id} href={url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title={a.filename} className="block">
+                                  <img src={url} alt={a.filename} style={{ borderColor: C.line }} className="h-14 w-14 object-cover rounded border" />
+                                </a>
+                              ) : (
+                                <a key={a.id} href={url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ borderColor: C.line, color: C.goldSoft }} className="text-[10px] px-2 py-1 rounded border flex items-center gap-1 hover:underline max-w-[180px]">
+                                  <span className="truncate">{a.filename}</span>
+                                  <ExternalLink size={9} className="shrink-0" />
+                                </a>
+                              );
+                            })}
+                          </div>
+                        )}
                         <div className="flex items-center justify-between gap-2 mt-2">
                           {o.published && <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px]">pub {o.published}</span>}
                           {o.source_url && (

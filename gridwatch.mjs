@@ -16,13 +16,32 @@
  */
 
 import express from "express";
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import multer from "multer";
+import path from "path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
 import { randomBytes } from "crypto";
 import { DISTRICTS, placeOf, TOWN_COORDS, norm } from "./client/src/lib/belize-places.mjs";
 import { fetchPowerUpdates } from "./bel-scraper.mjs";
 
 const MANUAL_STORE = "./grid-manual-outages.json";
+const ATTACH_DIR = "./grid-attachments";
+if (!existsSync(ATTACH_DIR)) mkdirSync(ATTACH_DIR, { recursive: true });
+
 const VALID_ISP_SOURCES = ["DigiBelize", "Smart", "Centaur Communications", "Nexgen", "Beeline", "BEL", "Other"];
+
+// Screenshots / evidence files uploaded with manual outages. Cap size and
+// count so the disk doesn't get abused. Filenames are randomized on disk
+// to avoid collisions; original name is kept in metadata for display.
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: ATTACH_DIR,
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname).slice(0, 8);
+      cb(null, `${Date.now()}-${randomBytes(4).toString("hex")}${ext}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024, files: 10 },
+});
 
 function loadManual() {
   try {
@@ -294,9 +313,65 @@ router.post("/manual-outages", express.json(), (req, res) => {
 
 router.delete("/manual-outages/:id", (req, res) => {
   const list = loadManual();
-  const next = list.filter((o) => o.id !== req.params.id);
-  if (next.length === list.length) return res.status(404).json({ error: "not found" });
-  saveManual(next);
+  const removed = list.find((o) => o.id === req.params.id);
+  if (!removed) return res.status(404).json({ error: "not found" });
+  // Delete on-disk attachment files along with the entry.
+  for (const a of removed.attachments || []) {
+    try { unlinkSync(path.join(ATTACH_DIR, a.storedName)); } catch (_) { /* already gone */ }
+  }
+  saveManual(list.filter((o) => o.id !== req.params.id));
+  res.json({ ok: true });
+});
+
+/* --------------------------- attachments -----------------------------
+ * Screenshots / evidence tied to a manual outage. Multipart POST accepts
+ * up to 10 files at a time, appended to the entry's attachments array.
+ * -------------------------------------------------------------------- */
+router.post("/manual-outages/:id/attachments", upload.array("files", 10), (req, res) => {
+  try {
+    const list = loadManual();
+    const entry = list.find((o) => o.id === req.params.id);
+    if (!entry) {
+      // Clean up files we just wrote — the entry doesn't exist to attach to.
+      for (const f of req.files || []) { try { unlinkSync(f.path); } catch (_) {} }
+      return res.status(404).json({ error: "outage not found" });
+    }
+    entry.attachments = entry.attachments || [];
+    for (const f of req.files || []) {
+      entry.attachments.push({
+        id: `att-${randomBytes(4).toString("hex")}`,
+        filename: f.originalname,
+        storedName: f.filename,
+        size: f.size,
+        mime: f.mimetype,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: req.user?.email || null,
+      });
+    }
+    saveManual(list);
+    res.json({ attachments: entry.attachments });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/attachments/:storedName", (req, res) => {
+  // Prevent path traversal — only allow bare filenames.
+  const name = path.basename(req.params.storedName);
+  const p = path.join(ATTACH_DIR, name);
+  if (!existsSync(p)) return res.status(404).end();
+  res.sendFile(path.resolve(p));
+});
+
+router.delete("/manual-outages/:id/attachments/:attId", (req, res) => {
+  const list = loadManual();
+  const entry = list.find((o) => o.id === req.params.id);
+  if (!entry) return res.status(404).json({ error: "not found" });
+  const idx = (entry.attachments || []).findIndex((a) => a.id === req.params.attId);
+  if (idx < 0) return res.status(404).json({ error: "attachment not found" });
+  const [removed] = entry.attachments.splice(idx, 1);
+  try { unlinkSync(path.join(ATTACH_DIR, removed.storedName)); } catch (_) {}
+  saveManual(list);
   res.json({ ok: true });
 });
 
