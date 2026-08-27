@@ -42,12 +42,17 @@ const SANS = "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-
 /* ------------------------------ helpers ------------------------------- */
 const parseTs = (s) => { if (!s) return null; const d = s instanceof Date ? s : new Date(s); return isNaN(d) ? null : d; };
 const fmtTime = (d) => (d ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Belize" }) : "—");
+// ET display for schedule shifts — the WFM PDF is stamped in Eastern time
+// and staffing thinks in that zone, so shift rows read in ET even though
+// everything else on the board (outages, weather) is Belize.
+const fmtTimeET = (d) => (d ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }) : "—");
 const fmtDay = (d) => (d ? d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "America/Belize" }) : "");
+const fmtDayET = (d) => (d ? d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "America/New_York" }) : "");
 const hrs = (ms) => Math.round((ms / 3600000) * 10) / 10;
 
 function windowLabel(o) {
   const s = parseTs(o.start), e = parseTs(o.end);
-  return s ? `${fmtDay(s)} · ${fmtTime(s)}–${e ? fmtTime(e) : "?"}` : "Time not stated";
+  return s ? `${fmtDay(s)} · ${fmtTime(s)}–${e ? fmtTime(e) : "?"} BZ` : "Time not stated";
 }
 function statusOf(o, now = new Date()) {
   const s = parseTs(o.start), e = parseTs(o.end);
@@ -695,14 +700,18 @@ function ScheduleTab({ outages, agents, rosterLoading }) {
           {mid && live && !dim && <span style={{ background: C.red }} className="w-2 h-2 rounded-full shrink-0 animate-pulse" />}
           <div className="min-w-0">
             <div style={{ color: dim ? C.dim : C.text }} className="text-sm truncate">{s.agent}</div>
+            {/* Shift times are shown in Eastern to match the WFM. */}
             <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] flex items-center gap-1 capitalize">
-              {s.town || s.district} · {fmtDay(s.start)} {fmtTime(s.start)}–{fmtTime(s.end)}
-              {fmtDay(s.start) !== fmtDay(s.end) && <Moon size={9} />}
+              {s.town || s.district} · {fmtDayET(s.start)} {fmtTimeET(s.start)}–{fmtTimeET(s.end)} ET
+              {fmtDayET(s.start) !== fmtDayET(s.end) && <Moon size={9} />}
             </div>
           </div>
         </div>
+        {/* "Dark from - to" is the outage overlap window shown in BZ, which
+            matches the outage source and lets a US-based staffer see the
+            outage frame at a glance next to the agent's ET shift. */}
         <div className="text-right shrink-0">
-          <div style={{ color: dim ? C.dim : s.pct >= 85 ? C.red : C.amber, fontFamily: MONO }} className="text-xs">{fmtTime(s.from)}–{fmtTime(s.to)}</div>
+          <div style={{ color: dim ? C.dim : s.pct >= 85 ? C.red : C.amber, fontFamily: MONO }} className="text-xs">{fmtTime(s.from)}–{fmtTime(s.to)} BZ</div>
           <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px]">{hrs(s.lost)}h · {s.pct}%</div>
         </div>
       </div>
@@ -1016,7 +1025,10 @@ function ManualOutageForm({ onClose, onSaved }) {
       const s = toLocal(data.start), e = toLocal(data.end);
       if (s) setStart(s);
       if (e) setEnd(e);
-      setFiles((prev) => (prev.length < 10 ? [...prev, file] : prev));
+      // Ensure the file is attached even if extraction was triggered
+      // directly from the vision zone. addFiles() de-dupes by only
+      // appending files not already in the array.
+      setFiles((prev) => prev.includes(file) || prev.length >= 10 ? prev : [...prev, file]);
       const filled = [
         data.source && "source",
         data.districts?.length && `${data.districts.length} district${data.districts.length !== 1 ? "s" : ""}`,
@@ -1050,6 +1062,13 @@ function ManualOutageForm({ onClose, onSaved }) {
   const addFiles = (list) => {
     const arr = Array.from(list || []).slice(0, 10 - files.length);
     setFiles((prev) => [...prev, ...arr]);
+    // Auto-run vision on the first image if extraction hasn't happened
+    // yet — merging the "attach" and "auto-fill" flows so users can't
+    // drop a screenshot into the wrong zone and miss the AI step.
+    if (!extractNote && !extracting) {
+      const firstImage = arr.find((f) => f.type.startsWith("image/"));
+      if (firstImage) extractFrom(firstImage);
+    }
   };
   const removeFile = (i) => setFiles((prev) => prev.filter((_, idx) => idx !== i));
 
@@ -1339,6 +1358,10 @@ export default function BelizeGridWatch() {
           <div style={{ color: C.gold, fontFamily: MONO }} className="text-[10px] tracking-[0.3em] uppercase mb-1">Answering Legal · Workforce Continuity</div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Belize Grid Watch</h1>
           <div style={{ color: C.dim }} className="text-xs mt-1">Matched by town, not district. Who is dark now, and who goes dark next.</div>
+          <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+            <span><span style={{ color: C.goldSoft }}>BZ</span> = Belize (outages, weather, notices)</span>
+            <span><span style={{ color: C.goldSoft }}>ET</span> = Eastern (uploaded schedule shifts)</span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowCfg((v) => !v)} style={{ borderColor: C.line, color: C.dim }} className="px-3 py-2 rounded-lg border text-xs flex items-center gap-2"><Settings size={13} /> Addresses</button>
