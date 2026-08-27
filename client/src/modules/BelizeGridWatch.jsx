@@ -515,15 +515,17 @@ function DistrictGrid({ byDistrict, agents, outages, selected, onSelect }) {
     // most-actionable tier they have (confirmed > monitoring > exempt).
     const perDistrict = new Map();
     for (const d of DISTRICTS) perDistrict.set(d, new Map());
+    const rank = (t) => (t === "confirmed" ? 3 : t === "monitoring" ? 2 : 1);
     for (const g of homeGroups) {
       for (const r of g.rows) {
-        for (const d of g.outage.districts) {
-          if (!perDistrict.has(d)) continue;
-          const bucket = perDistrict.get(d);
-          const prev = bucket.get(r.agent.name);
-          const rank = (t) => (t === "confirmed" ? 3 : t === "monitoring" ? 2 : 1);
-          if (!prev || rank(r.tier) > rank(prev.tier)) bucket.set(r.agent.name, r);
-        }
+        // Add each affected agent to THEIR OWN district card only. The
+        // outage might span 4 districts, but the agent lives in one of
+        // them — flagging them under all four inflates every card.
+        const d = r.agent.district;
+        if (!perDistrict.has(d)) continue;
+        const bucket = perDistrict.get(d);
+        const prev = bucket.get(r.agent.name);
+        if (!prev || rank(r.tier) > rank(prev.tier)) bucket.set(r.agent.name, r);
       }
     }
 
@@ -1467,14 +1469,21 @@ export default function BelizeGridWatch() {
   const watchWeather = weather.towns.filter((w) => w.level === "watch").length;
   const alertActive = liveOutages || upcomingOutages || severeWeather || watchWeather;
 
-  // Roster-based confirmed replacements. Distinct-by-name, live outages
-  // first, then upcoming — sorted so the most urgent replacement is at
-  // the top of the banner.
+  // Roster-based confirmed replacements. Distinct-by-name; sort the
+  // source groups by active-first BEFORE dedup so someone flagged in
+  // BOTH a live and an upcoming outage always renders with the live
+  // badge (previously the badge came from whichever group appeared
+  // first in the outages array, which was arbitrary).
   const replacements = useMemo(() => {
     const groups = computeHomeAffected(roster.agents, outages, now);
+    const sorted = [...groups].sort((a, b) => {
+      const aActive = statusOf(a.outage, now) === "active";
+      const bActive = statusOf(b.outage, now) === "active";
+      return aActive === bActive ? 0 : aActive ? -1 : 1;
+    });
     const seen = new Set();
     const out = [];
-    for (const g of groups) {
+    for (const g of sorted) {
       const active = statusOf(g.outage, now) === "active";
       for (const r of g.rows) {
         if (r.tier !== "confirmed") continue;
@@ -1483,7 +1492,7 @@ export default function BelizeGridWatch() {
         out.push({ agent: r.agent, active, outage: g.outage });
       }
     }
-    return out.sort((a, b) => (a.active === b.active ? 0 : a.active ? -1 : 1));
+    return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roster.agents, outages]);
 
