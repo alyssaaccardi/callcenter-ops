@@ -983,9 +983,52 @@ function ManualOutageForm({ onClose, onSaved }) {
   const [cause, setCause] = useState("");
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [extractNote, setExtractNote] = useState(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
   const fileInputRef = useRef(null);
+  const extractInputRef = useRef(null);
+
+  // Send the screenshot to the server for Gemini vision extraction, then
+  // pre-fill any fields it could read. Also attach the same image so the
+  // saved outage carries its own evidence.
+  const extractFrom = async (file) => {
+    if (!file) return;
+    setExtracting(true); setExtractNote(null); setErr(null);
+    try {
+      const fd = new FormData();
+      fd.append("image", file);
+      const r = await fetch(`${API}/extract-outage`, { method: "POST", credentials: "include", body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `Extraction failed (${r.status})`);
+      if (data.source) setSource(data.source);
+      if (data.type) setType(data.type);
+      if (data.districts?.length) setDistricts(data.districts);
+      if (data.areas?.length) setAreas(data.areas.join(", "));
+      if (data.cause) setCause(data.cause);
+      // Convert incoming ISO with -06:00 back into datetime-local shape.
+      const toLocal = (iso) => {
+        if (!iso) return null;
+        const m = String(iso).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+        return m ? `${m[1]}T${m[2]}` : null;
+      };
+      const s = toLocal(data.start), e = toLocal(data.end);
+      if (s) setStart(s);
+      if (e) setEnd(e);
+      setFiles((prev) => (prev.length < 10 ? [...prev, file] : prev));
+      const filled = [
+        data.source && "source",
+        data.districts?.length && `${data.districts.length} district${data.districts.length !== 1 ? "s" : ""}`,
+        data.areas?.length && `${data.areas.length} area${data.areas.length !== 1 ? "s" : ""}`,
+        data.start && "start",
+        data.end && "end",
+        data.cause && "cause",
+      ].filter(Boolean);
+      setExtractNote(filled.length ? `Filled from screenshot: ${filled.join(", ")}. Review and submit.` : "Screenshot processed but nothing extracted. Fill manually.");
+    } catch (e) { setErr(`Vision extraction: ${e.message}`); }
+    finally { setExtracting(false); }
+  };
 
   const toggle = (d) => setDistricts((s) => s.includes(d) ? s.filter((x) => x !== d) : [...s, d]);
 
@@ -1046,6 +1089,47 @@ function ManualOutageForm({ onClose, onSaved }) {
           <h3 className="text-lg font-semibold">Log outage</h3>
           <button onClick={onClose}><X size={16} style={{ color: C.dim }} /></button>
         </div>
+
+        {/* Vision extraction — drop a Facebook/BEL-app screenshot and let
+            Gemini pre-fill the form. The image is kept as an attachment. */}
+        <div
+          onClick={() => !extracting && extractInputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const f = Array.from(e.dataTransfer.files || []).find((x) => x.type.startsWith("image/"));
+            if (f && !extracting) extractFrom(f);
+          }}
+          style={{
+            background: extracting ? "rgba(201,162,39,0.10)" : "rgba(79,191,159,0.06)",
+            borderColor: extracting ? C.gold : "rgba(79,191,159,0.35)",
+            borderStyle: "dashed",
+            cursor: extracting ? "wait" : "pointer",
+          }}
+          className="mb-4 rounded-lg border p-3 text-center"
+        >
+          <div className="flex items-center justify-center gap-2">
+            {extracting ? <RefreshCw size={13} className="animate-spin" style={{ color: C.gold }} /> : <span style={{ color: C.mint }}>✨</span>}
+            <span style={{ color: extracting ? C.gold : C.text }} className="text-xs font-semibold">
+              {extracting ? "Reading screenshot with Gemini…" : "Auto-fill from screenshot"}
+            </span>
+          </div>
+          <div style={{ color: C.dim }} className="text-[10px] mt-0.5">
+            Drop a screenshot of a Facebook post, BEL 24/7 app screen, or news article — the form fills itself.
+          </div>
+          <input
+            ref={extractInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => extractFrom(e.target.files?.[0])}
+          />
+        </div>
+        {extractNote && (
+          <div style={{ color: C.mint, background: "rgba(79,191,159,0.08)", borderColor: "rgba(79,191,159,0.3)" }} className="mb-3 p-2 rounded-lg border text-[11px]">
+            {extractNote}
+          </div>
+        )}
 
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2">

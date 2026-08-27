@@ -355,6 +355,88 @@ router.post("/manual-outages/:id/attachments", upload.array("files", 10), (req, 
   }
 });
 
+/* ---------------------- image → outage extraction ---------------------
+ * Vision extraction — drop a screenshot of a Digi/BEL/Smart Facebook
+ * post (or the BEL app), get back a pre-filled outage payload the form
+ * can populate. Uses Gemini 3.1 Pro Preview with an inline image part.
+ * -------------------------------------------------------------------- */
+const extractUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+});
+
+router.post("/extract-outage", extractUpload.single("image"), async (req, res) => {
+  try {
+    if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: "GEMINI_API_KEY not configured" });
+    if (!req.file) return res.status(400).json({ error: "image is required" });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const prompt = `You're reading a screenshot of a Belize utility outage announcement — from BEL, DigiBelize, Smart, Centaur Communications, Nexgen, Beeline, or the BEL 24/7 app.
+
+Extract the outage details. Return ONLY minified JSON — no prose, no code fences.
+
+Schema:
+{"source":"DigiBelize|Smart|Centaur Communications|Nexgen|Beeline|BEL|Other","type":"isp_outage|load_shedding|planned|other","districts":["Cayo"],"areas":["Belmopan","San Ignacio"],"start":"${today}T19:00:00-06:00","end":"${today}T21:30:00-06:00","cause":"<=20 words"}
+
+Rules:
+- districts must be a subset of: Corozal, Orange Walk, Belize, Cayo, Stann Creek, Toledo
+- If the source logo/name isn't visible, guess from context; use "Other" only as last resort
+- All times are Belize time (-06:00). If a date isn't stated, use ${today}. If only a time is given, assume today.
+- end may be null if not stated
+- If it's a power outage from BEL, type is "planned" for scheduled maintenance or "load_shedding" for rotating cuts
+- If it's an internet/ISP outage, type is "isp_outage"
+- cause: brief reason (max 20 words), null if not stated
+- If you can't tell it's an outage at all, return {"error":"not an outage announcement"}`;
+
+    const body = {
+      contents: [{
+        role: "user",
+        parts: [
+          { text: prompt },
+          { inline_data: { mime_type: req.file.mimetype || "image/jpeg", data: req.file.buffer.toString("base64") } },
+        ],
+      }],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 3000 },
+    };
+    const model = process.env.GRID_NEWS_MODEL || "gemini-3.1-pro-preview";
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-goog-api-key": process.env.GEMINI_API_KEY },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const t = await r.text();
+      return res.status(502).json({ error: `Gemini returned ${r.status}: ${t.slice(0, 200)}` });
+    }
+    const data = await r.json();
+    const text = (data.candidates?.[0]?.content?.parts || [])
+      .map((p) => p.text || "")
+      .join("\n");
+    const parsed = extractJSON(text);
+    if (!parsed) return res.status(422).json({ error: "Could not parse Gemini response", raw: text.slice(0, 400) });
+    if (parsed.error) return res.status(422).json({ error: parsed.error });
+
+    // Backfill districts from named areas.
+    const districts = (parsed.districts || []).filter((d) => DISTRICTS.includes(d));
+    const areas = parsed.areas || [];
+    for (const a of areas) {
+      const p = placeOf(a);
+      if (p.district && !districts.includes(p.district)) districts.push(p.district);
+    }
+    res.json({
+      source: parsed.source || "Other",
+      type: parsed.type || "isp_outage",
+      districts,
+      areas,
+      start: parsed.start || null,
+      end: parsed.end || null,
+      cause: parsed.cause || "",
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/attachments/:storedName", (req, res) => {
   // Prevent path traversal — only allow bare filenames.
   const name = path.basename(req.params.storedName);
