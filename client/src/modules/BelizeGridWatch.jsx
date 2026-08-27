@@ -4,7 +4,7 @@ import Papa from "papaparse";
 import {
   RefreshCw, Settings, AlertTriangle, Zap, Users, Clock, ExternalLink,
   Activity, Upload, Download, FileSpreadsheet, Radio, Map as MapIcon,
-  CalendarDays, X, Moon, Eye, CheckCircle2,
+  CalendarDays, X, Moon, Eye, CheckCircle2, Plus, Trash2,
 } from "lucide-react";
 
 /* ==================================================================== */
@@ -830,10 +830,137 @@ function ScheduleTab({ outages, agents, rosterLoading }) {
   );
 }
 
+/* ---------------------- manual ISP outage form ------------------------ */
+const ISP_SOURCES = ["DigiBelize", "Smart", "Centaur Communications", "Nexgen", "Beeline", "BEL", "Other"];
+
+function ManualOutageForm({ onClose, onSaved }) {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const nowLocal = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const [source, setSource] = useState("DigiBelize");
+  const [type, setType] = useState("isp_outage");
+  const [districts, setDistricts] = useState([]);
+  const [areas, setAreas] = useState("");
+  const [start, setStart] = useState(nowLocal);
+  const [end, setEnd] = useState("");
+  const [cause, setCause] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const toggle = (d) => setDistricts((s) => s.includes(d) ? s.filter((x) => x !== d) : [...s, d]);
+
+  // datetime-local input gives no offset — treat it as Belize local time.
+  const toBelizeIso = (v) => v ? `${v}:00-06:00` : null;
+
+  const submit = async () => {
+    setErr(null);
+    if (!districts.length) { setErr("Pick at least one district."); return; }
+    setSaving(true);
+    try {
+      const r = await fetch(`${API}/manual-outages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          source, type,
+          districts,
+          areas: areas.split(/[,\n]/).map((s) => s.trim()).filter(Boolean),
+          start: toBelizeIso(start),
+          end: toBelizeIso(end),
+          cause,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `Save failed (${r.status})`);
+      onSaved();
+      onClose();
+    } catch (e) { setErr(e.message); } finally { setSaving(false); }
+  };
+
+  return (
+    <div onClick={onClose} style={{ background: "rgba(0,0,0,0.6)" }} className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderColor: C.line }} className="w-full max-w-lg rounded-xl border p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">Log outage</h3>
+          <button onClick={onClose}><X size={16} style={{ color: C.dim }} /></button>
+        </div>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">Source *</span>
+              <select value={source} onChange={(e) => setSource(e.target.value)} style={{ background: C.ink, borderColor: C.line, color: C.text }} className="w-full mt-1 px-2.5 py-2 rounded-lg border text-sm">
+                {ISP_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">Type</span>
+              <select value={type} onChange={(e) => setType(e.target.value)} style={{ background: C.ink, borderColor: C.line, color: C.text }} className="w-full mt-1 px-2.5 py-2 rounded-lg border text-sm">
+                <option value="isp_outage">ISP outage</option>
+                <option value="load_shedding">Load shedding</option>
+                <option value="planned">Planned power</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+          </div>
+
+          <div>
+            <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">Districts *</span>
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              {DISTRICTS.map((d) => (
+                <button key={d} onClick={() => toggle(d)} style={{ background: districts.includes(d) ? C.gold : "transparent", color: districts.includes(d) ? C.ink : C.dim, borderColor: districts.includes(d) ? C.gold : C.line }} className="px-2.5 py-1 rounded border text-xs">
+                  {d}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">Start * (BZ)</span>
+              <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} style={{ background: C.ink, borderColor: C.line, color: C.text }} className="w-full mt-1 px-2.5 py-2 rounded-lg border text-sm" />
+            </label>
+            <label className="block">
+              <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">End (BZ)</span>
+              <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} style={{ background: C.ink, borderColor: C.line, color: C.text }} className="w-full mt-1 px-2.5 py-2 rounded-lg border text-sm" />
+            </label>
+          </div>
+
+          <label className="block">
+            <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">Areas (comma-separated)</span>
+            <input type="text" value={areas} onChange={(e) => setAreas(e.target.value)} placeholder="Belmopan, San Ignacio" style={{ background: C.ink, borderColor: C.line, color: C.text }} className="w-full mt-1 px-2.5 py-2 rounded-lg border text-sm" />
+            <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px]">Leave blank for district-wide.</span>
+          </label>
+
+          <label className="block">
+            <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">Cause / note</span>
+            <input type="text" value={cause} onChange={(e) => setCause(e.target.value)} maxLength={200} style={{ background: C.ink, borderColor: C.line, color: C.text }} className="w-full mt-1 px-2.5 py-2 rounded-lg border text-sm" />
+          </label>
+
+          {err && <div style={{ color: C.red }} className="text-xs">{err}</div>}
+        </div>
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} style={{ borderColor: C.line, color: C.dim }} className="px-3 py-2 rounded-lg border text-sm">Cancel</button>
+          <button onClick={submit} disabled={saving} style={{ background: C.gold, color: C.ink }} className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">
+            {saving ? "Saving…" : "Log outage"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+async function deleteManualOutage(id) {
+  const r = await fetch(`${API}/manual-outages/${encodeURIComponent(id)}`, { method: "DELETE", credentials: "include" });
+  if (!r.ok) throw new Error(`Delete failed (${r.status})`);
+}
+
 /* ================================ app ================================= */
 export default function BelizeGridWatch() {
   const [tab, setTab] = useState("grid");
   const [showCfg, setShowCfg] = useState(false);
+  const [showLogForm, setShowLogForm] = useState(false);
   const [selected, setSelected] = useState(null);
   const { outages, grid, loading, error, checked, reload } = useOutages();
   const roster = useRoster();
@@ -977,7 +1104,17 @@ export default function BelizeGridWatch() {
             <div className="space-y-4">
               <Watchlist agents={roster.agents} outages={outages} />
               <WeatherPanel towns={weather.towns} error={weather.error} />
-              <Panel title="Outage notices" right={checked && <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px]">{fmtTime(checked)} BZ</span>}>
+              <Panel
+                title="Outage notices"
+                right={
+                  <div className="flex items-center gap-2">
+                    {checked && <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px]">{fmtTime(checked)} BZ</span>}
+                    <button onClick={() => setShowLogForm(true)} title="Log ISP or manual outage" style={{ borderColor: C.line, color: C.goldSoft }} className="w-6 h-6 rounded border flex items-center justify-center hover:opacity-80">
+                      <Plus size={12} />
+                    </button>
+                  </div>
+                }
+              >
                 <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
                   {loading && <div style={{ color: C.dim }} className="text-sm py-8 text-center">Searching BEL and Belize news outlets…</div>}
                   {!loading && visible.length === 0 && <div style={{ color: C.mint }} className="text-sm py-8 text-center">No outages on record{selected ? ` for ${selected}` : ""}.</div>}
@@ -988,16 +1125,29 @@ export default function BelizeGridWatch() {
                         <div className="flex flex-wrap gap-1.5 mb-1.5">
                           <Pill tone={st === "active" ? "active" : "upcoming"}>{st === "active" ? "Dark now" : h < 24 ? `in ${Math.max(0, Math.round(h))}h` : "Scheduled"}</Pill>
                           {o.type === "load_shedding" && <Pill tone="gold">Load shed</Pill>}
+                          {o.type === "isp_outage" && <Pill tone="quiet">ISP</Pill>}
+                          {o.manual && <Pill tone="quiet">Manual · {o.source}</Pill>}
                         </div>
                         <div className="text-sm font-semibold">{o.districts.join(" · ") || "District unclear"}</div>
                         <div style={{ color: C.dim, fontFamily: MONO }} className="text-[11px] mt-1">{windowLabel(o)}</div>
                         {o.areaPlaces?.length > 0 && <div style={{ color: C.dim }} className="text-xs mt-1.5 leading-relaxed">{o.areaPlaces.slice(0, 6).map((p) => p.raw).join(", ")}{o.areaPlaces.length > 6 ? ` +${o.areaPlaces.length - 6}` : ""}</div>}
+                        {o.cause && <div style={{ color: C.dim }} className="text-[11px] mt-1 italic">{o.cause}</div>}
                         <div className="flex items-center justify-between gap-2 mt-2">
                           {o.published && <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px]">pub {o.published}</span>}
                           {o.source_url && (
                             <a href={o.source_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: C.goldSoft, fontFamily: MONO }} className="text-[10px] flex items-center gap-1 hover:underline">
                               {o.source} <ExternalLink size={10} />
                             </a>
+                          )}
+                          {o.manual && (
+                            <button
+                              onClick={async (e) => { e.stopPropagation(); if (confirm("Delete this manual outage?")) { await deleteManualOutage(o.id); reload(true); } }}
+                              style={{ color: C.dim }}
+                              className="text-[10px] flex items-center gap-1 hover:opacity-80"
+                              title="Delete manual outage"
+                            >
+                              <Trash2 size={11} />
+                            </button>
                           )}
                         </div>
                       </button>
@@ -1009,6 +1159,10 @@ export default function BelizeGridWatch() {
             </div>
           </div>
         </>
+      )}
+
+      {showLogForm && (
+        <ManualOutageForm onClose={() => setShowLogForm(false)} onSaved={() => reload(true)} />
       )}
 
       <div style={{ color: C.dim, borderColor: C.line }} className="mt-5 pt-4 border-t text-[10px] leading-relaxed">

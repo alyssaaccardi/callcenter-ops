@@ -16,8 +16,23 @@
  */
 
 import express from "express";
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { randomBytes } from "crypto";
 import { DISTRICTS, placeOf, TOWN_COORDS, norm } from "./client/src/lib/belize-places.mjs";
 import { fetchPowerUpdates } from "./bel-scraper.mjs";
+
+const MANUAL_STORE = "./grid-manual-outages.json";
+const VALID_ISP_SOURCES = ["DigiBelize", "Smart", "Centaur Communications", "Nexgen", "Beeline", "BEL", "Other"];
+
+function loadManual() {
+  try {
+    if (!existsSync(MANUAL_STORE)) return [];
+    return JSON.parse(readFileSync(MANUAL_STORE, "utf8"));
+  } catch { return []; }
+}
+function saveManual(list) {
+  writeFileSync(MANUAL_STORE, JSON.stringify(list, null, 2));
+}
 
 const router = express.Router();
 
@@ -122,16 +137,20 @@ function extractJSON(raw) {
 async function newsSupplement() {
   if (!process.env.ANTHROPIC_API_KEY) return [];
   const today = new Date().toISOString().slice(0, 10);
-  const prompt = `Search for Belize LOAD SHEDDING announcements published in the last 3 days as of ${today}.
+  const prompt = `Search for Belize LOAD SHEDDING and ISP OUTAGE announcements published in the last 3 days as of ${today}.
 
-Only rotating/emergency load shedding — ignore planned maintenance, which is already covered. Sources: Love FM Belize, Breaking Belize News, Channel 5 Belize, 7 News Belize, Amandala, Greater Belize Media.
+Include:
+  1. Rotating/emergency load shedding (ignore planned BEL maintenance — already covered).
+  2. Reported outages from DigiBelize, Smart, Centaur Communications, Nexgen, or Beeline internet.
 
-CRITICAL: Belize had near-identical CFE-linked crises in 2024, June 2026 and July 2026. Check each article's publication date and discard anything older than 3 days.
+Sources: Love FM Belize, Breaking Belize News, Channel 5 Belize, 7 News Belize, Amandala, Greater Belize Media, and the ISPs' own posts when quoted by news outlets.
+
+CRITICAL: Belize had near-identical CFE-linked power crises in 2024, June 2026 and July 2026. Check each article's publication date and discard anything older than 3 days.
 
 Return ONLY minified JSON, no prose:
-{"grid_status":"normal|strained|emergency","grid_note":"<=20 words","outages":[{"id":"n1","districts":["Cayo"],"areas":["Belmopan","San Ignacio"],"district_wide":false,"start":"${today}T19:00:00-06:00","end":"${today}T21:30:00-06:00","type":"load_shedding","cause":"<=12 words","published":"${today}","source":"Love FM","source_url":"https://..."}]}
+{"grid_status":"normal|strained|emergency","grid_note":"<=20 words","outages":[{"id":"n1","districts":["Cayo"],"areas":["Belmopan","San Ignacio"],"district_wide":false,"start":"${today}T19:00:00-06:00","end":"${today}T21:30:00-06:00","type":"load_shedding|isp_outage","cause":"<=12 words","published":"${today}","source":"Love FM|DigiBelize","source_url":"https://..."}]}
 
-If no load shedding is announced, return an empty outages array. Be terse.`;
+If nothing is announced, return an empty outages array. Be terse.`;
 
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -164,7 +183,12 @@ router.get("/outages", async (req, res) => {
   try {
     if (!req.query.fresh) {
       const cached = getCached("outages", 10 * 60 * 1000);
-      if (cached) return res.json({ ...cached, cached: true });
+      if (cached) {
+        // Manual entries are cheap to reload every call and change more
+        // often than BEL — merge them in fresh so a new manual outage
+        // shows up without waiting 10 min for the BEL cache to expire.
+        return res.json({ ...cached, outages: [...cached.outages, ...loadManual()], cached: true });
+      }
     }
 
     const bel = await fetchPowerUpdates();
@@ -198,10 +222,71 @@ router.get("/outages", async (req, res) => {
       checked: new Date().toISOString(),
     };
     setCached("outages", payload);
-    res.json(payload);
+    // Merge manual entries after caching so cache expiry doesn't affect
+    // how quickly a fresh manual entry appears.
+    res.json({ ...payload, outages: [...outages, ...loadManual()] });
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
+});
+
+/* --------------------------- manual outages ---------------------------
+ * ISP outages (Digi, Smart, etc.) are announced only on Facebook, which
+ * blocks bots. Staffing logs them here so they show up in the same feed
+ * as BEL outages and affect the same headcount calculations.
+ * -------------------------------------------------------------------- */
+router.get("/manual-outages", (_req, res) => {
+  res.json({ outages: loadManual(), validSources: VALID_ISP_SOURCES, districts: DISTRICTS });
+});
+
+router.post("/manual-outages", express.json(), (req, res) => {
+  try {
+    const { source, districts = [], areas = [], start, end, cause, type } = req.body || {};
+    if (!source) return res.status(400).json({ error: "source is required" });
+    if (!start) return res.status(400).json({ error: "start time is required" });
+    const validDistricts = districts.filter((d) => DISTRICTS.includes(d));
+    if (!validDistricts.length) return res.status(400).json({ error: "at least one valid district is required" });
+
+    const areaPlaces = (areas || []).filter(Boolean).map((a) => ({ raw: a, ...placeOf(a) }));
+    // District can be derived from named areas too — union with what the
+    // user picked so a "San Ignacio" area implicitly counts as Cayo.
+    for (const p of areaPlaces) if (p.district && !validDistricts.includes(p.district)) validDistricts.push(p.district);
+
+    const entry = {
+      id: `man-${randomBytes(4).toString("hex")}`,
+      districts: validDistricts,
+      areas: areas || [],
+      areaPlaces,
+      district_wide: !areaPlaces.length,
+      excludes: [],
+      excludePlaces: [],
+      start,
+      end: end || null,
+      type: type || "isp_outage",
+      cause: (cause || "").slice(0, 200) || null,
+      source,
+      source_url: null,
+      published: new Date().toISOString().slice(0, 10),
+      manual: true,
+      createdBy: req.user?.email || null,
+      createdAt: new Date().toISOString(),
+    };
+
+    const list = loadManual();
+    list.push(entry);
+    saveManual(list);
+    res.json({ entry });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete("/manual-outages/:id", (req, res) => {
+  const list = loadManual();
+  const next = list.filter((o) => o.id !== req.params.id);
+  if (next.length === list.length) return res.status(404).json({ error: "not found" });
+  saveManual(next);
+  res.json({ ok: true });
 });
 
 /* ------------------------------ weather -------------------------------
