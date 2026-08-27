@@ -12,6 +12,7 @@ import {
 /* ==================================================================== */
 
 import { DISTRICTS, placeOf, nameKeys, norm } from "../lib/belize-places.mjs";
+import { parseSchedulePdf } from "../lib/parse-schedule-pdf.mjs";
 
 const API = import.meta.env?.VITE_GRID_API ?? "/api/grid";
 const BOARD_URL = import.meta.env?.VITE_GRID_BOARD_URL
@@ -192,6 +193,7 @@ function autoMap(headers) {
   return map;
 }
 function readWorkbook(file) {
+  if (/\.pdf$/i.test(file.name)) return parseSchedulePdf(file);
   return new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onerror = () => reject(new Error("Could not read that file."));
@@ -202,7 +204,7 @@ function readWorkbook(file) {
           const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array", cellDates: true });
           resolve(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, blankrows: false, defval: "" }));
         }
-      } catch { reject(new Error("That file could not be parsed. Try CSV or .xlsx.")); }
+      } catch { reject(new Error("That file could not be parsed. Try CSV, .xlsx, or the WFM PDF export.")); }
     };
     if (/\.csv$/i.test(file.name)) r.readAsText(file); else r.readAsArrayBuffer(file);
   });
@@ -520,7 +522,9 @@ function ScheduleTab({ outages, agents, rosterLoading }) {
   const parsed = useMemo(() => (rows && map.agent != null ? buildShifts(rows, headerRow, map) : null), [rows, headerRow, map]);
   const sites = useMemo(() => [...new Set((parsed?.shifts || []).map((s) => s.site).filter(Boolean))], [parsed]);
   useEffect(() => {
-    if (!sites.length) return;
+    // No site column detected — don't leave the filter on [C] or every
+    // shift gets excluded. Fall back to "all".
+    if (!sites.length) { if (siteFilter !== "all") setSiteFilter("all"); return; }
     if (!sites.includes(siteFilter)) setSiteFilter(sites.includes(BELIZE_SITE) ? BELIZE_SITE : "all");
   }, [sites]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -574,13 +578,13 @@ function ScheduleTab({ outages, agents, rosterLoading }) {
           </div>
           <div className="text-lg font-semibold mb-1">Load this week's schedule</div>
           <div style={{ color: C.dim }} className="text-sm max-w-md mb-5 leading-relaxed">
-            CSV or Excel with a name, a date, and shift times. Towns come from the monday.com address board.
+            PDF, CSV, or Excel with a name, a date, and shift times. WFM PDF exports are parsed directly. Towns come from the monday.com address board.
           </div>
           {err && <div style={{ color: C.red }} className="text-sm mb-3">{err}</div>}
           <button onClick={() => inputRef.current?.click()} style={{ background: C.gold, color: C.ink }} className="px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2">
             <Upload size={15} /> Choose file
           </button>
-          <input ref={inputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+          <input ref={inputRef} type="file" accept=".csv,.xlsx,.xls,.pdf" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
           {!agents.length && !rosterLoading && (
             <div style={{ color: C.amber }} className="text-xs mt-5 flex items-center gap-1.5"><AlertTriangle size={13} /> Address board not loaded — nothing can be matched yet.</div>
           )}
@@ -698,7 +702,7 @@ function ScheduleTab({ outages, agents, rosterLoading }) {
             <button onClick={() => inputRef.current?.click()} style={{ borderColor: C.line, color: C.dim }} className="px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5"><Upload size={12} /> Replace</button>
             <button onClick={downloadCSV} disabled={!G.length} style={{ background: C.gold, color: C.ink }} className="px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40"><Download size={12} /> Export</button>
           </div>
-          <input ref={inputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+          <input ref={inputRef} type="file" accept=".csv,.xlsx,.xls,.pdf" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
         </div>
         {showMap && (
           <div style={{ borderColor: C.line }} className="mt-4 pt-4 border-t grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
