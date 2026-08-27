@@ -134,8 +134,10 @@ function extractJSON(raw) {
   try { return JSON.parse(s.slice(first, last + 1)); } catch { return null; }
 }
 
+// Gemini with google_search grounding — uses the key that's already
+// on prod. Free-tier friendly and well-indexed on Belize news outlets.
 async function newsSupplement() {
-  if (!process.env.ANTHROPIC_API_KEY) return [];
+  if (!process.env.GEMINI_API_KEY) return [];
   const today = new Date().toISOString().slice(0, 10);
   const prompt = `Search for Belize LOAD SHEDDING and ISP OUTAGE announcements published in the last 3 days as of ${today}.
 
@@ -147,28 +149,32 @@ Sources: Love FM Belize, Breaking Belize News, Channel 5 Belize, 7 News Belize, 
 
 CRITICAL: Belize had near-identical CFE-linked power crises in 2024, June 2026 and July 2026. Check each article's publication date and discard anything older than 3 days.
 
-Return ONLY minified JSON, no prose:
+Districts must be one of: Corozal, Orange Walk, Belize, Cayo, Stann Creek, Toledo.
+
+Return ONLY minified JSON, no prose, no code fences:
 {"grid_status":"normal|strained|emergency","grid_note":"<=20 words","outages":[{"id":"n1","districts":["Cayo"],"areas":["Belmopan","San Ignacio"],"district_wide":false,"start":"${today}T19:00:00-06:00","end":"${today}T21:30:00-06:00","type":"load_shedding|isp_outage","cause":"<=12 words","published":"${today}","source":"Love FM|DigiBelize","source_url":"https://..."}]}
 
-If nothing is announced, return an empty outages array. Be terse.`;
+If nothing is announced, return {"grid_status":"normal","grid_note":"","outages":[]}. Be terse.`;
 
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
+  const model = process.env.GRID_NEWS_MODEL || "gemini-2.5-pro";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  const r = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
+      "X-goog-api-key": process.env.GEMINI_API_KEY,
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 2000,
-      messages: [{ role: "user", content: prompt }],
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      tools: [{ google_search: {} }],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 2000 },
     }),
   });
   if (!r.ok) return [];
   const data = await r.json();
-  const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  const text = (data.candidates?.[0]?.content?.parts || [])
+    .map((p) => p.text || "")
+    .join("\n");
   const parsed = extractJSON(text);
   if (!parsed) return [];
   return { note: parsed.grid_note, status: parsed.grid_status, list: (parsed.outages || []).map((o, i) => {
