@@ -12,6 +12,7 @@ const ROLES = [
   { value: 'newsletter_contributor', label: 'Newsletter Contributor' },
   { value: 'scriptor',               label: 'The Rob-osetta Stone' },
   { value: 'rob_ai_board',           label: "Rob's AI Board" },
+  { value: 'staffing',               label: 'Staffing' },
 ];
 
 const ROLE_STYLE = {
@@ -25,6 +26,7 @@ const ROLE_STYLE = {
   newsletter_contributor: { background: 'rgba(236,72,153,0.15)', color: '#f472b6' },
   scriptor:               { background: 'rgba(139,92,246,0.15)', color: '#c4b5fd' },
   rob_ai_board:           { background: 'rgba(249,115,22,0.15)', color: '#fb923c' },
+  staffing:               { background: 'rgba(20,184,166,0.15)', color: '#5eead4' },
 };
 
 const ROLE_LABEL = {
@@ -39,6 +41,7 @@ const ROLE_LABEL = {
   newsletter_contributor: 'Newsletter Contributor',
   scriptor:               'The Rob-osetta Stone',
   rob_ai_board:           "Rob's AI Board",
+  staffing:               'Staffing',
 };
 
 function TutorialRow({ t, onToggle, onReset }) {

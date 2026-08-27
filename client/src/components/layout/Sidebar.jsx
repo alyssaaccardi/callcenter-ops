@@ -25,6 +25,7 @@ const ALL_NAV_ITEMS = [
   { id: 'ring-leader',      icon: '🛎️', label: 'The Ring Leader',  roles: ['super_admin', 'newsletter_contributor'], section: 'Newsletter'    },
   { id: 'scriptor',         icon: '🗿', label: 'The Rob-osetta Stone', roles: ['super_admin', 'scriptor'],            section: 'Tools'         },
   { id: 'rob-ai-board',     icon: '🤖', label: "Rob's AI Board",   roles: ['super_admin', 'rob_ai_board'],           section: 'Sales'         },
+  { id: 'belize-grid-watch', icon: '⚡', label: 'Belize Grid Watch', roles: ['super_admin', 'staffing'],              section: 'Staffing'      },
 ];
 
 const ROLE_LABELS = {
@@ -38,6 +39,7 @@ const ROLE_LABELS = {
   newsletter_contributor: 'Newsletter Contributor',
   scriptor:               'The Rob-osetta Stone',
   rob_ai_board:           "Rob's AI Board",
+  staffing:               'Staffing',
 };
 
 const NAV_SECTION_LABEL = {

@@ -34,6 +34,7 @@ import RingLeader from './modules/RingLeader';
 import Scriptor from './modules/Scriptor';
 import RobStonePage, { RobStoneApp } from './pages/RobStonePage';
 import RobAiBoardPage from './pages/RobAiBoardPage';
+import BelizeGridWatch from './modules/BelizeGridWatch';
 
 // Single source of truth for which "experience" a user gets at the root URL.
 // scriptor-only users get the chrome-less Rob-osetta Stone app (no sidebar);
@@ -53,6 +54,7 @@ function Dashboard() {
     user?.role === 'newsletter_contributor' ? 'ring-leader'      :
     user?.role === 'scriptor'               ? 'scriptor'         :
     user?.role === 'rob_ai_board'           ? 'rob-ai-board'     :
+    user?.role === 'staffing'               ? 'belize-grid-watch':
     'status';
   return <DashboardInner user={user} defaultModule={defaultModule} />;
 }
@@ -71,6 +73,7 @@ function DashboardInner({ user, defaultModule }) {
   const isNewsletter = hasRole('super_admin', 'newsletter_contributor');
   const isScribe     = hasRole('super_admin', 'scriptor');
   const isRobAiBoard = hasRole('super_admin', 'rob_ai_board');
+  const isStaffing   = hasRole('super_admin', 'staffing');
 
   const moduleMap = {
     'admin-dashboard':  isAnalytics ? <AdminDashboard />        : null,
@@ -94,9 +97,10 @@ function DashboardInner({ user, defaultModule }) {
     'ring-leader':      isNewsletter ? <RingLeader /> : null,
     scriptor:           isScribe    ? <Scriptor /> : null,
     'rob-ai-board':     isRobAiBoard ? <RobAiBoardPage /> : null,
+    'belize-grid-watch': isStaffing  ? <BelizeGridWatch /> : null,
   };
 
-  const fallback = isOps ? <StatusBoard /> : isSupport ? <SupportCenter /> : isTech ? <TechCenter /> : isNewsletter ? <RingLeader /> : isScribe ? <Scriptor /> : isRobAiBoard ? <RobAiBoardPage /> : isMinuteAuditor ? <MinuteAuditor /> : <StatusBoard />;
+  const fallback = isOps ? <StatusBoard /> : isSupport ? <SupportCenter /> : isTech ? <TechCenter /> : isNewsletter ? <RingLeader /> : isScribe ? <Scriptor /> : isRobAiBoard ? <RobAiBoardPage /> : isMinuteAuditor ? <MinuteAuditor /> : isStaffing ? <BelizeGridWatch /> : <StatusBoard />;
 
   const isPortal = activeModule === 'app-portal';
 
