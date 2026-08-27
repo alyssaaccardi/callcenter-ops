@@ -57,6 +57,12 @@ const router = express.Router();
 
 const BOARD_ID = process.env.GRID_BOARD_ID || "18415794851";
 const GROUP_MATCH = process.env.GRID_GROUP_MATCH ?? "Active Employee Addresses";
+// Status column on the Belize Employee Address board — only rows with
+// "Active" here should feed the affected-staff logic. Anyone marked
+// Inactive doesn't work here anymore and must not surface as a person
+// to replace during an outage.
+const STATUS_COLUMN_ID = process.env.GRID_STATUS_COLUMN_ID || "color_mm6m75qj";
+const STATUS_ACTIVE_LABEL = process.env.GRID_STATUS_ACTIVE_LABEL || "Active";
 
 /* ------------------------------- cache -------------------------------- */
 const cache = new Map();
@@ -109,8 +115,18 @@ async function fetchRoster() {
   const items = json.data?.boards?.[0]?.items_page?.items || [];
   const people = items
     .filter((it) => !GROUP_MATCH || (it.group?.title || "").toLowerCase().includes(GROUP_MATCH.toLowerCase()))
+    .filter((it) => {
+      // Skip anyone whose Status is not "Active". Inactive employees no
+      // longer work here and shouldn't drive any headcount or replace
+      // math. Missing status = treated as inactive (safer default).
+      const st = (it.column_values || []).find((c) => c.id === STATUS_COLUMN_ID)?.text;
+      return (st || "").trim() === STATUS_ACTIVE_LABEL;
+    })
     .map((it) => {
+      // Address concatenation excludes the Status column so its label
+      // text ("Active") never leaks into placeOf() as a false match.
       const address = (it.column_values || [])
+        .filter((c) => c.id !== STATUS_COLUMN_ID)
         .map((c) => c.text)
         .filter(Boolean)
         .join(" | ")
