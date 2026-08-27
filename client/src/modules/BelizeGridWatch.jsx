@@ -228,6 +228,21 @@ function findHeaderRow(rows) {
   }
   return 0;
 }
+// The WFM PDF stamps shifts in America/New_York — EDT (-04:00) most of
+// the year, EST (-05:00) Nov–Mar. Belize is UTC-6 year-round. Parsing
+// with the wrong offset makes every shift 1-2 hours off vs. BEL notices,
+// which throws off overlap detection AND the display (since fmtTime
+// converts to Belize). Compute the correct offset per shift date.
+function easternOffsetFor(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  if (m < 3 || m > 11) return "-05:00";
+  if (m > 3 && m < 11) return "-04:00";
+  const firstOfMonth = new Date(Date.UTC(y, m - 1, 1));
+  const firstSunday = 1 + ((7 - firstOfMonth.getUTCDay()) % 7);
+  if (m === 3) return d >= firstSunday + 7 ? "-04:00" : "-05:00";
+  return d < firstSunday ? "-04:00" : "-05:00";
+}
+
 function buildShifts(rows, headerRow, map) {
   const out = [], problems = [];
   for (let i = headerRow + 1; i < rows.length; i++) {
@@ -243,8 +258,9 @@ function buildShifts(rows, headerRow, map) {
       problems.push({ row: i + 1, agent, reason: !date ? "No readable date" : "No readable shift time" });
       continue;
     }
-    const start = new Date(`${date}T${String(Math.floor(sMin / 60) % 24).padStart(2, "0")}:${String(sMin % 60).padStart(2, "0")}:00-06:00`);
-    let end = new Date(`${date}T${String(Math.floor(eMin / 60) % 24).padStart(2, "0")}:${String(eMin % 60).padStart(2, "0")}:00-06:00`);
+    const off = easternOffsetFor(date);
+    const start = new Date(`${date}T${String(Math.floor(sMin / 60) % 24).padStart(2, "0")}:${String(sMin % 60).padStart(2, "0")}:00${off}`);
+    let end = new Date(`${date}T${String(Math.floor(eMin / 60) % 24).padStart(2, "0")}:${String(eMin % 60).padStart(2, "0")}:00${off}`);
     if (end <= start) end = new Date(end.getTime() + 86400000);
     out.push({
       key: String(i), agent, keys: nameKeys(agent), date, start, end,
