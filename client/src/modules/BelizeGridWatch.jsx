@@ -11,7 +11,7 @@ import {
 /*  Belize Grid Watch — town-first outage impact on scheduled staff      */
 /* ==================================================================== */
 
-import { DISTRICTS, placeOf, nameKeys, norm } from "../lib/belize-places.mjs";
+import { DISTRICTS, placeOf, nameKeys, norm, TOWN_COORDS } from "../lib/belize-places.mjs";
 import { parseSchedulePdf } from "../lib/parse-schedule-pdf.mjs";
 
 const API = import.meta.env?.VITE_GRID_API ?? "/api/grid";
@@ -343,11 +343,39 @@ function Stat({ icon: Icon, label, value, tone, sub }) {
   );
 }
 
-function BelizeMap({ byDistrict, selected, onSelect }) {
+// Approximate lat/lon -> SVG viewBox transform. The map is stylized, so
+// this isn't projection-accurate, but towns land inside (or very near) the
+// correct district, which is all the visual needs to show.
+const BBOX = { minLon: -89.30, maxLon: -87.70, minLat: 15.90, maxLat: 18.50 };
+const svgFromLatLon = (lat, lon) => [
+  ((lon - BBOX.minLon) / (BBOX.maxLon - BBOX.minLon)) * 330 + 38,
+  ((BBOX.maxLat - lat) / (BBOX.maxLat - BBOX.minLat)) * 602 + 10,
+];
+
+function BelizeMap({ byDistrict, selected, onSelect, agents }) {
   const fill = (d) => { const s = byDistrict[d]?.worst; return s === "active" ? "url(#hatchRed)" : s === "upcoming" ? C.panelHi : C.panel; };
   const stroke = (d) => { const s = byDistrict[d]?.worst; return s === "active" ? C.red : s === "upcoming" ? C.amber : C.line; };
+
+  // Cluster agents by town (one dot per town, sized by headcount).
+  // Non-coord towns fall through silently — they still count in the
+  // per-district total shown under the district label.
+  const townClusters = useMemo(() => {
+    const m = new Map();
+    for (const a of agents || []) {
+      const key = a.town && TOWN_COORDS[a.town] ? a.town : null;
+      if (!key) continue;
+      if (!m.has(key)) m.set(key, { count: 0, district: a.district });
+      m.get(key).count++;
+    }
+    return [...m.entries()].map(([town, v]) => {
+      const [lat, lon] = TOWN_COORDS[town];
+      const [x, y] = svgFromLatLon(lat, lon);
+      return { town, x, y, count: v.count, district: v.district };
+    });
+  }, [agents]);
+
   return (
-    <svg viewBox="0 0 400 640" className="w-full h-full" role="img" aria-label="Belize districts by outage status">
+    <svg viewBox="0 0 400 640" className="w-full h-full" role="img" aria-label="Belize districts and staff locations">
       <defs>
         <pattern id="hatchRed" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
           <rect width="7" height="7" fill="#3A1620" />
@@ -374,6 +402,20 @@ function BelizeMap({ byDistrict, selected, onSelect }) {
           </g>
         );
       })}
+      {/* Staff-per-town dots. Always mint — they mean "people live here",
+          never "outage". The district hatch behind them tells the outage
+          story. Rendered after districts so they sit on top. Pointer events
+          disabled so clicks still hit the district for filtering. */}
+      {townClusters.map(({ town, x, y, count }) => (
+        <g key={town} style={{ pointerEvents: "none" }}>
+          <circle cx={x} cy={y} r={3 + Math.min(count, 6)} fill={C.mint} fillOpacity={0.85} stroke={C.ink} strokeWidth="1.2" />
+          {count > 1 && (
+            <text x={x} y={y + 3} textAnchor="middle" style={{ fontFamily: MONO, fontSize: 9, fontWeight: 700 }} fill={C.ink}>
+              {count}
+            </text>
+          )}
+        </g>
+      ))}
     </svg>
   );
 }
@@ -426,8 +468,7 @@ function Watchlist({ agents, outages }) {
   );
 }
 
-function WeatherPanel() {
-  const { towns, error } = useWeather();
+function WeatherPanel({ towns, error }) {
   if (error || !towns.length) return null;
   const bad = towns.filter((t) => t.level !== "ok");
   return (
@@ -522,9 +563,10 @@ function ScheduleTab({ outages, agents, rosterLoading }) {
   const parsed = useMemo(() => (rows && map.agent != null ? buildShifts(rows, headerRow, map) : null), [rows, headerRow, map]);
   const sites = useMemo(() => [...new Set((parsed?.shifts || []).map((s) => s.site).filter(Boolean))], [parsed]);
   useEffect(() => {
-    // No site column detected — don't leave the filter on [C] or every
-    // shift gets excluded. Fall back to "all".
-    if (!sites.length) { if (siteFilter !== "all") setSiteFilter("all"); return; }
+    // PDF parser already drops non-[C] shifts, and CSVs with a Site column
+    // let users switch manually. If a CSV has no Site column, stay on [C]
+    // and show empty — no [C] tag means not Belize per staffing's rule.
+    if (!sites.length) return;
     if (!sites.includes(siteFilter)) setSiteFilter(sites.includes(BELIZE_SITE) ? BELIZE_SITE : "all");
   }, [sites]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -795,7 +837,15 @@ export default function BelizeGridWatch() {
   const [selected, setSelected] = useState(null);
   const { outages, grid, loading, error, checked, reload } = useOutages();
   const roster = useRoster();
+  const weather = useWeather();
   useTick();
+
+  const now = new Date();
+  const liveOutages = outages.filter((o) => statusOf(o, now) === "active").length;
+  const upcomingOutages = outages.filter((o) => statusOf(o, now) === "upcoming").length;
+  const severeWeather = weather.towns.filter((w) => w.level === "severe").length;
+  const watchWeather = weather.towns.filter((w) => w.level === "watch").length;
+  const alertActive = liveOutages || upcomingOutages || severeWeather || watchWeather;
 
   const byDistrict = useMemo(() => {
     const m = {};
@@ -844,6 +894,43 @@ export default function BelizeGridWatch() {
         </Panel>
       )}
 
+      {alertActive > 0 && (
+        <button
+          onClick={() => setTab("grid")}
+          style={{
+            background: liveOutages || severeWeather ? "rgba(216,80,63,0.08)" : "rgba(232,163,61,0.06)",
+            borderColor: liveOutages || severeWeather ? "rgba(216,80,63,0.4)" : "rgba(232,163,61,0.35)",
+            color: C.text,
+          }}
+          className="w-full mb-4 p-3 rounded-xl border flex flex-wrap items-center gap-4 text-left hover:opacity-90 transition-opacity"
+        >
+          {liveOutages > 0 && (
+            <span style={{ color: C.red, fontFamily: MONO }} className="text-xs flex items-center gap-1.5">
+              <span style={{ background: C.red }} className="w-2 h-2 rounded-full animate-pulse" />
+              {liveOutages} outage{liveOutages !== 1 ? "s" : ""} live now
+            </span>
+          )}
+          {upcomingOutages > 0 && (
+            <span style={{ color: C.amber, fontFamily: MONO }} className="text-xs flex items-center gap-1.5">
+              <Clock size={12} /> {upcomingOutages} outage{upcomingOutages !== 1 ? "s" : ""} scheduled
+            </span>
+          )}
+          {severeWeather > 0 && (
+            <span style={{ color: C.red, fontFamily: MONO }} className="text-xs flex items-center gap-1.5">
+              <AlertTriangle size={12} /> {severeWeather} town{severeWeather !== 1 ? "s" : ""} · severe weather
+            </span>
+          )}
+          {watchWeather > 0 && severeWeather === 0 && (
+            <span style={{ color: C.amber, fontFamily: MONO }} className="text-xs flex items-center gap-1.5">
+              <AlertTriangle size={12} /> {watchWeather} town{watchWeather !== 1 ? "s" : ""} · weather watch
+            </span>
+          )}
+          <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] ml-auto">
+            {tab === "grid" ? "Details below ↓" : "Open Grid status →"}
+          </span>
+        </button>
+      )}
+
       <div className="flex gap-1 mb-4">
         {[["grid", "Grid status", MapIcon], ["schedule", "Affected staff", CalendarDays]].map(([id, label, Icon]) => (
           <button key={id} onClick={() => setTab(id)} style={{ background: tab === id ? C.panel : "transparent", color: tab === id ? C.text : C.dim, borderColor: tab === id ? C.line : "transparent" }} className="px-4 py-2 rounded-lg border text-sm font-medium flex items-center gap-2">
@@ -873,23 +960,23 @@ export default function BelizeGridWatch() {
             <Panel
               title={selected ? `Filtered · ${selected}` : "Tap a district to filter"}
               right={
-                <div className="flex items-center gap-3">
-                  {[["Dark now", C.red], ["Scheduled", C.amber], ["Clear", C.line]].map(([l, c]) => (
+                <div className="flex items-center gap-3 flex-wrap">
+                  {[["Dark now", C.red, "square"], ["Scheduled", C.amber, "square"], ["Clear", C.line, "square"], ["Staff", C.mint, "dot"]].map(([l, c, shape]) => (
                     <span key={l} style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] flex items-center gap-1.5">
-                      <span style={{ background: c }} className="w-2.5 h-2.5 rounded-sm inline-block" /> {l}
+                      <span style={{ background: c }} className={shape === "dot" ? "w-2 h-2 rounded-full inline-block" : "w-2.5 h-2.5 rounded-sm inline-block"} /> {l}
                     </span>
                   ))}
                 </div>
               }
             >
               <div className="h-[440px] md:h-[560px] flex items-center justify-center">
-                <BelizeMap byDistrict={byDistrict} selected={selected} onSelect={setSelected} />
+                <BelizeMap byDistrict={byDistrict} selected={selected} onSelect={setSelected} agents={roster.agents} />
               </div>
             </Panel>
 
             <div className="space-y-4">
               <Watchlist agents={roster.agents} outages={outages} />
-              <WeatherPanel />
+              <WeatherPanel towns={weather.towns} error={weather.error} />
               <Panel title="Outage notices" right={checked && <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px]">{fmtTime(checked)} BZ</span>}>
                 <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
                   {loading && <div style={{ color: C.dim }} className="text-sm py-8 text-center">Searching BEL and Belize news outlets…</div>}

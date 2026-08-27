@@ -221,11 +221,18 @@ export async function parseSchedulePdf(file, opts = {}) {
     }
   }
 
+  // Belize-only: no [C] tag means the agent isn't in Belize, and BEL
+  // outages don't apply to them. Drop them here so nothing downstream
+  // (missing-address warning, headcounts) has to know about non-Belize
+  // staff. Unassigned rows keep site "" — those are Belize-schedule
+  // shifts that just haven't been assigned yet, so they stay.
+  const belizeShifts = shifts.filter((s) => s.Site === 'C' || s.Agent === '(Unassigned)');
+
   // Dedupe on (agent, date, start, end) — pdfplumber and pdfjs both
   // occasionally re-emit an item that spans a line break.
   const seen = new Set();
   const uniq = [];
-  for (const s of shifts) {
+  for (const s of belizeShifts) {
     const k = `${s.Agent}|${s.Date}|${s.Start}|${s.End}`;
     if (seen.has(k)) continue;
     seen.add(k);
