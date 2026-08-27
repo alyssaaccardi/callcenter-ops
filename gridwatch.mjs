@@ -156,7 +156,9 @@ Return ONLY minified JSON, no prose, no code fences:
 
 If nothing is announced, return {"grid_status":"normal","grid_note":"","outages":[]}. Be terse.`;
 
-  const model = process.env.GRID_NEWS_MODEL || "gemini-2.5-pro";
+  // gemini-3.1-pro-preview uses a thinking budget internally, so
+  // maxOutputTokens must cover reasoning + JSON output.
+  const model = process.env.GRID_NEWS_MODEL || "gemini-3.1-pro-preview";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const r = await fetch(url, {
     method: "POST",
@@ -167,7 +169,7 @@ If nothing is announced, return {"grid_status":"normal","grid_note":"","outages"
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       tools: [{ google_search: {} }],
-      generationConfig: { temperature: 0.1, maxOutputTokens: 2000 },
+      generationConfig: { temperature: 0.1, maxOutputTokens: 4000 },
     }),
   });
   if (!r.ok) return [];
