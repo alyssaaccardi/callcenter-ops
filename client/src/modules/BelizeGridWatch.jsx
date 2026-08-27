@@ -363,8 +363,11 @@ const svgFromLatLon = (lat, lon) => [
 ];
 
 function BelizeMap({ byDistrict, selected, onSelect, agents }) {
-  const fill = (d) => { const s = byDistrict[d]?.worst; return s === "active" ? "url(#hatchRed)" : s === "upcoming" ? C.panelHi : C.panel; };
-  const stroke = (d) => { const s = byDistrict[d]?.worst; return s === "active" ? C.red : s === "upcoming" ? C.amber : C.line; };
+  // Town-forward layout: districts recede to muted backdrop, towns
+  // dominate. Outage state still colors the district hatch/border for
+  // context, but the staffing story is told at the town level.
+  const fill = (d) => { const s = byDistrict[d]?.worst; return s === "active" ? "url(#hatchRed)" : s === "upcoming" ? "rgba(232,163,61,0.06)" : "rgba(255,255,255,0.02)"; };
+  const stroke = (d) => { const s = byDistrict[d]?.worst; return s === "active" ? "rgba(216,80,63,0.55)" : s === "upcoming" ? "rgba(232,163,61,0.45)" : "rgba(34,64,95,0.35)"; };
   const isAffected = (d) => byDistrict[d]?.worst === "active" || byDistrict[d]?.worst === "upcoming";
 
   // Cluster agents by town (one dot per town, sized by headcount).
@@ -393,46 +396,59 @@ function BelizeMap({ byDistrict, selected, onSelect, agents }) {
           <line x1="0" y1="0" x2="0" y2="7" stroke={C.red} strokeWidth="2.5" opacity="0.75" />
         </pattern>
       </defs>
+      {/* Districts as backdrop — muted fills, thin borders. Still
+          clickable for filtering and their outage state colors the hatch,
+          but the eye lands on the town markers on top. */}
       {DISTRICTS.map((d) => {
         const meta = DISTRICT_META[d], info = byDistrict[d] || {}, sel = selected === d;
         return (
           <g key={d} onClick={() => onSelect(sel ? null : d)} style={{ cursor: "pointer" }} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && onSelect(sel ? null : d)}>
-            <path d={meta.path} fill={fill(d)} stroke={sel ? C.gold : stroke(d)} strokeWidth={sel ? 2.6 : 1.4} strokeLinejoin="round" />
-            {(meta.extra || []).map((p, i) => <path key={i} d={p} fill={fill(d)} stroke={sel ? C.gold : stroke(d)} strokeWidth="1.2" />)}
-            {info.worst === "active" && (
-              <circle cx={meta.label[0]} cy={meta.label[1] - 22} r="5" fill={C.red}>
-                <animate attributeName="opacity" values="1;0.15;1" dur="1.6s" repeatCount="indefinite" />
-              </circle>
-            )}
-            <text x={meta.label[0]} y={meta.label[1]} textAnchor="middle" fill={info.worst ? C.text : C.dim} style={{ fontFamily: SANS, fontSize: 12, fontWeight: 700, letterSpacing: "0.04em" }}>{d.toUpperCase()}</text>
-            {info.staff > 0 && (
-              <text x={meta.label[0]} y={meta.label[1] + 15} textAnchor="middle" style={{ fontFamily: MONO, fontSize: 11 }} fill={info.worst === "active" ? C.red : info.worst ? C.amber : C.dim}>
-                {info.staff} staff
-              </text>
-            )}
+            <path d={meta.path} fill={fill(d)} stroke={sel ? C.gold : stroke(d)} strokeWidth={sel ? 2.6 : 0.9} strokeLinejoin="round" />
+            {(meta.extra || []).map((p, i) => <path key={i} d={p} fill={fill(d)} stroke={sel ? C.gold : stroke(d)} strokeWidth="0.8" />)}
+            {/* Subtle district name in the corner — context only. */}
+            <text x={meta.label[0]} y={meta.label[1]} textAnchor="middle" fill={info.worst ? "rgba(232,240,248,0.35)" : "rgba(138,163,191,0.35)"} style={{ fontFamily: SANS, fontSize: 10, fontWeight: 600, letterSpacing: "0.05em" }}>{d.toUpperCase()}</text>
           </g>
         );
       })}
-      {/* Staff-per-town dots. Always mint — they mean "people live here",
-          never "outage". The district hatch behind them tells the outage
-          story. Labels appear only for towns inside affected districts to
-          avoid clutter; every dot has a native <title> for hover. */}
+      {/* Town markers — the actual story. Always mint (staff, not outage);
+          the outage picture is told by the district hatch behind them and
+          by an extra ring around towns that sit in an affected district.
+          All labels always visible so the map reads at a glance. */}
       {townClusters.map(({ town, x, y, count, district }) => {
-        const showLabel = district && isAffected(district);
+        const affected = district && isAffected(district);
+        const active = district && byDistrict[district]?.worst === "active";
+        const r = 5 + Math.min(count, 8);
         return (
-          <g key={town} style={{ pointerEvents: showLabel ? "auto" : "none" }}>
-            <title>{town} · {count} staff</title>
-            <circle cx={x} cy={y} r={3 + Math.min(count, 6)} fill={C.mint} fillOpacity={0.85} stroke={C.ink} strokeWidth="1.2" />
+          <g key={town}>
+            <title>{town} · {count} staff{affected ? ` · in outage area (${district})` : ""}</title>
+            {/* Halo ring for towns inside an affected district. Never
+                colored red so the dot itself stays unambiguously "staff". */}
+            {affected && (
+              <circle cx={x} cy={y} r={r + 4} fill="none" stroke={active ? C.red : C.amber} strokeWidth="1.6" strokeOpacity="0.75">
+                {active && <animate attributeName="stroke-opacity" values="0.9;0.35;0.9" dur="1.6s" repeatCount="indefinite" />}
+              </circle>
+            )}
+            <circle cx={x} cy={y} r={r} fill={C.mint} fillOpacity={0.95} stroke={C.ink} strokeWidth="1.5" />
             {count > 1 && (
-              <text x={x} y={y + 3} textAnchor="middle" style={{ fontFamily: MONO, fontSize: 9, fontWeight: 700 }} fill={C.ink}>
+              <text x={x} y={y + 4} textAnchor="middle" style={{ fontFamily: MONO, fontSize: 11, fontWeight: 800 }} fill={C.ink}>
                 {count}
               </text>
             )}
-            {showLabel && (
-              <text x={x} y={y + 3 + Math.min(count, 6) + 10} textAnchor="middle" style={{ fontFamily: MONO, fontSize: 9, fontWeight: 600, textTransform: "capitalize", paintOrder: "stroke" }} stroke={C.ink} strokeWidth="3" fill={C.mint}>
-                {town}
-              </text>
-            )}
+            {/* Town name always shown, stroke-outlined for legibility. */}
+            <text
+              x={x} y={y + r + 12}
+              textAnchor="middle"
+              style={{
+                fontFamily: SANS, fontSize: 11,
+                fontWeight: affected ? 800 : 600,
+                textTransform: "capitalize",
+                paintOrder: "stroke",
+              }}
+              stroke={C.ink} strokeWidth="3.5"
+              fill={affected ? (active ? C.red : C.amber) : C.text}
+            >
+              {town}
+            </text>
           </g>
         );
       })}
@@ -1255,9 +1271,12 @@ export default function BelizeGridWatch() {
               title={selected ? `Filtered · ${selected}` : "Tap a district to filter"}
               right={
                 <div className="flex items-center gap-3 flex-wrap">
-                  {[["Dark now", C.red, "square"], ["Scheduled", C.amber, "square"], ["Clear", C.line, "square"], ["Staff", C.mint, "dot"]].map(([l, c, shape]) => (
+                  {[["Staff town", C.mint, "dot"], ["In outage area", C.red, "ring"], ["Upcoming", C.amber, "ring"]].map(([l, c, shape]) => (
                     <span key={l} style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] flex items-center gap-1.5">
-                      <span style={{ background: c }} className={shape === "dot" ? "w-2 h-2 rounded-full inline-block" : "w-2.5 h-2.5 rounded-sm inline-block"} /> {l}
+                      <span
+                        style={shape === "ring" ? { border: `1.5px solid ${c}`, background: "transparent" } : { background: c }}
+                        className={shape === "square" ? "w-2.5 h-2.5 rounded-sm inline-block" : "w-2 h-2 rounded-full inline-block"}
+                      /> {l}
                     </span>
                   ))}
                 </div>
