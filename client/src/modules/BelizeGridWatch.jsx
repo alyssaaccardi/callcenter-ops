@@ -562,7 +562,7 @@ function ScheduleTab({ outages, agents, rosterLoading }) {
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const a = document.createElement("a");
     a.href = url; a.download = `affected-staff-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 500);
   };
 
   if (!rows) {
@@ -599,7 +599,7 @@ function ScheduleTab({ outages, agents, rosterLoading }) {
             <div style={{ color: dim ? C.dim : C.text }} className="text-sm truncate">{s.agent}</div>
             <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] flex items-center gap-1 capitalize">
               {s.town || s.district} · {fmtDay(s.start)} {fmtTime(s.start)}–{fmtTime(s.end)}
-              {s.end.getUTCDate() !== s.start.getUTCDate() && <Moon size={9} />}
+              {fmtDay(s.start) !== fmtDay(s.end) && <Moon size={9} />}
             </div>
           </div>
         </div>

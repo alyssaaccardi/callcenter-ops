@@ -6,6 +6,11 @@
    as modules convert to the new tokens. */
 @import './styles/tokens.css';
 
+/* Tailwind utilities scoped to BelizeGridWatch.jsx (see tailwind.config.js).
+   Preflight is disabled and the content path is restricted so no other
+   module is affected. */
+@tailwind utilities;
+
 *, *::before, *::after { margin: 0; padding: 0; }
 
 html, body, #root { height: 100%; }

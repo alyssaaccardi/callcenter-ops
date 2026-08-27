@@ -102,7 +102,7 @@ function DashboardInner({ user, defaultModule }) {
 
   const fallback = isOps ? <StatusBoard /> : isSupport ? <SupportCenter /> : isTech ? <TechCenter /> : isNewsletter ? <RingLeader /> : isScribe ? <Scriptor /> : isRobAiBoard ? <RobAiBoardPage /> : isMinuteAuditor ? <MinuteAuditor /> : isStaffing ? <BelizeGridWatch /> : <StatusBoard />;
 
-  const isPortal = activeModule === 'app-portal';
+  const isPortal = activeModule === 'app-portal' || activeModule === 'belize-grid-watch';
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>

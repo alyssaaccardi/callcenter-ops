@@ -53,6 +53,11 @@ const iso = (ymd, mins) =>
   `${ymd[0]}-${String(ymd[1]).padStart(2, "0")}-${String(ymd[2]).padStart(2, "0")}` +
   `T${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}:00-06:00`;
 
+const addDayYmd = ([y, m, d]) => {
+  const dt = new Date(Date.UTC(y, m - 1, d) + 86400000);
+  return [dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate()];
+};
+
 /** Split an area list on commas/semicolons/"and", drop filler. */
 function splitAreas(txt) {
   return String(txt)
@@ -138,11 +143,8 @@ export function parsePowerUpdates(html) {
     for (const p of areaPlaces) if (p.district && !districts.includes(p.district)) districts.push(p.district);
 
     const start = iso(ymd, sMin);
-    let end = eMin == null ? null : iso(ymd, eMin);
-    if (end && eMin <= sMin) {
-      const d = new Date(iso(ymd, eMin));
-      end = new Date(d.getTime() + 86400000).toISOString();
-    }
+    // Overnight rollover: keep -06:00 offset (all other timestamps use it too).
+    const end = eMin == null ? null : iso(eMin <= sMin ? addDayYmd(ymd) : ymd, eMin);
 
     const type = /unplanned|emergency|unscheduled/i.test(info.outageType || "")
       ? "unplanned"
