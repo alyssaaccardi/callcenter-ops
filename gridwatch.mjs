@@ -187,52 +187,55 @@ If nothing is announced, return {"grid_status":"normal","grid_note":"","outages"
   }) };
 }
 
+// Split caches: BEL scrape is fast + deterministic (poll it aggressively
+// so staffing sees new notices within ~60s of publication). News supplement
+// is a slow, paid Gemini call — keep its 10-min cache so we don't burn
+// budget on every poll. Manual entries have no cache; they merge live.
+const BEL_TTL_MS = 60 * 1000;
+const NEWS_TTL_MS = 10 * 60 * 1000;
+
 router.get("/outages", async (req, res) => {
   try {
-    if (!req.query.fresh) {
-      const cached = getCached("outages", 10 * 60 * 1000);
-      if (cached) {
-        // Manual entries are cheap to reload every call and change more
-        // often than BEL — merge them in fresh so a new manual outage
-        // shows up without waiting 10 min for the BEL cache to expire.
-        return res.json({ ...cached, outages: [...cached.outages, ...loadManual()], cached: true });
-      }
+    const fresh = !!req.query.fresh;
+
+    let bel = fresh ? null : getCached("bel", BEL_TTL_MS);
+    if (!bel) {
+      bel = await fetchPowerUpdates();
+      setCached("bel", bel);
     }
 
-    const bel = await fetchPowerUpdates();
-    let outages = bel;
-    let status = "normal", note = "", supplemented = false;
-
+    let sup = null, supplemented = false;
     if (process.env.GRID_NEWS_SUPPLEMENT === "1") {
-      try {
-        const sup = await newsSupplement();
-        if (sup?.list?.length) {
-          // Drop news items that duplicate a BEL row (same day + district)
-          const seen = new Set(bel.map((o) => `${o.start.slice(0, 10)}|${o.districts.join()}`));
-          const extra = sup.list.filter((o) => !seen.has(`${String(o.start).slice(0, 10)}|${o.districts.join()}`));
-          outages = [...bel, ...extra];
-          supplemented = true;
-        }
-        if (sup?.status) status = sup.status;
-        if (sup?.note) note = sup.note;
-      } catch { /* BEL alone is still a valid answer */ }
+      sup = fresh ? null : getCached("news", NEWS_TTL_MS);
+      if (!sup) {
+        try {
+          sup = await newsSupplement();
+          setCached("news", sup);
+        } catch { sup = null; /* BEL alone is still valid */ }
+      }
+      if (sup?.list?.length) supplemented = true;
+    }
+
+    let outages = bel;
+    if (sup?.list?.length) {
+      const seen = new Set(bel.map((o) => `${o.start.slice(0, 10)}|${o.districts.join()}`));
+      const extra = sup.list.filter((o) => !seen.has(`${String(o.start).slice(0, 10)}|${o.districts.join()}`));
+      outages = [...bel, ...extra];
     }
 
     const now = Date.now();
     outages = outages.filter((o) => !o.end || new Date(o.end).getTime() > now);
-    if (outages.some((o) => o.type === "load_shedding")) status = status === "normal" ? "strained" : status;
 
-    const payload = {
+    let status = sup?.status || "normal";
+    if (outages.some((o) => o.type === "load_shedding") && status === "normal") status = "strained";
+
+    res.json({
       grid_status: status,
-      grid_note: note,
-      outages,
+      grid_note: sup?.note || "",
+      outages: [...outages, ...loadManual()],
       sources: { bel: bel.length, supplemented },
       checked: new Date().toISOString(),
-    };
-    setCached("outages", payload);
-    // Merge manual entries after caching so cache expiry doesn't affect
-    // how quickly a fresh manual entry appears.
-    res.json({ ...payload, outages: [...outages, ...loadManual()] });
+    });
   } catch (e) {
     res.status(502).json({ error: e.message });
   }

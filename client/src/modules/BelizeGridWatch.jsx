@@ -61,6 +61,11 @@ const overlapMs = (aS, aE, bS, bE) => (!aS || !aE || !bS || !bE ? 0 : Math.max(0
 
 
 /* ------------------------------ data hooks ---------------------------- */
+// Auto-poll cadence — server caches BEL for 60s, so this is a cheap
+// no-op most of the time and just rides the cache. When BEL publishes a
+// new notice, staffing sees it within 60-120s of the site updating.
+const OUTAGE_POLL_MS = 60000;
+
 function useOutages() {
   const [outages, setOutages] = useState([]);
   const [grid, setGrid] = useState(null);
@@ -80,7 +85,12 @@ function useOutages() {
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    const id = setInterval(() => load(false), OUTAGE_POLL_MS);
+    return () => clearInterval(id);
+  }, [load]);
+
   return { outages, grid, loading, error, checked, reload: load };
 }
 
@@ -698,7 +708,7 @@ function ScheduleTab({ outages, agents, rosterLoading }) {
             )}
           </div>
           <div className="text-right">
-            <div style={{ color: none ? C.mint : live ? C.red : C.amber, fontFamily: MONO }} className="text-3xl font-bold leading-none">{g.headcount}</div>
+            <div style={{ color: none ? C.dim : live ? C.red : C.amber, fontFamily: MONO }} className="text-3xl font-bold leading-none">{g.headcount}</div>
             <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest mt-1">to replace</div>
           </div>
         </div>
@@ -889,7 +899,10 @@ function AffectedStaffPanel({ agents, outages, onOpenSchedule }) {
               <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] mb-2">{windowLabel(g.outage)}</div>
               <div className="space-y-0.5">
                 {g.rows.map(({ agent, tier }) => {
-                  const tone = tier === "confirmed" ? C.red : tier === "exempt" ? C.mint : C.amber;
+                  // Exempt = "keeps power, not at risk" — teal-mint feels
+                  // too much like "all clear". Use dim so it visually
+                  // recedes below the actionable tiers.
+                  const tone = tier === "confirmed" ? C.red : tier === "exempt" ? C.dim : C.amber;
                   return (
                     <div key={agent.id + g.outage.id} className="flex items-center justify-between gap-2 py-0.5">
                       <div className="flex items-center gap-2 min-w-0">
@@ -919,9 +932,16 @@ function AffectedStaffPanel({ agents, outages, onOpenSchedule }) {
 const ISP_SOURCES = ["DigiBelize", "Smart", "Centaur Communications", "Nexgen", "Beeline", "BEL", "Other"];
 
 function ManualOutageForm({ onClose, onSaved }) {
-  const now = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  const nowLocal = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  // Default to *Belize* wall-clock time regardless of the browser's zone —
+  // this form's timestamps are all interpreted as America/Belize downstream.
+  const nowLocal = (() => {
+    const p = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Belize",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(new Date()).reduce((a, x) => (a[x.type] = x.value, a), {});
+    return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+  })();
   const [source, setSource] = useState("DigiBelize");
   const [type, setType] = useState("isp_outage");
   const [districts, setDistricts] = useState([]);
@@ -1098,7 +1118,9 @@ export default function BelizeGridWatch() {
             <button onClick={() => setShowCfg(false)}><X size={14} style={{ color: C.dim }} /></button>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={roster.reload} style={{ background: C.panelHi, color: C.text, borderColor: C.line }} className="px-4 py-2 rounded-lg border text-sm">Reload addresses</button>
+            <button onClick={roster.reload} disabled={roster.loading} style={{ background: C.panelHi, color: C.text, borderColor: C.line }} className="px-4 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-50">
+              <RefreshCw size={12} className={roster.loading ? "animate-spin" : ""} /> {roster.loading ? "Reading…" : "Reload addresses"}
+            </button>
             <span style={{ color: roster.error ? C.amber : C.dim, fontFamily: MONO }} className="text-[10px]">
               {roster.error || (roster.loading ? "Reading board…" : `${roster.agents.length} people · ${new Set(roster.agents.map((a) => a.town).filter(Boolean)).size} towns`)}
             </span>
@@ -1225,7 +1247,12 @@ export default function BelizeGridWatch() {
                           )}
                           {o.manual && (
                             <button
-                              onClick={async (e) => { e.stopPropagation(); if (confirm("Delete this manual outage?")) { await deleteManualOutage(o.id); reload(true); } }}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (!confirm("Delete this manual outage?")) return;
+                                try { await deleteManualOutage(o.id); reload(true); }
+                                catch (err) { alert(`Could not delete: ${err.message}`); }
+                              }}
                               style={{ color: C.dim }}
                               className="text-[10px] flex items-center gap-1 hover:opacity-80"
                               title="Delete manual outage"
