@@ -498,6 +498,133 @@ function BelizeMap({ byDistrict, selected, onSelect, agents }) {
   );
 }
 
+/* -------------------------- district grid ----------------------------- */
+// Replaces the stylized map. Six cards, one per district — each shows
+// status, staff count, and the names to replace. Click to filter the
+// notices feed. This is what staffing actually needs to see: who lives
+// where, who's affected, and who to call.
+function DistrictGrid({ byDistrict, agents, outages, selected, onSelect }) {
+  const now = new Date();
+
+  // Precompute per-district: status, town breakdown, replace/monitor
+  // staff (from homeAffected), and outage count.
+  const cards = useMemo(() => {
+    const homeGroups = computeHomeAffected(agents, outages, now);
+    // Flatten by district — a staffer can be flagged by multiple
+    // outages; keep them distinct-by-name per district and prefer the
+    // most-actionable tier they have (confirmed > monitoring > exempt).
+    const perDistrict = new Map();
+    for (const d of DISTRICTS) perDistrict.set(d, new Map());
+    for (const g of homeGroups) {
+      for (const r of g.rows) {
+        for (const d of g.outage.districts) {
+          if (!perDistrict.has(d)) continue;
+          const bucket = perDistrict.get(d);
+          const prev = bucket.get(r.agent.name);
+          const rank = (t) => (t === "confirmed" ? 3 : t === "monitoring" ? 2 : 1);
+          if (!prev || rank(r.tier) > rank(prev.tier)) bucket.set(r.agent.name, r);
+        }
+      }
+    }
+
+    return DISTRICTS.map((d) => {
+      const info = byDistrict[d] || {};
+      const inDistrict = agents.filter((a) => a.district === d);
+      const townCounts = inDistrict.reduce((m, a) => {
+        if (!a.town) return m;
+        m.set(a.town, (m.get(a.town) || 0) + 1);
+        return m;
+      }, new Map());
+      const towns = [...townCounts.entries()].sort((a, b) => b[1] - a[1]);
+      const affected = [...perDistrict.get(d).values()]
+        .sort((a, b) => (a.tier === b.tier ? a.agent.name.localeCompare(b.agent.name) : a.tier === "confirmed" ? -1 : b.tier === "confirmed" ? 1 : 0));
+      const replaceCount = affected.filter((r) => r.tier === "confirmed").length;
+      const monitorCount = affected.filter((r) => r.tier === "monitoring").length;
+      const notices = outages.filter((o) => o.districts.includes(d)).length;
+      return { d, info, staff: inDistrict.length, towns, affected, replaceCount, monitorCount, notices };
+    });
+  }, [byDistrict, agents, outages]);
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+      {cards.map(({ d, info, staff, towns, affected, replaceCount, monitorCount, notices }) => {
+        const sel = selected === d;
+        const worst = info.worst;
+        const tone = worst === "active" ? C.red : worst === "upcoming" ? C.amber : C.dim;
+        const cardBg = worst === "active" ? "rgba(216,80,63,0.06)" : worst === "upcoming" ? "rgba(232,163,61,0.05)" : C.panel;
+        const cardBorder = sel ? C.gold : worst === "active" ? "rgba(216,80,63,0.4)" : worst === "upcoming" ? "rgba(232,163,61,0.35)" : C.line;
+        return (
+          <button
+            key={d}
+            onClick={() => onSelect(sel ? null : d)}
+            style={{ background: cardBg, borderColor: cardBorder }}
+            className="text-left rounded-xl border p-3.5 transition-colors hover:opacity-95"
+          >
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <div className="min-w-0">
+                <div style={{ color: C.text, fontFamily: SANS }} className="text-sm font-bold tracking-wide uppercase truncate">{d}</div>
+                <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] mt-0.5">
+                  {staff} staff{towns.length ? ` · ${towns.length} town${towns.length !== 1 ? "s" : ""}` : ""}
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span style={{ background: tone }} className={`w-2 h-2 rounded-full ${worst === "active" ? "animate-pulse" : ""}`} />
+                <span style={{ color: tone, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">
+                  {worst === "active" ? "Dark" : worst === "upcoming" ? "Upcoming" : "Clear"}
+                </span>
+              </div>
+            </div>
+
+            {/* Headline counter — the "so what" for this district. */}
+            <div className="flex items-baseline gap-3 mb-2.5">
+              <div style={{ color: replaceCount ? C.red : monitorCount ? C.amber : C.dim, fontFamily: MONO }} className="text-3xl font-bold leading-none">
+                {replaceCount || monitorCount || staff}
+              </div>
+              <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest leading-tight">
+                {replaceCount ? "to replace" : monitorCount ? "to monitor" : staff ? "live here" : "no staff"}
+              </div>
+            </div>
+
+            {/* Named affected staff — replace tier first, then monitor. */}
+            {affected.length > 0 ? (
+              <div style={{ borderColor: "rgba(255,255,255,0.05)" }} className="border-t pt-2 space-y-0.5">
+                {affected.slice(0, 6).map(({ agent, tier }) => {
+                  const rowTone = tier === "confirmed" ? C.red : tier === "exempt" ? C.dim : C.amber;
+                  return (
+                    <div key={agent.id} className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span style={{ background: rowTone }} className="w-1.5 h-1.5 rounded-full shrink-0" />
+                        <span style={{ color: C.text }} className="text-[11px] truncate">{agent.name}</span>
+                      </div>
+                      <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] capitalize shrink-0 truncate max-w-[80px]">{agent.town || "—"}</span>
+                    </div>
+                  );
+                })}
+                {affected.length > 6 && (
+                  <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] pt-0.5">+ {affected.length - 6} more</div>
+                )}
+              </div>
+            ) : towns.length > 0 ? (
+              <div style={{ borderColor: "rgba(255,255,255,0.05)" }} className="border-t pt-2">
+                <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] leading-relaxed capitalize">
+                  {towns.slice(0, 4).map(([t, n]) => `${t} (${n})`).join(" · ")}
+                  {towns.length > 4 && ` +${towns.length - 4}`}
+                </div>
+              </div>
+            ) : null}
+
+            {notices > 0 && (
+              <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] mt-2.5 flex items-center gap-1">
+                <Zap size={9} /> {notices} notice{notices !== 1 ? "s" : ""}
+              </div>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* --------------------------- town watchlist --------------------------- */
 function Watchlist({ agents, outages }) {
   const now = new Date();
@@ -1515,29 +1642,26 @@ export default function BelizeGridWatch() {
             <Stat icon={Users} label="Staff located" value={roster.agents.length} tone={roster.agents.length ? C.mint : C.dim} />
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4">
-            <Panel
-              title={selected ? `Filtered · ${selected}` : "Tap a district to filter"}
-              right={
-                <div className="flex items-center gap-3 flex-wrap">
-                  {[["Staff town", C.mint, "dot"], ["In outage area", C.red, "ring"], ["Upcoming", C.amber, "ring"]].map(([l, c, shape]) => (
-                    <span key={l} style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] flex items-center gap-1.5">
-                      <span
-                        style={shape === "ring" ? { border: `1.5px solid ${c}`, background: "transparent" } : { background: c }}
-                        className={shape === "square" ? "w-2.5 h-2.5 rounded-sm inline-block" : "w-2 h-2 rounded-full inline-block"}
-                      /> {l}
-                    </span>
-                  ))}
-                </div>
-              }
-            >
-              <div className="h-[520px] md:h-[720px] lg:h-[820px] flex items-center justify-center">
-                <BelizeMap byDistrict={byDistrict} selected={selected} onSelect={setSelected} agents={roster.agents} />
+          <div className="mb-4">
+            <div className="flex items-baseline justify-between mb-2 px-1">
+              <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">
+                {selected ? `Filtered · ${selected}` : "Districts — tap to filter notices"}
               </div>
-            </Panel>
+              {selected && (
+                <button onClick={() => setSelected(null)} style={{ color: C.goldSoft, fontFamily: MONO }} className="text-[10px] hover:underline">
+                  clear filter ×
+                </button>
+              )}
+            </div>
+            <DistrictGrid byDistrict={byDistrict} agents={roster.agents} outages={outages} selected={selected} onSelect={setSelected} />
+          </div>
 
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4">
             <div className="space-y-4">
               <AffectedStaffPanel agents={roster.agents} outages={outages} onOpenSchedule={() => setTab("schedule")} />
+            </div>
+
+            <div className="space-y-4">
               <Watchlist agents={roster.agents} outages={outages} />
               <WeatherPanel towns={weather.towns} error={weather.error} />
               <Panel
