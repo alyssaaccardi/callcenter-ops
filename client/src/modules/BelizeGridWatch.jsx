@@ -393,7 +393,9 @@ function BelizeMap({ byDistrict, selected, onSelect, agents }) {
 
   // Cluster agents by town (one dot per town, sized by headcount).
   // Non-coord towns fall through silently — they still count in the
-  // per-district total shown under the district label.
+  // per-district total shown under the district label. Labels use a
+  // simple collision-avoidance pass: sort by y, and if two labels are
+  // within a threshold, push the later one down.
   const townClusters = useMemo(() => {
     const m = new Map();
     for (const a of agents || []) {
@@ -402,11 +404,24 @@ function BelizeMap({ byDistrict, selected, onSelect, agents }) {
       if (!m.has(key)) m.set(key, { count: 0, district: a.district });
       m.get(key).count++;
     }
-    return [...m.entries()].map(([town, v]) => {
+    const raw = [...m.entries()].map(([town, v]) => {
       const [lat, lon] = TOWN_COORDS[town];
       const [x, y] = svgFromLatLon(lat, lon);
       return { town, x, y, count: v.count, district: v.district };
     });
+    // Collision pass — group by rough x-bucket, then push labels down
+    // if the previous one in the bucket is too close vertically.
+    raw.sort((a, b) => a.y - b.y);
+    const lastY = new Map();
+    for (const c of raw) {
+      const bucket = Math.round(c.x / 40);
+      const prev = lastY.get(bucket) ?? -999;
+      const r = 5 + Math.min(c.count, 8);
+      const desired = c.y + r + 14;
+      c.labelY = desired < prev + 14 ? prev + 14 : desired;
+      lastY.set(bucket, c.labelY);
+    }
+    return raw;
   }, [agents]);
 
   return (
@@ -417,60 +432,66 @@ function BelizeMap({ byDistrict, selected, onSelect, agents }) {
           <line x1="0" y1="0" x2="0" y2="7" stroke={C.red} strokeWidth="2.5" opacity="0.75" />
         </pattern>
       </defs>
-      {/* Districts as backdrop — muted fills, thin borders. Still
-          clickable for filtering and their outage state colors the hatch,
-          but the eye lands on the town markers on top. */}
+      {/* Districts as backdrop — muted fills, thin borders. District
+          names sit at the top-left corner of each shape so they don't
+          overlap town markers. */}
       {DISTRICTS.map((d) => {
         const meta = DISTRICT_META[d], info = byDistrict[d] || {}, sel = selected === d;
         return (
           <g key={d} onClick={() => onSelect(sel ? null : d)} style={{ cursor: "pointer" }} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && onSelect(sel ? null : d)}>
             <path d={meta.path} fill={fill(d)} stroke={sel ? C.gold : stroke(d)} strokeWidth={sel ? 2.6 : 0.9} strokeLinejoin="round" />
             {(meta.extra || []).map((p, i) => <path key={i} d={p} fill={fill(d)} stroke={sel ? C.gold : stroke(d)} strokeWidth="0.8" />)}
-            {/* Subtle district name in the corner — context only. */}
-            <text x={meta.label[0]} y={meta.label[1]} textAnchor="middle" fill={info.worst ? "rgba(232,240,248,0.35)" : "rgba(138,163,191,0.35)"} style={{ fontFamily: SANS, fontSize: 10, fontWeight: 600, letterSpacing: "0.05em" }}>{d.toUpperCase()}</text>
           </g>
         );
       })}
-      {/* Town markers — the actual story. Always mint (staff, not outage);
-          the outage picture is told by the district hatch behind them and
-          by an extra ring around towns that sit in an affected district.
-          All labels always visible so the map reads at a glance. */}
+      {/* Town markers first, then labels — separating groups so all dots
+          render below all labels. Only affected-district towns get a
+          visible label so unaffected areas stay quiet; hover title still
+          works for the rest. */}
       {townClusters.map(({ town, x, y, count, district }) => {
         const affected = district && isAffected(district);
         const active = district && byDistrict[district]?.worst === "active";
         const r = 5 + Math.min(count, 8);
         return (
-          <g key={town}>
+          <g key={`m-${town}`}>
             <title>{town} · {count} staff{affected ? ` · in outage area (${district})` : ""}</title>
-            {/* Halo ring for towns inside an affected district. Never
-                colored red so the dot itself stays unambiguously "staff". */}
             {affected && (
-              <circle cx={x} cy={y} r={r + 4} fill="none" stroke={active ? C.red : C.amber} strokeWidth="1.6" strokeOpacity="0.75">
+              <circle cx={x} cy={y} r={r + 4} fill="none" stroke={active ? C.red : C.amber} strokeWidth="1.8" strokeOpacity="0.75">
                 {active && <animate attributeName="stroke-opacity" values="0.9;0.35;0.9" dur="1.6s" repeatCount="indefinite" />}
               </circle>
             )}
             <circle cx={x} cy={y} r={r} fill={C.mint} fillOpacity={0.95} stroke={C.ink} strokeWidth="1.5" />
             {count > 1 && (
-              <text x={x} y={y + 4} textAnchor="middle" style={{ fontFamily: MONO, fontSize: 11, fontWeight: 800 }} fill={C.ink}>
+              <text x={x} y={y + 4.5} textAnchor="middle" style={{ fontFamily: MONO, fontSize: 12, fontWeight: 800 }} fill={C.ink}>
                 {count}
               </text>
             )}
-            {/* Town name always shown, stroke-outlined for legibility. */}
-            <text
-              x={x} y={y + r + 12}
-              textAnchor="middle"
-              style={{
-                fontFamily: SANS, fontSize: 11,
-                fontWeight: affected ? 800 : 600,
-                textTransform: "capitalize",
-                paintOrder: "stroke",
-              }}
-              stroke={C.ink} strokeWidth="3.5"
-              fill={affected ? (active ? C.red : C.amber) : C.text}
-            >
-              {town}
-            </text>
           </g>
+        );
+      })}
+      {/* Second pass: labels for affected-district towns only, using the
+          collision-adjusted labelY so nearby names don't overlap. */}
+      {townClusters.filter((c) => c.district && isAffected(c.district)).map(({ town, x, labelY, district }) => {
+        const active = byDistrict[district]?.worst === "active";
+        return (
+          <text
+            key={`t-${town}`}
+            x={x} y={labelY}
+            textAnchor="middle"
+            style={{ fontFamily: SANS, fontSize: 13, fontWeight: 700, textTransform: "capitalize", paintOrder: "stroke" }}
+            stroke={C.ink} strokeWidth="4"
+            fill={active ? C.red : C.amber}
+          >
+            {town}
+          </text>
+        );
+      })}
+      {/* District name pinned at the top of each shape — small and
+          muted so it labels the region without competing with towns. */}
+      {DISTRICTS.map((d) => {
+        const meta = DISTRICT_META[d], info = byDistrict[d] || {};
+        return (
+          <text key={`d-${d}`} x={meta.label[0]} y={meta.label[1] - 40} textAnchor="middle" fill={info.worst ? "rgba(232,240,248,0.5)" : "rgba(138,163,191,0.4)"} style={{ fontFamily: SANS, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", pointerEvents: "none" }}>{d.toUpperCase()}</text>
         );
       })}
     </svg>
@@ -1494,7 +1515,7 @@ export default function BelizeGridWatch() {
             <Stat icon={Users} label="Staff located" value={roster.agents.length} tone={roster.agents.length ? C.mint : C.dim} />
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4">
             <Panel
               title={selected ? `Filtered · ${selected}` : "Tap a district to filter"}
               right={
@@ -1510,7 +1531,7 @@ export default function BelizeGridWatch() {
                 </div>
               }
             >
-              <div className="h-[440px] md:h-[560px] flex items-center justify-center">
+              <div className="h-[520px] md:h-[720px] lg:h-[820px] flex items-center justify-center">
                 <BelizeMap byDistrict={byDistrict} selected={selected} onSelect={setSelected} agents={roster.agents} />
               </div>
             </Panel>
