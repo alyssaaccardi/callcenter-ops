@@ -355,6 +355,7 @@ const svgFromLatLon = (lat, lon) => [
 function BelizeMap({ byDistrict, selected, onSelect, agents }) {
   const fill = (d) => { const s = byDistrict[d]?.worst; return s === "active" ? "url(#hatchRed)" : s === "upcoming" ? C.panelHi : C.panel; };
   const stroke = (d) => { const s = byDistrict[d]?.worst; return s === "active" ? C.red : s === "upcoming" ? C.amber : C.line; };
+  const isAffected = (d) => byDistrict[d]?.worst === "active" || byDistrict[d]?.worst === "upcoming";
 
   // Cluster agents by town (one dot per town, sized by headcount).
   // Non-coord towns fall through silently — they still count in the
@@ -404,18 +405,27 @@ function BelizeMap({ byDistrict, selected, onSelect, agents }) {
       })}
       {/* Staff-per-town dots. Always mint — they mean "people live here",
           never "outage". The district hatch behind them tells the outage
-          story. Rendered after districts so they sit on top. Pointer events
-          disabled so clicks still hit the district for filtering. */}
-      {townClusters.map(({ town, x, y, count }) => (
-        <g key={town} style={{ pointerEvents: "none" }}>
-          <circle cx={x} cy={y} r={3 + Math.min(count, 6)} fill={C.mint} fillOpacity={0.85} stroke={C.ink} strokeWidth="1.2" />
-          {count > 1 && (
-            <text x={x} y={y + 3} textAnchor="middle" style={{ fontFamily: MONO, fontSize: 9, fontWeight: 700 }} fill={C.ink}>
-              {count}
-            </text>
-          )}
-        </g>
-      ))}
+          story. Labels appear only for towns inside affected districts to
+          avoid clutter; every dot has a native <title> for hover. */}
+      {townClusters.map(({ town, x, y, count, district }) => {
+        const showLabel = district && isAffected(district);
+        return (
+          <g key={town} style={{ pointerEvents: showLabel ? "auto" : "none" }}>
+            <title>{town} · {count} staff</title>
+            <circle cx={x} cy={y} r={3 + Math.min(count, 6)} fill={C.mint} fillOpacity={0.85} stroke={C.ink} strokeWidth="1.2" />
+            {count > 1 && (
+              <text x={x} y={y + 3} textAnchor="middle" style={{ fontFamily: MONO, fontSize: 9, fontWeight: 700 }} fill={C.ink}>
+                {count}
+              </text>
+            )}
+            {showLabel && (
+              <text x={x} y={y + 3 + Math.min(count, 6) + 10} textAnchor="middle" style={{ fontFamily: MONO, fontSize: 9, fontWeight: 600, textTransform: "capitalize", paintOrder: "stroke" }} stroke={C.ink} strokeWidth="3" fill={C.mint}>
+                {town}
+              </text>
+            )}
+          </g>
+        );
+      })}
     </svg>
   );
 }
@@ -830,6 +840,81 @@ function ScheduleTab({ outages, agents, rosterLoading }) {
   );
 }
 
+/* -------------------- staff in affected areas ------------------------- */
+// Location-only affected list — doesn't require an uploaded schedule.
+// Same tier logic as analyze(): confirmed = district-wide or town-named,
+// monitoring = right district, town not in the notice, exempt = town in
+// the notice's excludes clause.
+function computeHomeAffected(agents, outages, now = new Date()) {
+  const groups = [];
+  for (const o of outages) {
+    if (statusOf(o, now) === "past") continue;
+    const areaNames = (o.areaPlaces || []).map((p) => norm(p.raw)).filter((x) => x.length >= 4);
+    const exNames = (o.excludePlaces || o.excludes || []).map((p) => norm(p.raw ?? p)).filter((x) => x.length >= 4);
+    const wide = o.district_wide || areaNames.length === 0;
+    const rows = agents
+      .filter((a) => a.district && o.districts.includes(a.district))
+      .map((a) => {
+        const t = norm(a.town || "");
+        const exempt = t.length >= 4 && exNames.some((n) => n.includes(t) || t.includes(n));
+        const named = t.length >= 4 && areaNames.some((n) => n.includes(t) || t.includes(n));
+        return { agent: a, tier: exempt ? "exempt" : wide || named ? "confirmed" : "monitoring" };
+      })
+      .sort((a, b) => (a.tier === b.tier ? a.agent.name.localeCompare(b.agent.name) : a.tier === "confirmed" ? -1 : b.tier === "confirmed" ? 1 : 0));
+    if (rows.length) groups.push({ outage: o, rows });
+  }
+  return groups;
+}
+
+function AffectedStaffPanel({ agents, outages, onOpenSchedule }) {
+  const groups = useMemo(() => computeHomeAffected(agents, outages), [agents, outages]);
+  if (!groups.length) return null;
+  const now = new Date();
+  const totalConfirmed = new Set(groups.flatMap((g) => g.rows.filter((r) => r.tier === "confirmed").map((r) => r.agent.name))).size;
+
+  return (
+    <Panel
+      title="Staff in affected areas"
+      right={<span style={{ color: totalConfirmed ? C.red : C.amber, fontFamily: MONO }} className="text-[10px]">{totalConfirmed} to replace</span>}
+    >
+      <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+        {groups.map((g) => {
+          const st = statusOf(g.outage, now);
+          return (
+            <div key={g.outage.id} style={{ borderColor: C.line }} className="pb-3 border-b last:border-b-0 last:pb-0">
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                <Pill tone={st === "active" ? "active" : "upcoming"}>{st === "active" ? "Dark now" : "Scheduled"}</Pill>
+                <span style={{ color: C.text, fontFamily: MONO }} className="text-[11px] font-semibold">{g.outage.districts.join(" · ")}</span>
+              </div>
+              <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] mb-2">{windowLabel(g.outage)}</div>
+              <div className="space-y-0.5">
+                {g.rows.map(({ agent, tier }) => {
+                  const tone = tier === "confirmed" ? C.red : tier === "exempt" ? C.mint : C.amber;
+                  return (
+                    <div key={agent.id + g.outage.id} className="flex items-center justify-between gap-2 py-0.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span style={{ background: tone }} className="w-1.5 h-1.5 rounded-full shrink-0" />
+                        <span style={{ color: C.text }} className="text-xs truncate">{agent.name}</span>
+                        <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] capitalize shrink-0">{agent.town || agent.district}</span>
+                      </div>
+                      <span style={{ color: tone, fontFamily: MONO }} className="text-[9px] uppercase tracking-widest shrink-0">
+                        {tier === "confirmed" ? "Replace" : tier === "exempt" ? "Exempt" : "Monitor"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ color: C.dim, borderColor: C.line }} className="text-[10px] mt-3 pt-3 border-t leading-relaxed">
+        Location-based — anyone whose home is in an outage district. For actual shift overlaps and the replace list, open <button onClick={onOpenSchedule} style={{ color: C.goldSoft }} className="underline">Affected staff</button>.
+      </div>
+    </Panel>
+  );
+}
+
 /* ---------------------- manual ISP outage form ------------------------ */
 const ISP_SOURCES = ["DigiBelize", "Smart", "Centaur Communications", "Nexgen", "Beeline", "BEL", "Other"];
 
@@ -1025,8 +1110,10 @@ export default function BelizeGridWatch() {
         <button
           onClick={() => setTab("grid")}
           style={{
-            background: liveOutages || severeWeather ? "rgba(216,80,63,0.08)" : "rgba(232,163,61,0.06)",
-            borderColor: liveOutages || severeWeather ? "rgba(216,80,63,0.4)" : "rgba(232,163,61,0.35)",
+            // Bar tone reflects OUTAGES only — weather is informational and
+            // must not read as an outage. Neutral when only weather flags.
+            background: liveOutages ? "rgba(216,80,63,0.08)" : upcomingOutages ? "rgba(232,163,61,0.06)" : "rgba(255,255,255,0.02)",
+            borderColor: liveOutages ? "rgba(216,80,63,0.4)" : upcomingOutages ? "rgba(232,163,61,0.35)" : C.line,
             color: C.text,
           }}
           className="w-full mb-4 p-3 rounded-xl border flex flex-wrap items-center gap-4 text-left hover:opacity-90 transition-opacity"
@@ -1042,14 +1129,10 @@ export default function BelizeGridWatch() {
               <Clock size={12} /> {upcomingOutages} outage{upcomingOutages !== 1 ? "s" : ""} scheduled
             </span>
           )}
-          {severeWeather > 0 && (
-            <span style={{ color: C.red, fontFamily: MONO }} className="text-xs flex items-center gap-1.5">
-              <AlertTriangle size={12} /> {severeWeather} town{severeWeather !== 1 ? "s" : ""} · severe weather
-            </span>
-          )}
-          {watchWeather > 0 && severeWeather === 0 && (
-            <span style={{ color: C.amber, fontFamily: MONO }} className="text-xs flex items-center gap-1.5">
-              <AlertTriangle size={12} /> {watchWeather} town{watchWeather !== 1 ? "s" : ""} · weather watch
+          {(severeWeather > 0 || watchWeather > 0) && (
+            <span style={{ color: C.dim, fontFamily: MONO }} className="text-xs flex items-center gap-1.5" title="Weather is informational, not treated as an outage.">
+              <span style={{ background: severeWeather ? C.amber : C.mint, opacity: 0.7 }} className="w-1.5 h-1.5 rounded-full" />
+              weather: {severeWeather > 0 ? `${severeWeather} severe` : ""}{severeWeather > 0 && watchWeather > 0 ? " · " : ""}{watchWeather > 0 ? `${watchWeather} watch` : ""}
             </span>
           )}
           <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] ml-auto">
@@ -1102,6 +1185,7 @@ export default function BelizeGridWatch() {
             </Panel>
 
             <div className="space-y-4">
+              <AffectedStaffPanel agents={roster.agents} outages={outages} onOpenSchedule={() => setTab("schedule")} />
               <Watchlist agents={roster.agents} outages={outages} />
               <WeatherPanel towns={weather.towns} error={weather.error} />
               <Panel
