@@ -1528,47 +1528,94 @@ export default function BelizeGridWatch() {
         </div>
       </div>
 
-      {replacements.length > 0 && (
-        <div
-          style={{
-            background: replacements[0].active ? "rgba(216,80,63,0.10)" : "rgba(232,163,61,0.08)",
-            borderColor: replacements[0].active ? "rgba(216,80,63,0.5)" : "rgba(232,163,61,0.45)",
-          }}
-          className="mb-4 rounded-2xl border p-4 md:p-5"
-        >
-          <div className="flex items-center gap-3 mb-3">
-            <div style={{ background: replacements[0].active ? C.red : C.amber }} className={`w-3 h-3 rounded-full ${replacements[0].active ? "animate-pulse" : ""}`} />
-            <div style={{ color: replacements[0].active ? C.red : C.amber, fontFamily: MONO }} className="text-[11px] uppercase tracking-[0.25em] font-bold">
-              Replace {replacements.length === 1 ? "this person" : `these ${replacements.length} people`}
-            </div>
-            <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] ml-auto">
-              home town in an outage area
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-            {replacements.map(({ agent, active, outage }) => (
-              <div
-                key={agent.name + outage.id}
-                style={{ background: C.panel, borderColor: active ? "rgba(216,80,63,0.35)" : C.line }}
-                className="rounded-lg border p-3"
-              >
-                <div className="flex items-baseline justify-between gap-2 mb-1">
-                  <div style={{ color: C.text }} className="text-base md:text-lg font-semibold truncate">{agent.name}</div>
-                  <div style={{ color: active ? C.red : C.amber, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest shrink-0">
-                    {active ? "Dark now" : "Upcoming"}
+      {replacements.length > 0 && (() => {
+        const liveReps = replacements.filter((r) => r.active);
+        const upcomingReps = replacements.filter((r) => !r.active);
+        return (
+          <div
+            style={{
+              background: liveReps.length ? "rgba(216,80,63,0.10)" : "rgba(232,163,61,0.08)",
+              borderColor: liveReps.length ? "rgba(216,80,63,0.5)" : "rgba(232,163,61,0.45)",
+            }}
+            className="mb-4 rounded-2xl border p-4 md:p-5"
+          >
+            {/* Header splits live vs upcoming so a single scary total
+                doesn't hide what's actually actionable right now. */}
+            <div className="flex flex-wrap items-center gap-4 mb-3">
+              {liveReps.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <div style={{ background: C.red }} className="w-3 h-3 rounded-full animate-pulse" />
+                  <div style={{ color: C.red, fontFamily: MONO }} className="text-[11px] uppercase tracking-[0.25em] font-bold">
+                    Replace now · {liveReps.length}
                   </div>
                 </div>
-                <div style={{ color: C.dim, fontFamily: MONO }} className="text-[11px] capitalize">
-                  {agent.town || agent.district} · {windowLabel(outage)}
+              )}
+              {upcomingReps.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <div style={{ background: C.amber }} className="w-2.5 h-2.5 rounded-full" />
+                  <div style={{ color: C.amber, fontFamily: MONO }} className="text-[11px] uppercase tracking-[0.25em] font-bold">
+                    Upcoming · {upcomingReps.length}
+                  </div>
+                </div>
+              )}
+              <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] ml-auto">
+                home town in an outage area
+              </div>
+            </div>
+
+            {liveReps.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 mb-3">
+                {liveReps.map(({ agent, outage }) => (
+                  <div
+                    key={agent.name + outage.id}
+                    style={{ background: C.panel, borderColor: "rgba(216,80,63,0.35)" }}
+                    className="rounded-lg border p-3"
+                  >
+                    <div className="flex items-baseline justify-between gap-2 mb-1">
+                      <div style={{ color: C.text }} className="text-base md:text-lg font-semibold truncate">{agent.name}</div>
+                      <div style={{ color: C.red, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest shrink-0">Dark now</div>
+                    </div>
+                    <div style={{ color: C.dim, fontFamily: MONO }} className="text-[11px] capitalize">
+                      {agent.town || agent.district} · {windowLabel(outage)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {upcomingReps.length > 0 && (
+              <div>
+                {liveReps.length > 0 && (
+                  <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest mb-1.5">
+                    Coming up
+                  </div>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                  {upcomingReps.map(({ agent, outage }) => (
+                    <div
+                      key={agent.name + outage.id}
+                      style={{ background: "rgba(255,255,255,0.02)", borderColor: C.line }}
+                      className="rounded-lg border p-2.5"
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <div style={{ color: C.text }} className="text-sm font-semibold truncate">{agent.name}</div>
+                        <div style={{ color: C.amber, fontFamily: MONO }} className="text-[9px] uppercase tracking-widest shrink-0">Upcoming</div>
+                      </div>
+                      <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] capitalize">
+                        {agent.town || agent.district} · {windowLabel(outage)}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            ))}
+            )}
+
+            <div style={{ color: C.dim }} className="text-[11px] mt-3">
+              Location-based: town matches the outage notice. Open <button onClick={() => setTab("schedule")} style={{ color: C.goldSoft }} className="underline">Affected staff</button> to layer in their shifts once the schedule is uploaded.
+            </div>
           </div>
-          <div style={{ color: C.dim }} className="text-[11px] mt-3">
-            Location-based: town matches the outage notice. Open <button onClick={() => setTab("schedule")} style={{ color: C.goldSoft }} className="underline">Affected staff</button> to layer in their shifts once the schedule is uploaded.
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {showCfg && (
         <Panel className="mb-4">
