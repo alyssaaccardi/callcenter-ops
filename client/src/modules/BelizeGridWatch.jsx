@@ -1079,6 +1079,26 @@ export default function BelizeGridWatch() {
   const watchWeather = weather.towns.filter((w) => w.level === "watch").length;
   const alertActive = liveOutages || upcomingOutages || severeWeather || watchWeather;
 
+  // Roster-based confirmed replacements. Distinct-by-name, live outages
+  // first, then upcoming — sorted so the most urgent replacement is at
+  // the top of the banner.
+  const replacements = useMemo(() => {
+    const groups = computeHomeAffected(roster.agents, outages, now);
+    const seen = new Set();
+    const out = [];
+    for (const g of groups) {
+      const active = statusOf(g.outage, now) === "active";
+      for (const r of g.rows) {
+        if (r.tier !== "confirmed") continue;
+        if (seen.has(r.agent.name)) continue;
+        seen.add(r.agent.name);
+        out.push({ agent: r.agent, active, outage: g.outage });
+      }
+    }
+    return out.sort((a, b) => (a.active === b.active ? 0 : a.active ? -1 : 1));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roster.agents, outages]);
+
   const byDistrict = useMemo(() => {
     const m = {};
     for (const d of DISTRICTS) {
@@ -1106,6 +1126,48 @@ export default function BelizeGridWatch() {
           </button>
         </div>
       </div>
+
+      {replacements.length > 0 && (
+        <div
+          style={{
+            background: replacements[0].active ? "rgba(216,80,63,0.10)" : "rgba(232,163,61,0.08)",
+            borderColor: replacements[0].active ? "rgba(216,80,63,0.5)" : "rgba(232,163,61,0.45)",
+          }}
+          className="mb-4 rounded-2xl border p-4 md:p-5"
+        >
+          <div className="flex items-center gap-3 mb-3">
+            <div style={{ background: replacements[0].active ? C.red : C.amber }} className={`w-3 h-3 rounded-full ${replacements[0].active ? "animate-pulse" : ""}`} />
+            <div style={{ color: replacements[0].active ? C.red : C.amber, fontFamily: MONO }} className="text-[11px] uppercase tracking-[0.25em] font-bold">
+              Replace {replacements.length === 1 ? "this person" : `these ${replacements.length} people`}
+            </div>
+            <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] ml-auto">
+              home town in an outage area
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+            {replacements.map(({ agent, active, outage }) => (
+              <div
+                key={agent.name + outage.id}
+                style={{ background: C.panel, borderColor: active ? "rgba(216,80,63,0.35)" : C.line }}
+                className="rounded-lg border p-3"
+              >
+                <div className="flex items-baseline justify-between gap-2 mb-1">
+                  <div style={{ color: C.text }} className="text-base md:text-lg font-semibold truncate">{agent.name}</div>
+                  <div style={{ color: active ? C.red : C.amber, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest shrink-0">
+                    {active ? "Dark now" : "Upcoming"}
+                  </div>
+                </div>
+                <div style={{ color: C.dim, fontFamily: MONO }} className="text-[11px] capitalize">
+                  {agent.town || agent.district} · {windowLabel(outage)}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ color: C.dim }} className="text-[11px] mt-3">
+            Location-based: town matches the outage notice. Open <button onClick={() => setTab("schedule")} style={{ color: C.goldSoft }} className="underline">Affected staff</button> to layer in their shifts once the schedule is uploaded.
+          </div>
+        </div>
+      )}
 
       {showCfg && (
         <Panel className="mb-4">
