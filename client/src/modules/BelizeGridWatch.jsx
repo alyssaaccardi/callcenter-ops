@@ -1058,7 +1058,14 @@ function ManualOutageForm({ onClose, onSaved }) {
 
   const submit = async () => {
     setErr(null);
-    if (!districts.length) { setErr("Pick at least one district."); return; }
+    // If the user has attached anything or run vision extraction, trust
+    // them — save the entry even without a district. It shows up in the
+    // feed and can be corrected later. Only block empty-district saves
+    // when the form is genuinely being filled by hand with no evidence.
+    if (!districts.length && !files.length && !extractNote) {
+      setErr("Pick at least one district (or drop a screenshot to auto-fill).");
+      return;
+    }
     setSaving(true);
     try {
       const r = await fetch(`${API}/manual-outages`, {

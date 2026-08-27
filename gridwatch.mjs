@@ -275,12 +275,14 @@ router.post("/manual-outages", express.json(), (req, res) => {
     if (!source) return res.status(400).json({ error: "source is required" });
     if (!start) return res.status(400).json({ error: "start time is required" });
     const validDistricts = districts.filter((d) => DISTRICTS.includes(d));
-    if (!validDistricts.length) return res.status(400).json({ error: "at least one valid district is required" });
 
     const areaPlaces = (areas || []).filter(Boolean).map((a) => ({ raw: a, ...placeOf(a) }));
     // District can be derived from named areas too — union with what the
     // user picked so a "San Ignacio" area implicitly counts as Cayo.
     for (const p of areaPlaces) if (p.district && !validDistricts.includes(p.district)) validDistricts.push(p.district);
+    // Empty districts array is allowed — the entry still saves as evidence
+    // of a reported outage. It just won't cross-reference against staff
+    // locations until a district is added later.
 
     const entry = {
       id: `man-${randomBytes(4).toString("hex")}`,
@@ -378,8 +380,14 @@ Extract the outage details. Return ONLY minified JSON — no prose, no code fenc
 Schema:
 {"source":"DigiBelize|Smart|Centaur Communications|Nexgen|Beeline|BEL|Other","type":"isp_outage|load_shedding|planned|other","districts":["Cayo"],"areas":["Belmopan","San Ignacio"],"start":"${today}T19:00:00-06:00","end":"${today}T21:30:00-06:00","cause":"<=20 words"}
 
-Rules:
+CRITICAL — districts is required, never return an empty array:
 - districts must be a subset of: Corozal, Orange Walk, Belize, Cayo, Stann Creek, Toledo
+- If the notice explicitly names a district, use that.
+- If it names towns/areas but not a district, MAP each town to its district and return them (Belmopan/San Ignacio/Benque = Cayo; Belize City/Ladyville/San Pedro = Belize; Dangriga/Placencia/Independence = Stann Creek; Punta Gorda = Toledo; Corozal Town/Sarteneja = Corozal; Orange Walk Town = Orange Walk).
+- If it's country-wide/nationwide load shedding, return ALL SIX districts.
+- If you truly cannot tell, return your single best guess based on the ISP's coverage area (Digi/Smart/BEL all serve nationwide → default to all six).
+
+Other rules:
 - If the source logo/name isn't visible, guess from context; use "Other" only as last resort
 - All times are Belize time (-06:00). If a date isn't stated, use ${today}. If only a time is given, assume today.
 - end may be null if not stated
