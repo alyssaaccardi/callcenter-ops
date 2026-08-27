@@ -1032,6 +1032,21 @@ function ManualOutageForm({ onClose, onSaved }) {
 
   const toggle = (d) => setDistricts((s) => s.includes(d) ? s.filter((x) => x !== d) : [...s, d]);
 
+  // As the user types area names, resolve any recognizable town to its
+  // district and pre-add it. Doesn't remove manually-picked districts.
+  useEffect(() => {
+    const parts = areas.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+    if (!parts.length) return;
+    const found = new Set();
+    for (const a of parts) { const p = placeOf(a); if (p.district) found.add(p.district); }
+    if (!found.size) return;
+    setDistricts((prev) => {
+      const next = new Set(prev);
+      for (const d of found) next.add(d);
+      return next.size === prev.length ? prev : [...next];
+    });
+  }, [areas]);
+
   const addFiles = (list) => {
     const arr = Array.from(list || []).slice(0, 10 - files.length);
     setFiles((prev) => [...prev, ...arr]);
@@ -1151,13 +1166,31 @@ function ManualOutageForm({ onClose, onSaved }) {
           </div>
 
           <div>
-            <span style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">Districts *</span>
-            <div className="flex flex-wrap gap-1.5 mt-1">
-              {DISTRICTS.map((d) => (
-                <button key={d} onClick={() => toggle(d)} style={{ background: districts.includes(d) ? C.gold : "transparent", color: districts.includes(d) ? C.ink : C.dim, borderColor: districts.includes(d) ? C.gold : C.line }} className="px-2.5 py-1 rounded border text-xs">
-                  {d}
-                </button>
-              ))}
+            <div className="flex items-baseline justify-between">
+              <span style={{ color: districts.length ? C.dim : C.amber, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">Districts *</span>
+              <span style={{ color: districts.length ? C.mint : C.amber, fontFamily: MONO }} className="text-[10px]">
+                {districts.length ? `${districts.length} picked` : "None selected — tap to pick"}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
+              {DISTRICTS.map((d) => {
+                const on = districts.includes(d);
+                return (
+                  <button
+                    key={d}
+                    onClick={() => toggle(d)}
+                    style={{
+                      background: on ? C.gold : "transparent",
+                      color: on ? C.ink : C.text,
+                      borderColor: on ? C.gold : C.line,
+                      fontWeight: on ? 700 : 500,
+                    }}
+                    className="px-2.5 py-1 rounded border text-xs transition-colors hover:opacity-90"
+                  >
+                    {on && "✓ "}{d}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
