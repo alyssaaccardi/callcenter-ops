@@ -6738,14 +6738,11 @@ app.get('/api/salesperson-auditor/results/:jobId', requireRole(...SALESPERSON_AU
   res.json(job);
 });
 
-// ─── React SPA Catch-All ─────────────────────────────────────────────────────
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'app', 'index.html'));
-});
-
 // ─── Belize Grid Watch (ESM router, dynamic import) ──────────────────────────
 // gridwatch.mjs / bel-scraper.mjs use ESM; this file is CommonJS, so we
-// lazy-load via dynamic import and gate at the mount.
+// lazy-load via dynamic import and gate at the mount. MUST be registered
+// before the SPA catch-all below or every /api/grid/* request falls through
+// to index.html.
 let _gridwatchRouter = null;
 import('./gridwatch.mjs')
   .then(m => { _gridwatchRouter = m.default; console.log('✅ Belize Grid Watch router loaded'); })
@@ -6754,6 +6751,11 @@ import('./gridwatch.mjs')
 app.use('/api/grid', requireRole('super_admin', 'staffing'), (req, res, next) => {
   if (!_gridwatchRouter) return res.status(503).json({ error: 'Grid Watch initializing' });
   return _gridwatchRouter(req, res, next);
+});
+
+// ─── React SPA Catch-All ─────────────────────────────────────────────────────
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'app', 'index.html'));
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
