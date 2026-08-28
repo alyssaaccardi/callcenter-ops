@@ -126,13 +126,19 @@ async function slackNotifyOutage(outage, roster) {
   }
 
   try {
+    // Optional channel override — modern Slack apps often ignore this,
+    // but classic/legacy webhooks respect it. Configure with
+    // SLACK_GRID_WATCH_CHANNEL if the webhook was created for a
+    // different channel than you want the alerts in.
+    const payload = {
+      text: `New outage · ${outage.districts.join(" · ")} · ${confirmed.length} to replace`,
+      blocks,
+    };
+    if (process.env.SLACK_GRID_WATCH_CHANNEL) payload.channel = process.env.SLACK_GRID_WATCH_CHANNEL;
     const r = await fetch(SLACK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text: `New outage · ${outage.districts.join(" · ")} · ${confirmed.length} to replace`,
-        blocks,
-      }),
+      body: JSON.stringify(payload),
     });
     if (!r.ok) console.error("Grid Watch Slack:", r.status, await r.text().catch(() => ""));
   } catch (e) {
