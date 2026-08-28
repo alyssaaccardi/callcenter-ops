@@ -503,13 +503,13 @@ function BelizeMap({ byDistrict, selected, onSelect, agents }) {
 // status, staff count, and the names to replace. Click to filter the
 // notices feed. This is what staffing actually needs to see: who lives
 // where, who's affected, and who to call.
-function DistrictGrid({ byDistrict, agents, outages, selected, onSelect }) {
+function DistrictGrid({ byDistrict, agents, outages, shifts, selected, onSelect }) {
   const now = new Date();
 
   // Precompute per-district: status, town breakdown, replace/monitor
   // staff (from homeAffected), and outage count.
   const cards = useMemo(() => {
-    const homeGroups = computeHomeAffected(agents, outages, now);
+    const homeGroups = computeHomeAffected(agents, outages, { shifts, now });
     // Flatten by district — a staffer can be flagged by multiple
     // outages; keep them distinct-by-name per district and prefer the
     // most-actionable tier they have (confirmed > monitoring > exempt).
@@ -741,7 +741,7 @@ const FIELDS = [
   ["place", "Town / address", false], ["role", "Role", false],
 ];
 
-function ScheduleTab({ outages, agents, rosterLoading }) {
+function ScheduleTab({ outages, agents, rosterLoading, onShiftsResolved }) {
   const [rows, setRows] = useState(null);
   const [headerRow, setHeaderRow] = useState(0);
   const [map, setMap] = useState({});
@@ -752,6 +752,7 @@ function ScheduleTab({ outages, agents, rosterLoading }) {
   const [showPossible, setShowPossible] = useState({});
   const inputRef = useRef(null);
   useTick();
+
 
   const headers = rows ? (rows[headerRow] || []).map((h, i) => String(h || `Column ${i + 1}`)) : [];
   const onFile = async (file) => {
@@ -778,6 +779,16 @@ function ScheduleTab({ outages, agents, rosterLoading }) {
   }, [sites]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const result = useMemo(() => (parsed ? analyze(parsed.shifts, outages, agents, siteFilter) : null), [parsed, outages, agents, siteFilter]);
+
+  // Publish the site-filtered shifts to the parent so the Grid Status
+  // tab can cross-reference against them without having to re-parse.
+  const filteredShifts = useMemo(() => {
+    if (!parsed?.shifts) return null;
+    return parsed.shifts.filter((s) => siteFilter === "all" || s.site === siteFilter);
+  }, [parsed, siteFilter]);
+  useEffect(() => {
+    if (onShiftsResolved) onShiftsResolved(filteredShifts && filteredShifts.length ? filteredShifts : null);
+  }, [filteredShifts, onShiftsResolved]);
 
   const now = new Date();
   const G = result?.groups || [];
@@ -1046,29 +1057,62 @@ function ScheduleTab({ outages, agents, rosterLoading }) {
 // Same tier logic as analyze(): confirmed = district-wide or town-named,
 // monitoring = right district, town not in the notice, exempt = town in
 // the notice's excludes clause.
-function computeHomeAffected(agents, outages, now = new Date()) {
+// If `shifts` are provided, only agents with a shift that overlaps the
+// outage window survive — turns the panel from "who lives here" into
+// "who is scheduled AND lives here", which is the actionable list.
+// Without shifts, falls back to the location-only view.
+function computeHomeAffected(agents, outages, opts = {}) {
+  const { shifts = null, now = new Date() } = opts;
+
+  let shiftsByAgentId = null;
+  if (shifts && shifts.length) {
+    const nameLookup = new Map();
+    for (const a of agents) {
+      for (const k of nameKeys(a.name)) if (!nameLookup.has(k)) nameLookup.set(k, a);
+    }
+    shiftsByAgentId = new Map();
+    for (const s of shifts) {
+      const agent = (s.keys || []).map((k) => nameLookup.get(k)).find(Boolean);
+      if (!agent) continue;
+      if (!shiftsByAgentId.has(agent.id)) shiftsByAgentId.set(agent.id, []);
+      shiftsByAgentId.get(agent.id).push(s);
+    }
+  }
+
   const groups = [];
   for (const o of outages) {
     if (statusOf(o, now) === "past") continue;
+    const oS = parseTs(o.start), oE = parseTs(o.end);
     const areaNames = (o.areaPlaces || []).map((p) => norm(p.raw)).filter((x) => x.length >= 4);
     const exNames = (o.excludePlaces || o.excludes || []).map((p) => norm(p.raw ?? p)).filter((x) => x.length >= 4);
     const wide = o.district_wide || areaNames.length === 0;
-    const rows = agents
+    let rows = agents
       .filter((a) => a.district && o.districts.includes(a.district))
       .map((a) => {
         const t = norm(a.town || "");
         const exempt = t.length >= 4 && exNames.some((n) => n.includes(t) || t.includes(n));
         const named = t.length >= 4 && areaNames.some((n) => n.includes(t) || t.includes(n));
         return { agent: a, tier: exempt ? "exempt" : wide || named ? "confirmed" : "monitoring" };
-      })
-      .sort((a, b) => (a.tier === b.tier ? a.agent.name.localeCompare(b.agent.name) : a.tier === "confirmed" ? -1 : b.tier === "confirmed" ? 1 : 0));
+      });
+
+    if (shiftsByAgentId) {
+      rows = rows
+        .map((r) => {
+          const list = shiftsByAgentId.get(r.agent.id) || [];
+          const overlapping = list.filter((s) => overlapMs(s.start, s.end, oS, oE) > 0);
+          return overlapping.length ? { ...r, shifts: overlapping } : null;
+        })
+        .filter(Boolean);
+    }
+
+    rows.sort((a, b) => (a.tier === b.tier ? a.agent.name.localeCompare(b.agent.name) : a.tier === "confirmed" ? -1 : b.tier === "confirmed" ? 1 : 0));
     if (rows.length) groups.push({ outage: o, rows });
   }
   return groups;
 }
 
-function AffectedStaffPanel({ agents, outages, onOpenSchedule }) {
-  const groups = useMemo(() => computeHomeAffected(agents, outages), [agents, outages]);
+function AffectedStaffPanel({ agents, outages, shifts, onOpenSchedule }) {
+  const groups = useMemo(() => computeHomeAffected(agents, outages, { shifts }), [agents, outages, shifts]);
   if (!groups.length) return null;
   const now = new Date();
   const totalConfirmed = new Set(groups.flatMap((g) => g.rows.filter((r) => r.tier === "confirmed").map((r) => r.agent.name))).size;
@@ -1113,7 +1157,9 @@ function AffectedStaffPanel({ agents, outages, onOpenSchedule }) {
         })}
       </div>
       <div style={{ color: C.dim, borderColor: C.line }} className="text-[10px] mt-3 pt-3 border-t leading-relaxed">
-        Location-based — anyone whose home is in an outage district. For actual shift overlaps and the replace list, open <button onClick={onOpenSchedule} style={{ color: C.goldSoft }} className="underline">Affected staff</button>.
+        {shifts && shifts.length
+          ? <>Shift-matched — only agents scheduled during each outage window are shown. Full breakdown on <button onClick={onOpenSchedule} style={{ color: C.goldSoft }} className="underline">Affected staff</button>.</>
+          : <>Location-only — anyone whose home is in an outage district. Upload the WFM schedule on <button onClick={onOpenSchedule} style={{ color: C.goldSoft }} className="underline">Affected staff</button> to filter to who is actually working.</>}
       </div>
     </Panel>
   );
@@ -1457,6 +1503,9 @@ export default function BelizeGridWatch() {
   const [showCfg, setShowCfg] = useState(false);
   const [showLogForm, setShowLogForm] = useState(false);
   const [selected, setSelected] = useState(null);
+  // ScheduleTab publishes its resolved shifts here so the Grid Status
+  // components can cross-reference against the schedule too.
+  const [scheduleShifts, setScheduleShifts] = useState(null);
   const { outages, grid, loading, error, checked, reload } = useOutages();
   const roster = useRoster();
   const weather = useWeather();
@@ -1475,7 +1524,7 @@ export default function BelizeGridWatch() {
   // badge (previously the badge came from whichever group appeared
   // first in the outages array, which was arbitrary).
   const replacements = useMemo(() => {
-    const groups = computeHomeAffected(roster.agents, outages, now);
+    const groups = computeHomeAffected(roster.agents, outages, { shifts: scheduleShifts, now });
     const sorted = [...groups].sort((a, b) => {
       const aActive = statusOf(a.outage, now) === "active";
       const bActive = statusOf(b.outage, now) === "active";
@@ -1494,7 +1543,7 @@ export default function BelizeGridWatch() {
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roster.agents, outages]);
+  }, [roster.agents, outages, scheduleShifts]);
 
   const byDistrict = useMemo(() => {
     const m = {};
@@ -1687,9 +1736,15 @@ export default function BelizeGridWatch() {
         </div>
       )}
 
-      {tab === "schedule" ? (
-        <ScheduleTab outages={outages} agents={roster.agents} rosterLoading={roster.loading} />
-      ) : (
+      {/* ScheduleTab stays mounted so an uploaded schedule persists
+          across tab switches. Its resolved shifts publish upstream via
+          onShiftsResolved so Grid Status components cross-reference
+          them. */}
+      <div style={{ display: tab === "schedule" ? "block" : "none" }}>
+        <ScheduleTab outages={outages} agents={roster.agents} rosterLoading={roster.loading} onShiftsResolved={setScheduleShifts} />
+      </div>
+
+      {tab === "grid" && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <Stat icon={Activity} label="National grid" value={grid ? grid.status : "—"} tone={gridTone} sub={grid?.note} />
@@ -1702,6 +1757,9 @@ export default function BelizeGridWatch() {
             <div className="flex items-baseline justify-between mb-2 px-1">
               <div style={{ color: C.dim, fontFamily: MONO }} className="text-[10px] uppercase tracking-widest">
                 {selected ? `Filtered · ${selected}` : "Districts — tap to filter notices"}
+                {scheduleShifts && scheduleShifts.length > 0 && (
+                  <span style={{ color: C.mint }} className="ml-2">· schedule-matched</span>
+                )}
               </div>
               {selected && (
                 <button onClick={() => setSelected(null)} style={{ color: C.goldSoft, fontFamily: MONO }} className="text-[10px] hover:underline">
@@ -1709,12 +1767,12 @@ export default function BelizeGridWatch() {
                 </button>
               )}
             </div>
-            <DistrictGrid byDistrict={byDistrict} agents={roster.agents} outages={outages} selected={selected} onSelect={setSelected} />
+            <DistrictGrid byDistrict={byDistrict} agents={roster.agents} outages={outages} shifts={scheduleShifts} selected={selected} onSelect={setSelected} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4">
             <div className="space-y-4">
-              <AffectedStaffPanel agents={roster.agents} outages={outages} onOpenSchedule={() => setTab("schedule")} />
+              <AffectedStaffPanel agents={roster.agents} outages={outages} shifts={scheduleShifts} onOpenSchedule={() => setTab("schedule")} />
             </div>
 
             <div className="space-y-4">
