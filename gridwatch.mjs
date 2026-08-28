@@ -24,8 +24,139 @@ import { DISTRICTS, placeOf, TOWN_COORDS, norm } from "./client/src/lib/belize-p
 import { fetchPowerUpdates } from "./bel-scraper.mjs";
 
 const MANUAL_STORE = "./grid-manual-outages.json";
+const NOTIFIED_STORE = "./grid-notified-outages.json";
 const ATTACH_DIR = "./grid-attachments";
 if (!existsSync(ATTACH_DIR)) mkdirSync(ATTACH_DIR, { recursive: true });
+
+// Slack notification config. If SLACK_GRID_WATCH_URL is unset the
+// notifier is a no-op; log is kept so we don't renotify a known outage.
+const SLACK_URL = process.env.SLACK_GRID_WATCH_URL || "";
+
+function loadNotified() {
+  try {
+    if (!existsSync(NOTIFIED_STORE)) return new Set();
+    return new Set(JSON.parse(readFileSync(NOTIFIED_STORE, "utf8")));
+  } catch { return new Set(); }
+}
+function saveNotified(set) {
+  // Keep the file bounded — outages don't recur under the same id but
+  // trimming to the last 500 avoids unbounded growth over years.
+  const arr = [...set];
+  const trimmed = arr.length > 500 ? arr.slice(arr.length - 500) : arr;
+  writeFileSync(NOTIFIED_STORE, JSON.stringify(trimmed, null, 2));
+}
+
+const BZ_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Belize",
+  weekday: "short", month: "short", day: "numeric",
+  hour: "numeric", minute: "2-digit",
+});
+const fmtBZ = (iso) => (iso ? `${BZ_FMT.format(new Date(iso))} BZ` : "?");
+
+// Location-based affected roster for a single outage — same tier logic
+// as the JSX side. Server can only do this level since the schedule
+// isn't uploaded here; that's fine for the Slack heads-up.
+function affectedFor(outage, roster) {
+  const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  const areaNames = (outage.areaPlaces || []).map((p) => norm(p.raw)).filter((x) => x.length >= 4);
+  const exNames = (outage.excludePlaces || outage.excludes || []).map((p) => norm(p.raw ?? p)).filter((x) => x.length >= 4);
+  const wide = outage.district_wide || areaNames.length === 0;
+  const confirmed = [];
+  const monitoring = [];
+  for (const a of roster) {
+    if (!a.district || !outage.districts.includes(a.district)) continue;
+    const t = norm(a.town || "");
+    const exempt = t.length >= 4 && exNames.some((n) => n.includes(t) || t.includes(n));
+    if (exempt) continue;
+    const named = t.length >= 4 && areaNames.some((n) => n.includes(t) || t.includes(n));
+    if (wide || named) confirmed.push(a);
+    else monitoring.push(a);
+  }
+  return { confirmed, monitoring };
+}
+
+async function slackNotifyOutage(outage, roster) {
+  if (!SLACK_URL) return;
+  const { confirmed, monitoring } = affectedFor(outage, roster);
+  const bullet = (a) => `• *${a.name}* — ${a.town || a.district}`;
+  const list = (arr, cap = 15) => {
+    if (!arr.length) return "_none_";
+    if (arr.length <= cap) return arr.map(bullet).join("\n");
+    return arr.slice(0, cap).map(bullet).join("\n") + `\n_+ ${arr.length - cap} more_`;
+  };
+  const isLive = new Date(outage.start) <= new Date();
+  const emoji = outage.type === "load_shedding" ? ":zap:" : outage.type === "isp_outage" ? ":globe_with_meridians:" : ":electric_plug:";
+  const status = isLive ? ":rotating_light: *LIVE*" : ":hourglass_flowing_sand: *Upcoming*";
+
+  const blocks = [
+    {
+      type: "header",
+      text: { type: "plain_text", text: `${emoji} New outage · ${outage.districts.join(" · ")}` },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `${status}   *Source:* ${outage.source || "unknown"}\n*Window:* ${fmtBZ(outage.start)} → ${outage.end ? fmtBZ(outage.end) : "?"}${outage.cause ? `\n*Cause:* ${outage.cause}` : ""}`,
+      },
+    },
+  ];
+  if (outage.areaPlaces?.length) {
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: `*Areas:* ${outage.areaPlaces.slice(0, 12).map((p) => p.raw).join(", ")}${outage.areaPlaces.length > 12 ? ` + ${outage.areaPlaces.length - 12} more` : ""}` }],
+    });
+  }
+  blocks.push({ type: "divider" });
+  blocks.push({
+    type: "section",
+    text: { type: "mrkdwn", text: `*To replace* (${confirmed.length})\n${list(confirmed)}` },
+  });
+  if (monitoring.length) {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `*Monitor* (${monitoring.length}) — right district, town not named\n${list(monitoring, 8)}` },
+    });
+  }
+  if (outage.source_url) {
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: `<${outage.source_url}|Source link>` }],
+    });
+  }
+
+  try {
+    const r = await fetch(SLACK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: `New outage · ${outage.districts.join(" · ")} · ${confirmed.length} to replace`,
+        blocks,
+      }),
+    });
+    if (!r.ok) console.error("Grid Watch Slack:", r.status, await r.text().catch(() => ""));
+  } catch (e) {
+    console.error("Grid Watch Slack failed:", e.message);
+  }
+}
+
+async function notifyNewOutages(outages, roster) {
+  if (!SLACK_URL) return;
+  // First run — the notified store doesn't exist yet. Seed it with all
+  // current outage ids WITHOUT sending Slack messages; otherwise every
+  // outage on the board when Slack is first turned on would fire a
+  // notification, spamming the channel.
+  const firstRun = !existsSync(NOTIFIED_STORE);
+  const notified = loadNotified();
+  const fresh = outages.filter((o) => o.id && !notified.has(o.id));
+  if (!fresh.length) return;
+  for (const o of fresh) {
+    if (!firstRun) await slackNotifyOutage(o, roster);
+    notified.add(o.id);
+  }
+  saveNotified(notified);
+  if (firstRun) console.log(`Grid Watch: seeded ${fresh.length} existing outages, notifications will fire on next new arrival.`);
+}
 
 const VALID_ISP_SOURCES = ["DigiBelize", "Smart", "Centaur Communications", "Nexgen", "Beeline", "BEL", "Other"];
 
@@ -234,9 +365,11 @@ router.get("/outages", async (req, res) => {
     const fresh = !!req.query.fresh;
 
     let bel = fresh ? null : getCached("bel", BEL_TTL_MS);
+    let belRefreshed = false;
     if (!bel) {
       bel = await fetchPowerUpdates();
       setCached("bel", bel);
+      belRefreshed = true;
     }
 
     let sup = null, supplemented = false;
@@ -271,6 +404,15 @@ router.get("/outages", async (req, res) => {
       sources: { bel: bel.length, supplemented },
       checked: new Date().toISOString(),
     });
+
+    // Slack heads-up on any newly-seen outage. Only runs when BEL was
+    // actually re-fetched from the source (not when we serve the 60s
+    // cache) so we don't burn Slack rate on identical cached payloads.
+    if (belRefreshed) {
+      fetchRoster()
+        .then((roster) => notifyNewOutages(bel, roster))
+        .catch((err) => console.error("Grid Watch notify:", err.message));
+    }
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
@@ -324,6 +466,19 @@ router.post("/manual-outages", express.json(), (req, res) => {
     list.push(entry);
     saveManual(list);
     res.json({ entry });
+
+    // Also ping Slack for manual entries so the team knows they were
+    // logged. Runs after the response so the UI doesn't wait on it.
+    fetchRoster()
+      .then((roster) => {
+        const notified = loadNotified();
+        if (notified.has(entry.id)) return;
+        return slackNotifyOutage(entry, roster).then(() => {
+          notified.add(entry.id);
+          saveNotified(notified);
+        });
+      })
+      .catch((err) => console.error("Grid Watch notify:", err.message));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -467,6 +622,36 @@ router.get("/attachments/:storedName", (req, res) => {
   const p = path.join(ATTACH_DIR, name);
   if (!existsSync(p)) return res.status(404).end();
   res.sendFile(path.resolve(p));
+});
+
+// Test endpoint — verify the Slack webhook URL is reachable and looks
+// right without waiting for a real BEL update. Uses the newest live or
+// upcoming outage in the current cache, or a stub if none exist.
+router.post("/notify-test", async (_req, res) => {
+  try {
+    if (!SLACK_URL) return res.status(503).json({ error: "SLACK_GRID_WATCH_URL not configured" });
+    const roster = await fetchRoster().catch(() => []);
+    const bel = getCached("bel", 60 * 60 * 1000) || [];
+    const manual = loadManual();
+    const now = Date.now();
+    const candidates = [...bel, ...manual].filter((o) => !o.end || new Date(o.end).getTime() > now);
+    const outage = candidates[0] || {
+      id: "test-" + Date.now(),
+      districts: ["Cayo"],
+      areaPlaces: [{ raw: "Belmopan" }],
+      district_wide: false,
+      excludes: [],
+      start: new Date().toISOString(),
+      end: new Date(Date.now() + 3600000).toISOString(),
+      type: "isp_outage",
+      source: "Test",
+      cause: "Test notification — ignore",
+    };
+    await slackNotifyOutage(outage, roster);
+    res.json({ ok: true, sent: outage.id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 router.delete("/manual-outages/:id/attachments/:attId", (req, res) => {
