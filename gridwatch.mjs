@@ -79,11 +79,29 @@ async function slackNotifyOutage(outage, roster) {
   if (!SLACK_URL) return;
   const { confirmed, monitoring } = affectedFor(outage, roster);
   const bullet = (a) => `• *${a.name}* — ${a.town || a.district}`;
-  const list = (arr, cap = 15) => {
-    if (!arr.length) return "_none_";
-    if (arr.length <= cap) return arr.map(bullet).join("\n");
-    return arr.slice(0, cap).map(bullet).join("\n") + `\n_+ ${arr.length - cap} more_`;
+
+  // Slack section blocks max out at 3000 chars. Chunk long lists into
+  // consecutive sections instead of truncating with "+N more" — the
+  // staffing team needs every name to plan replacements.
+  const SECTION_CAP = 2800;
+  const chunkList = (arr) => {
+    if (!arr.length) return ["_none_"];
+    const lines = arr.map(bullet);
+    const chunks = [];
+    let buf = "";
+    for (const line of lines) {
+      const next = buf ? `${buf}\n${line}` : line;
+      if (next.length > SECTION_CAP) {
+        if (buf) chunks.push(buf);
+        buf = line;
+      } else {
+        buf = next;
+      }
+    }
+    if (buf) chunks.push(buf);
+    return chunks;
   };
+
   const isLive = new Date(outage.start) <= new Date();
   const emoji = outage.type === "load_shedding" ? ":zap:" : outage.type === "isp_outage" ? ":globe_with_meridians:" : ":electric_plug:";
   const status = isLive ? ":rotating_light: *LIVE*" : ":hourglass_flowing_sand: *Upcoming*";
@@ -104,20 +122,33 @@ async function slackNotifyOutage(outage, roster) {
   if (outage.areaPlaces?.length) {
     blocks.push({
       type: "context",
-      elements: [{ type: "mrkdwn", text: `*Areas:* ${outage.areaPlaces.slice(0, 12).map((p) => p.raw).join(", ")}${outage.areaPlaces.length > 12 ? ` + ${outage.areaPlaces.length - 12} more` : ""}` }],
+      elements: [{ type: "mrkdwn", text: `*Areas:* ${outage.areaPlaces.map((p) => p.raw).join(", ")}` }],
     });
   }
   blocks.push({ type: "divider" });
+
+  // "To replace" — first chunk carries the header; subsequent chunks
+  // continue the same list without a repeat header.
+  const confirmedChunks = chunkList(confirmed);
   blocks.push({
     type: "section",
-    text: { type: "mrkdwn", text: `*To replace* (${confirmed.length})\n${list(confirmed)}` },
+    text: { type: "mrkdwn", text: `*To replace* (${confirmed.length})\n${confirmedChunks[0]}` },
   });
+  for (let i = 1; i < confirmedChunks.length; i++) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: confirmedChunks[i] } });
+  }
+
   if (monitoring.length) {
+    const monitoringChunks = chunkList(monitoring);
     blocks.push({
       type: "section",
-      text: { type: "mrkdwn", text: `*Monitor* (${monitoring.length}) — right district, town not named\n${list(monitoring, 8)}` },
+      text: { type: "mrkdwn", text: `*Monitor* (${monitoring.length}) — right district, town not named\n${monitoringChunks[0]}` },
     });
+    for (let i = 1; i < monitoringChunks.length; i++) {
+      blocks.push({ type: "section", text: { type: "mrkdwn", text: monitoringChunks[i] } });
+    }
   }
+
   if (outage.source_url) {
     blocks.push({
       type: "context",
