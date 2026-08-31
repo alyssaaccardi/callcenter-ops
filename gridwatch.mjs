@@ -421,24 +421,51 @@ router.get("/outages", async (req, res) => {
       if (sup?.list?.length) supplemented = true;
     }
 
-    let outages = bel;
+    // Merge BEL + Gemini news + manual entries, then filter to
+    // outages that are ACTUALLY live or upcoming. Everything past
+    // gets dropped so the feed matches reality.
+    let merged = bel;
     if (sup?.list?.length) {
       const seen = new Set(bel.map((o) => `${o.start.slice(0, 10)}|${o.districts.join()}`));
       const extra = sup.list.filter((o) => !seen.has(`${String(o.start).slice(0, 10)}|${o.districts.join()}`));
-      outages = [...bel, ...extra];
+      merged = [...bel, ...extra];
     }
+    merged = [...merged, ...loadManual()];
 
     const now = Date.now();
-    outages = outages.filter((o) => !o.end || new Date(o.end).getTime() > now);
+    const outages = merged.filter((o) => !o.end || new Date(o.end).getTime() > now);
 
-    let status = sup?.status || "normal";
-    if (outages.some((o) => o.type === "load_shedding") && status === "normal") status = "strained";
+    // Grid status is derived from LIVE outages only. Gemini's news
+    // verdict is used only if it's corroborated by an actual live
+    // outage — otherwise stale news kept the status flapping between
+    // emergency and normal even when nothing was actually happening.
+    const isActive = (o) => {
+      const s = o.start ? new Date(o.start).getTime() : null;
+      const e = o.end ? new Date(o.end).getTime() : null;
+      return s !== null && s <= now && (!e || e >= now);
+    };
+    const liveOutages = outages.filter(isActive);
+    const anyLiveLoadShed = liveOutages.some((o) => o.type === "load_shedding");
+    const anyLiveISP      = liveOutages.some((o) => o.type === "isp_outage");
+
+    let status = "normal", note = "";
+    if (liveOutages.length) {
+      // Trust Gemini's status only when live outages back it up. If
+      // Gemini said "emergency" but there's nothing live, we downgrade.
+      if (sup?.status === "emergency" && anyLiveLoadShed) status = "emergency";
+      else if (anyLiveLoadShed) status = "strained";
+      else if (anyLiveISP) status = "strained";
+      else status = "normal";
+      // Only carry the Gemini note through when there's a live outage
+      // that backs it up — otherwise it lingers as false alarm text.
+      if (sup?.note && (anyLiveLoadShed || anyLiveISP)) note = sup.note;
+    }
 
     res.json({
       grid_status: status,
-      grid_note: sup?.note || "",
-      outages: [...outages, ...loadManual()],
-      sources: { bel: bel.length, supplemented },
+      grid_note: note,
+      outages,
+      sources: { bel: bel.length, supplemented, live: liveOutages.length },
       checked: new Date().toISOString(),
     });
 
