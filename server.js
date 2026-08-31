@@ -241,13 +241,18 @@ app.get('/api/users', requireRole('super_admin'), (req, res) => {
 });
 
 const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor', 'minute_auditor', 'scriptor', 'staffing'];
-const ADDITIONAL_ROLES = ['zendesk_auditor', 'minute_auditor'];
 
 app.post('/api/users', requireRole('super_admin'), (req, res) => {
   const { email, name, role, additionalRoles = [] } = req.body;
   if (!email || !name || !role) return res.status(400).json({ error: 'email, name, and role are required' });
   if (!VALID_ROLES.includes(role)) return res.status(400).json({ error: 'invalid role' });
-  const validExtra = additionalRoles.filter(r => ADDITIONAL_ROLES.includes(r));
+  // Any valid role can be granted as an additional role. Filter out
+  // the primary role (redundant) and super_admin (already grants all).
+  const validExtra = [...new Set(
+    (additionalRoles || [])
+      .filter(r => VALID_ROLES.includes(r))
+      .filter(r => r !== role && r !== 'super_admin')
+  )];
   addUser(email, name, role, validExtra);
   res.json({ success: true });
 });

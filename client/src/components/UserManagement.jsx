@@ -142,11 +142,26 @@ export default function UserManagement() {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState('call_center_ops');
-  const [zdAuditor, setZdAuditor] = useState(false);
+  const [extraRoles, setExtraRoles] = useState([]);
+  const [editing, setEditing] = useState(null); // email being edited, or null for "add new"
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [confirmEmail, setConfirmEmail] = useState(null);
+
+  const toggleExtra = (r) => setExtraRoles(prev => prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]);
+  const resetForm = () => { setEmail(''); setName(''); setRole('call_center_ops'); setExtraRoles([]); setEditing(null); };
+  const startEdit = (u) => {
+    setEditing(u.email);
+    setEmail(u.email);
+    setName(u.name);
+    setRole(u.role);
+    setExtraRoles(u.additionalRoles || []);
+    setError('');
+    setSuccess('');
+    // Scroll form into view.
+    setTimeout(() => document.getElementById('user-mgmt-form')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
+  };
 
   async function fetchUsers() {
     try {
@@ -168,15 +183,14 @@ export default function UserManagement() {
     if (!email || !name) { setError('Email and name are required'); return; }
     setAdding(true);
     try {
-      const additionalRoles = (zdAuditor && role !== 'zendesk_auditor') ? ['zendesk_auditor'] : [];
+      // De-dup, drop the primary role and super_admin from extras.
+      const additionalRoles = [...new Set(extraRoles.filter(r => r !== role && r !== 'super_admin'))];
       await api.post('/api/users', { email: email.trim().toLowerCase(), name: name.trim(), role, additionalRoles });
-      setEmail('');
-      setName('');
-      setZdAuditor(false);
-      setSuccess(`${name} added successfully`);
+      setSuccess(`${name} ${editing ? 'updated' : 'added'} successfully`);
+      resetForm();
       await fetchUsers();
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to add user');
+      setError(err.response?.data?.error || 'Failed to save user');
     } finally {
       setAdding(false);
     }
@@ -238,13 +252,18 @@ export default function UserManagement() {
                         <button className="btn btn-ghost btn-sm" onClick={() => setConfirmEmail(null)}>No</button>
                       </span>
                     ) : (
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => handleRemove(u.email)}
-                        style={{ color: 'var(--danger)', fontSize: 12 }}
-                      >
-                        Remove
-                      </button>
+                      <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+                        <button className="btn btn-ghost btn-sm" onClick={() => startEdit(u)} style={{ fontSize: 12 }}>
+                          Edit
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => handleRemove(u.email)}
+                          style={{ color: 'var(--danger)', fontSize: 12 }}
+                        >
+                          Remove
+                        </button>
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -254,8 +273,8 @@ export default function UserManagement() {
         )}
       </div>
 
-      <div className="settings-card">
-        <h3>Add User</h3>
+      <div className="settings-card" id="user-mgmt-form">
+        <h3>{editing ? `Edit ${editing}` : 'Add User'}</h3>
         {error && <div className="notice notice-err mb-12">{error}</div>}
         {success && <div className="notice notice-ok mb-12">{success}</div>}
         <form onSubmit={handleAdd}>
@@ -267,6 +286,7 @@ export default function UserManagement() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="user@answeringlegal.com"
+                disabled={!!editing}
               />
             </div>
             <div className="form-row">
@@ -279,23 +299,51 @@ export default function UserManagement() {
               />
             </div>
             <div className="form-row">
-              <label className="field-label">Role</label>
-              <select value={role} onChange={e => { setRole(e.target.value); if (e.target.value === 'zendesk_auditor') setZdAuditor(false); }}>
+              <label className="field-label">Primary role</label>
+              <select value={role} onChange={e => { setRole(e.target.value); setExtraRoles(prev => prev.filter(r => r !== e.target.value)); }}>
                 {ROLES.map(r => (
                   <option key={r.value} value={r.value}>{r.label}</option>
                 ))}
               </select>
             </div>
           </div>
-          {role !== 'zendesk_auditor' && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13, color: 'var(--text)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={zdAuditor} onChange={e => setZdAuditor(e.target.checked)} />
-              Also grant Farewell Report access
-            </label>
-          )}
-          <button className="btn btn-primary btn-sm mt-12" type="submit" disabled={adding}>
-            {adding ? 'Adding...' : 'Add User'}
-          </button>
+
+          <div style={{ marginTop: 14 }}>
+            <div className="field-label" style={{ marginBottom: 6 }}>Additional roles</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {ROLES.filter(r => r.value !== 'super_admin' && r.value !== role).map(r => {
+                const on = extraRoles.includes(r.value);
+                return (
+                  <button
+                    key={r.value}
+                    type="button"
+                    onClick={() => toggleExtra(r.value)}
+                    style={{
+                      all: 'unset', cursor: 'pointer',
+                      fontSize: 12, padding: '4px 10px', borderRadius: 4,
+                      border: `1px solid ${on ? 'transparent' : 'rgba(255,255,255,0.15)'}`,
+                      ...(on ? ROLE_STYLE[r.value] || { background: 'rgba(255,255,255,0.12)', color: 'var(--text)' } : { color: 'var(--muted)' }),
+                    }}
+                  >
+                    {on && '✓ '}{r.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+              Click to grant access. The primary role and Super Admin are excluded from this list.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <button className="btn btn-primary btn-sm" type="submit" disabled={adding}>
+              {adding ? (editing ? 'Saving...' : 'Adding...') : (editing ? 'Save changes' : 'Add User')}
+            </button>
+            {editing && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={resetForm}>
+                Cancel
+              </button>
+            )}
+          </div>
         </form>
       </div>
 
