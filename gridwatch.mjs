@@ -22,6 +22,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "
 import { randomBytes } from "crypto";
 import { DISTRICTS, placeOf, TOWN_COORDS, norm } from "./client/src/lib/belize-places.mjs";
 import { fetchPowerUpdates } from "./bel-scraper.mjs";
+import { fetchPucAdvisories } from "./puc-scraper.mjs";
 
 const MANUAL_STORE = "./grid-manual-outages.json";
 const NOTIFIED_STORE = "./grid-notified-outages.json";
@@ -396,6 +397,10 @@ If nothing is announced, return {"grid_status":"normal","grid_note":"","outages"
 // budget on every poll. Manual entries have no cache; they merge live.
 const BEL_TTL_MS = 60 * 1000;
 const NEWS_TTL_MS = 10 * 60 * 1000;
+// PUC updates once or twice a day at most — no point hammering it every
+// minute. 5 min gives us a fresh read on any new declaration without
+// spamming the site.
+const PUC_TTL_MS = 5 * 60 * 1000;
 
 router.get("/outages", async (req, res) => {
   try {
@@ -407,6 +412,20 @@ router.get("/outages", async (req, res) => {
       bel = await fetchPowerUpdates();
       setCached("bel", bel);
       belRefreshed = true;
+    }
+
+    // PUC advisories (declarations / shortfall notices). Deterministic
+    // scrape like BEL, but not a timed outage — surfaced separately as
+    // `advisories` so it never affects the affected-staff math.
+    let puc = fresh ? null : getCached("puc", PUC_TTL_MS);
+    if (!puc) {
+      try {
+        puc = await fetchPucAdvisories();
+        setCached("puc", puc);
+      } catch (err) {
+        console.error("PUC scrape failed:", err.message);
+        puc = [];
+      }
     }
 
     let sup = null, supplemented = false;
@@ -465,7 +484,8 @@ router.get("/outages", async (req, res) => {
       grid_status: status,
       grid_note: note,
       outages,
-      sources: { bel: bel.length, supplemented, live: liveOutages.length },
+      advisories: puc,
+      sources: { bel: bel.length, puc: puc.length, supplemented, live: liveOutages.length },
       checked: new Date().toISOString(),
     });
 
@@ -791,6 +811,7 @@ router.get("/sources", (_req, res) => {
   res.json({
     power: [
       { name: "BEL Power Updates", url: "https://www.bel.com.bz/PowerUpdates/", live: true },
+      { name: "PUC Publications", url: "https://puc.bz/publications/", live: true },
       { name: "BEL Facebook", url: "https://www.facebook.com/BelizeElectricityLimited" },
       { name: "BEL 24/7 app", url: "https://play.google.com/store/apps/details?id=bz.com.bel247" },
     ],
