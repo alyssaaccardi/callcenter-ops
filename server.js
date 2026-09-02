@@ -240,7 +240,7 @@ app.get('/api/users', requireRole('super_admin'), (req, res) => {
   res.json({ users: Object.entries(users).map(([email, u]) => ({ email, ...u })) });
 });
 
-const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor', 'minute_auditor', 'scriptor', 'staffing'];
+const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor', 'billing', 'scriptor', 'staffing'];
 
 app.post('/api/users', requireRole('super_admin'), (req, res) => {
   const { email, name, role, additionalRoles = [] } = req.body;
@@ -5563,7 +5563,7 @@ app.post('/api/scriptor/docx', requireRole(...SCRIBE_ROLES), async (req, res) =>
 // and billing category), enrich each row via ChargeOver by COCustomerId, and
 // return a paid/unpaid verdict. Client Type column (AL/RS) hints the tenant;
 // blank/unknown rows fall back to trying both.
-const MINUTE_AUDITOR_ROLES = ['super_admin', 'call_center_ops', 'minute_auditor'];
+const MINUTE_AUDITOR_ROLES = ['super_admin', 'call_center_ops', 'billing'];
 const minuteAuditorUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 const minuteAuditorJobs = new Map();
 
@@ -6542,7 +6542,7 @@ app.get('/api/minute-auditor/results/:jobId', requireRole(...MINUTE_AUDITOR_ROLE
 // junk, blanks) is a misassignment and gets flagged. Only customers created
 // within the last SALESPERSON_AUDITOR_WINDOW_YEARS are checked; older
 // customers predate the salesperson concept.
-const SALESPERSON_AUDITOR_ROLES = ['super_admin', 'call_center_ops', 'minute_auditor'];
+const SALESPERSON_AUDITOR_ROLES = ['super_admin', 'call_center_ops', 'billing'];
 const SALESPERSON_AUDITOR_WINDOW_YEARS = 4;
 const salespersonAuditorUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 const salespersonAuditorJobs = new Map();

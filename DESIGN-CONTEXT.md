@@ -19,7 +19,7 @@ Context for a designer working on this app. Everything below is grounded in the 
 | `support` | Support agents: their queue, account reviews, team leaderboard |
 | `tech` | Tech team: tech queue, app portal (embedded internal app), leaderboard |
 | `zendesk_auditor` | Reads cancellation ticket audits ("The Farewell Reporter") |
-| `minute_auditor` | Runs monthly minute-usage vs. ChargeOver audits |
+| `billing` | Runs billing audits: minute-usage, salesperson attribution, no-charge leaderboard |
 | `newsletter_contributor` | Submits & reviews content for "The Ring Leader" internal newsletter |
 | `scriptor` | Uses the Rob-osetta Stone transcription tool (chrome-less) |
 | `tv_display` | Read-only wall-mounted TV pages, token-authenticated |
@@ -72,7 +72,7 @@ Context for a designer working on this app. Everything below is grounded in the 
 | `user-management` | User Management | `UserManagementModule.jsx` → `components/UserManagement.jsx` | Administration | super_admin |
 | `admin-dashboard` | Admin Dashboard | `AdminDashboard.jsx` | Analytics | super_admin, call_center_ops, zendesk_auditor |
 | `zendesk-auditor` | The Farewell Reporter | `ZendeskAuditor.jsx` | Analytics | super_admin, call_center_ops, zendesk_auditor |
-| `minute-auditor` | Minute Usage Auditor | `MinuteAuditor.jsx` + `.css` | Billing | super_admin, call_center_ops, minute_auditor |
+| `minute-auditor` | Minute Usage Auditor | `MinuteAuditor.jsx` + `.css` | Billing | super_admin, call_center_ops, billing |
 | `ring-leader` | The Ring Leader | `RingLeader.jsx` + `.css` | Newsletter | super_admin, newsletter_contributor |
 | `scriptor` | The Rob-osetta Stone | `Scriptor.jsx` | Tools | super_admin, scriptor |
 

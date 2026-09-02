@@ -29,6 +29,7 @@ import WhatsNew from './components/WhatsNew';
 import ZendeskAuditor from './modules/ZendeskAuditor';
 import MinuteAuditor from './modules/MinuteAuditor';
 import SalespersonAuditor from './modules/SalespersonAuditor';
+import NoChargeLeaderboard from './modules/NoChargeLeaderboard';
 import MitelLeaderboard from './modules/MitelLeaderboard';
 import RingLeader from './modules/RingLeader';
 import Scriptor from './modules/Scriptor';
@@ -50,7 +51,7 @@ function Dashboard() {
     user?.role === 'support'                ? 'support-center'   :
     user?.role === 'tech'                   ? 'tech-center'      :
     user?.role === 'zendesk_auditor'        ? 'zendesk-auditor'  :
-    user?.role === 'minute_auditor'         ? 'minute-auditor'   :
+    user?.role === 'billing'                ? 'minute-auditor'   :
     user?.role === 'newsletter_contributor' ? 'ring-leader'      :
     user?.role === 'scriptor'               ? 'scriptor'         :
     user?.role === 'rob_ai_board'           ? 'rob-ai-board'     :
@@ -68,7 +69,7 @@ function DashboardInner({ user, defaultModule }) {
   const isSupport  = hasRole('super_admin', 'support');
   const isTech     = hasRole('super_admin', 'tech');
   const isAuditor  = hasRole('super_admin', 'zendesk_auditor');
-  const isMinuteAuditor = hasRole('super_admin', 'call_center_ops', 'minute_auditor');
+  const isBilling = hasRole('super_admin', 'call_center_ops', 'billing');
   const isAnalytics = hasRole('super_admin', 'call_center_ops', 'zendesk_auditor'); // gates the Analytics section (Admin Dashboard + Farewell Reporter — tied together)
   const isNewsletter = hasRole('super_admin', 'newsletter_contributor');
   const isScribe     = hasRole('super_admin', 'scriptor');
@@ -92,17 +93,18 @@ function DashboardInner({ user, defaultModule }) {
     settings:           (user?.role === 'super_admin' || user?.role === 'call_center_ops') ? <Settings /> : null,
     'user-management':  user?.role === 'super_admin' ? <UserManagementModule /> : null,
     'zendesk-auditor':  isAnalytics ? <ZendeskAuditor /> : null,
-    'minute-auditor':   isMinuteAuditor ? <MinuteAuditor /> : null,
-    'salesperson-auditor': isMinuteAuditor ? <SalespersonAuditor /> : null,
+    'minute-auditor':   isBilling ? <MinuteAuditor /> : null,
+    'salesperson-auditor': isBilling ? <SalespersonAuditor /> : null,
+    'nocharge-leaderboard': isBilling ? <NoChargeLeaderboard /> : null,
     'ring-leader':      isNewsletter ? <RingLeader /> : null,
     scriptor:           isScribe    ? <Scriptor /> : null,
     'rob-ai-board':     isRobAiBoard ? <RobAiBoardPage /> : null,
     'belize-grid-watch': isStaffing  ? <BelizeGridWatch /> : null,
   };
 
-  const fallback = isOps ? <StatusBoard /> : isSupport ? <SupportCenter /> : isTech ? <TechCenter /> : isNewsletter ? <RingLeader /> : isScribe ? <Scriptor /> : isRobAiBoard ? <RobAiBoardPage /> : isMinuteAuditor ? <MinuteAuditor /> : isStaffing ? <BelizeGridWatch /> : <StatusBoard />;
+  const fallback = isOps ? <StatusBoard /> : isSupport ? <SupportCenter /> : isTech ? <TechCenter /> : isNewsletter ? <RingLeader /> : isScribe ? <Scriptor /> : isRobAiBoard ? <RobAiBoardPage /> : isBilling ? <MinuteAuditor /> : isStaffing ? <BelizeGridWatch /> : <StatusBoard />;
 
-  const isPortal = activeModule === 'app-portal' || activeModule === 'belize-grid-watch';
+  const isPortal = activeModule === 'app-portal' || activeModule === 'belize-grid-watch' || activeModule === 'nocharge-leaderboard';
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
