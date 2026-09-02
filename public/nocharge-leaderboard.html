@@ -168,7 +168,7 @@ details.mapping[open] summary::before{content:"▾ "}
 .controls .f{display:flex; flex-direction:column; gap:3px}
 .controls select, .controls input{width:auto}
 .tscroll{overflow-x:auto; max-height:70vh; overflow-y:auto}
-table{border-collapse:separate; border-spacing:0; width:100%; min-width:900px}
+table{border-collapse:separate; border-spacing:0; width:100%; min-width:1080px}
 th,td{padding:8px 12px; text-align:right; white-space:nowrap}
 th:nth-child(2), td:nth-child(2){text-align:left; white-space:normal; min-width:220px}
 th{
@@ -465,10 +465,12 @@ function aggregate(){
     const disp=canonical(r.co), k=keyOf(disp);
     let g=map.get(k);
     if(!g){ g={company:disp, accts:new Set(), variants:new Set(),
-               nc:{calls:0,msgs:0,mins:0}, all:{calls:0,msgs:0,mins:0}, ncLabels:new Set()};
+               nc:{calls:0,msgs:0,mins:0}, all:{calls:0,msgs:0,mins:0},
+               ncLabels:new Set(), contactCount:0};
             map.set(k,g); }
     g.variants.add(r.co);
     if(r.acct) g.accts.add(r.acct);
+    g.contactCount++;
     g.all.calls+=r.calls; g.all.msgs+=r.msgs; g.all.mins+=r.mins;
     if(re.test(r.contact)){
       g.nc.calls+=r.calls; g.nc.msgs+=r.msgs; g.nc.mins+=r.mins; g.ncLabels.add(r.contact);
@@ -561,7 +563,9 @@ const COLS=[
   {k:"nccalls",t:"NC calls",      sort:"nccalls"},
   {k:"ncmsgs",t:"NC messages",    sort:"ncmsgs"},
   {k:"ncmins",t:"NC minutes",     sort:"ncmins"},
+  {k:"contacts",t:"Contact lines",sort:"contacts"},
   {k:"tot",   t:"All contacts",   sort:"tot"},
+  {k:"allmsgs",t:"All messages",  sort:"allmsgs"},
   {k:"share", t:"Share no-charge",sort:"share"},
   {k:"labels",t:"Labels",         sort:null}
 ];
@@ -570,6 +574,7 @@ function val(g,k){
     case "company": return g.company.toUpperCase();
     case "vol": return g.vol; case "tot": return g.tot; case "share": return g.share;
     case "nccalls": return g.nc.calls; case "ncmsgs": return g.nc.msgs; case "ncmins": return g.nc.mins;
+    case "contacts": return g.contactCount; case "allmsgs": return g.all.msgs;
   }
   return 0;
 }
@@ -613,12 +618,14 @@ function renderTable(groups){
       <td class="num ${g.nc.calls?"":"dim"}">${fmt(g.nc.calls)}</td>
       <td class="num ${g.nc.msgs?"":"dim"}">${fmt(g.nc.msgs)}</td>
       <td class="num ${g.nc.mins?"":"dim"}">${fmt(g.nc.mins)}</td>
+      <td class="num">${fmt(g.contactCount)}</td>
       <td class="num dim">${fmt(g.tot)}</td>
+      <td class="num ${g.all.msgs?"":"dim"}">${fmt(g.all.msgs)}</td>
       <td class="share"><div class="bar"><div class="track"><div class="fill ${cls}" style="width:${Math.min(100,pct).toFixed(1)}%"></div></div><span class="pct">${pct.toFixed(0)}%</span></div></td>
       <td class="num dim">${g.ncLabels.size}</td>
     </tr>`;
   }).join("");
-  $("tbl").tBodies[0].innerHTML = body || `<tr><td colspan="9" class="empty">No clients match those filters.</td></tr>`;
+  $("tbl").tBodies[0].innerHTML = body || `<tr><td colspan="11" class="empty">No clients match those filters.</td></tr>`;
   $("foot").innerHTML = `Showing <b>${fmt(shown.length)}</b> of ${fmt(rows.length)} clients with no-charge activity · ranked by ${esc($("metric").selectedOptions[0].textContent.toLowerCase())} · share is no-charge ÷ that client's total across all contacts`;
   $("tableTitle").textContent = sortKey==="share" ? "Highest no-charge share" : sortKey==="company" ? "Clients A–Z" : "Highest no-charge volume";
 }
@@ -717,11 +724,11 @@ function saveLocally(csv){
   setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 }
 function buildCSV(){
-  const head=["Rank","Company","Account IDs","Name variants","No-charge volume","NC calls","NC messages","NC minutes","All-contact volume","Share no-charge","NC labels"];
+  const head=["Rank","Company","Account IDs","Name variants","No-charge volume","NC calls","NC messages","NC minutes","Contact lines","All-contact volume","All messages","Share no-charge","NC labels"];
   const q=v=>{ const s=String(v==null?"":v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
   return [head.join(",")].concat(VIEW.map((g,i)=>[
     i+1,g.company,[...g.accts].join(" / "),[...g.variants].join(" / "),
-    g.vol,g.nc.calls,g.nc.msgs,g.nc.mins,g.tot,(g.share*100).toFixed(1)+"%",[...g.ncLabels].join(" / ")
+    g.vol,g.nc.calls,g.nc.msgs,g.nc.mins,g.contactCount,g.tot,g.all.msgs,(g.share*100).toFixed(1)+"%",[...g.ncLabels].join(" / ")
   ].map(q).join(","))).join("\n");
 }
 $("exportBtn").onclick=async()=>{
