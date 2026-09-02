@@ -559,15 +559,15 @@ $("clearMerges").onclick=()=>{ MERGES.clear(); recompute(); };
 const COLS=[
   {k:"rank",  t:"#",              sort:null},
   {k:"company",t:"Company",       sort:"company"},
-  {k:"vol",   t:"No-charge",      sort:"vol", hero:true},
-  {k:"nccalls",t:"No-charge calls",    sort:"nccalls"},
-  {k:"ncmsgs",t:"No-charge messages",  sort:"ncmsgs"},
-  {k:"ncmins",t:"No-charge minutes",   sort:"ncmins"},
-  {k:"contacts",t:"Contact lines",sort:"contacts"},
-  {k:"tot",   t:"All contacts",   sort:"tot"},
-  {k:"allmsgs",t:"All messages",  sort:"allmsgs"},
-  {k:"share", t:"Share no-charge",sort:"share"},
-  {k:"labels",t:"Labels",         sort:null}
+  {k:"vol",   t:"No-charge total",      sort:"vol", hero:true},
+  {k:"nccalls",t:"No-charge calls",     sort:"nccalls"},
+  {k:"ncmsgs",t:"No-charge messages",   sort:"ncmsgs"},
+  {k:"ncmins",t:"No-charge minutes",    sort:"ncmins"},
+  {k:"contacts",t:"Contact lines",      sort:"contacts"},
+  {k:"tot",   t:"Account total",        sort:"tot"},
+  {k:"allmsgs",t:"Account messages",    sort:"allmsgs"},
+  {k:"share", t:"Share no-charge",      sort:"share"},
+  {k:"labels",t:"No-charge label variants", sort:null}
 ];
 function val(g,k){
   switch(k){
@@ -724,7 +724,7 @@ function saveLocally(csv){
   setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 }
 function buildCSV(){
-  const head=["Rank","Company","Account IDs","Name variants","No-charge volume","No-charge calls","No-charge messages","No-charge minutes","Contact lines","All-contact volume","All messages","Share no-charge","No-charge labels"];
+  const head=["Rank","Company","Account IDs","Name variants","No-charge total","No-charge calls","No-charge messages","No-charge minutes","Contact lines","Account total","Account messages","Share no-charge","No-charge label variants"];
   const q=v=>{ const s=String(v==null?"":v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
   return [head.join(",")].concat(VIEW.map((g,i)=>[
     i+1,g.company,[...g.accts].join(" / "),[...g.variants].join(" / "),
