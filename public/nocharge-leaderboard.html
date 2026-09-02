@@ -560,9 +560,9 @@ const COLS=[
   {k:"rank",  t:"#",              sort:null},
   {k:"company",t:"Company",       sort:"company"},
   {k:"vol",   t:"No-charge",      sort:"vol", hero:true},
-  {k:"nccalls",t:"NC calls",      sort:"nccalls"},
-  {k:"ncmsgs",t:"NC messages",    sort:"ncmsgs"},
-  {k:"ncmins",t:"NC minutes",     sort:"ncmins"},
+  {k:"nccalls",t:"No-charge calls",    sort:"nccalls"},
+  {k:"ncmsgs",t:"No-charge messages",  sort:"ncmsgs"},
+  {k:"ncmins",t:"No-charge minutes",   sort:"ncmins"},
   {k:"contacts",t:"Contact lines",sort:"contacts"},
   {k:"tot",   t:"All contacts",   sort:"tot"},
   {k:"allmsgs",t:"All messages",  sort:"allmsgs"},
@@ -724,7 +724,7 @@ function saveLocally(csv){
   setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 }
 function buildCSV(){
-  const head=["Rank","Company","Account IDs","Name variants","No-charge volume","NC calls","NC messages","NC minutes","Contact lines","All-contact volume","All messages","Share no-charge","NC labels"];
+  const head=["Rank","Company","Account IDs","Name variants","No-charge volume","No-charge calls","No-charge messages","No-charge minutes","Contact lines","All-contact volume","All messages","Share no-charge","No-charge labels"];
   const q=v=>{ const s=String(v==null?"":v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
   return [head.join(",")].concat(VIEW.map((g,i)=>[
     i+1,g.company,[...g.accts].join(" / "),[...g.variants].join(" / "),
