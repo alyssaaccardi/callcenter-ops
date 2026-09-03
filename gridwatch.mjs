@@ -23,6 +23,7 @@ import { randomBytes } from "crypto";
 import { DISTRICTS, placeOf, TOWN_COORDS, norm } from "./client/src/lib/belize-places.mjs";
 import { fetchPowerUpdates } from "./bel-scraper.mjs";
 import { fetchPucAdvisories } from "./puc-scraper.mjs";
+import { fetchBzInternetStatus } from "./ioda-fetcher.mjs";
 
 const MANUAL_STORE = "./grid-manual-outages.json";
 const NOTIFIED_STORE = "./grid-notified-outages.json";
@@ -401,6 +402,8 @@ const NEWS_TTL_MS = 10 * 60 * 1000;
 // minute. 5 min gives us a fresh read on any new declaration without
 // spamming the site.
 const PUC_TTL_MS = 5 * 60 * 1000;
+// IODA signals arrive on a 30-min cadence; 5 min is well under that.
+const IODA_TTL_MS = 5 * 60 * 1000;
 
 router.get("/outages", async (req, res) => {
   try {
@@ -425,6 +428,17 @@ router.get("/outages", async (req, res) => {
       } catch (err) {
         console.error("PUC scrape failed:", err.message);
         puc = [];
+      }
+    }
+
+    let internet = fresh ? null : getCached("ioda", IODA_TTL_MS);
+    if (!internet) {
+      try {
+        internet = await fetchBzInternetStatus();
+        setCached("ioda", internet);
+      } catch (err) {
+        console.error("IODA fetch failed:", err.message);
+        internet = { status: "unknown", note: "", signals: null, source: "https://ioda.inetintel.cc.gatech.edu/country/BZ", checked: null };
       }
     }
 
@@ -483,6 +497,9 @@ router.get("/outages", async (req, res) => {
     res.json({
       grid_status: status,
       grid_note: note,
+      internet_status: internet.status,
+      internet_note: internet.note,
+      internet: internet,
       outages,
       advisories: puc,
       sources: { bel: bel.length, puc: puc.length, supplemented, live: liveOutages.length },
@@ -825,6 +842,7 @@ router.get("/sources", (_req, res) => {
       { name: "Centaur Communications", url: "https://www.facebook.com/centaurcommunications" },
       { name: "Nexgen", url: "https://www.facebook.com/nexgenbelize" },
       { name: "Beeline", url: "https://www.facebook.com/BeelineInternetBelize" },
+      { name: "IODA · country page", url: "https://ioda.inetintel.cc.gatech.edu/country/BZ", live: true },
     ],
   });
 });

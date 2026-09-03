@@ -85,7 +85,12 @@ function useOutages() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Outage lookup failed (${res.status})`);
       setOutages((data.outages || []).filter((o) => statusOf(o) !== "past"));
-      setGrid({ status: data.grid_status || "normal", note: data.grid_note || "" });
+      setGrid({
+        status: data.grid_status || "normal",
+        note: data.grid_note || "",
+        internetStatus: data.internet_status || "unknown",
+        internetNote: data.internet_note || "",
+      });
       setChecked(data.checked ? new Date(data.checked) : new Date());
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }, []);
@@ -1556,6 +1561,8 @@ export default function BelizeGridWatch() {
 
   const visible = selected ? outages.filter((o) => o.districts.includes(selected)) : outages;
   const gridTone = grid?.status === "emergency" ? C.red : grid?.status === "strained" ? C.amber : C.mint;
+  const internetTone = grid?.internetStatus === "outage" ? C.red : grid?.internetStatus === "degraded" ? C.amber : grid?.internetStatus === "unknown" ? C.dim : C.mint;
+  const internetLabel = grid?.internetStatus === "outage" ? "outage" : grid?.internetStatus === "degraded" ? "degraded" : grid?.internetStatus === "unknown" ? "—" : "normal";
 
   return (
     <div style={{ background: C.ink, color: C.text, fontFamily: SANS, minHeight: "100%" }} className="p-4 md:p-6">
@@ -1746,8 +1753,9 @@ export default function BelizeGridWatch() {
 
       {tab === "grid" && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
             <Stat icon={Activity} label="National grid" value={grid ? grid.status : "—"} tone={gridTone} sub={grid?.note} />
+            <Stat icon={Radio} label="National internet" value={internetLabel} tone={internetTone} sub={grid?.internetNote || "IODA · ioda.inetintel.cc.gatech.edu"} />
             <Stat icon={Zap} label="Districts dark now" value={DISTRICTS.filter((d) => byDistrict[d].worst === "active").length} tone={C.red} />
             <Stat icon={Clock} label="Districts scheduled" value={DISTRICTS.filter((d) => byDistrict[d].worst === "upcoming").length} tone={C.amber} />
             <Stat icon={Users} label="Staff located" value={roster.agents.length} tone={roster.agents.length ? C.mint : C.dim} />
