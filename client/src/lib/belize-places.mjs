@@ -87,3 +87,10 @@ export const TOWN_COORDS = {
   wagierale: [16.970, -88.233], sarawee: [16.983, -88.245],
   "san antonio toledo": [16.258, -88.976], "big falls": [16.284, -88.799],
 };
+
+// placeOf() norms addresses ("Bradley's Bank" -> "bradley s bank"), so map
+// the normalized form of every key to the same coords or lookups silently miss.
+for (const [k, v] of Object.entries(TOWN_COORDS)) {
+  const n = norm(k);
+  if (n !== k && !(n in TOWN_COORDS)) TOWN_COORDS[n] = v;
+}
