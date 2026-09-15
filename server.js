@@ -4935,6 +4935,10 @@ const DAILY_DECLINES_COLS = {
   weekOf:       'date_mknapcya',
 };
 const DAILY_DECLINES_TENANTS = ['AL', 'RS', 'ARE', 'TS'];
+// Rows with a blank or unrecognized Company column land here instead of being
+// silently dropped from the total — ops needs to see them so they can tag them.
+const DAILY_DECLINES_UNTAGGED = 'UNTAGGED';
+const DAILY_DECLINES_ALL_BUCKETS = [...DAILY_DECLINES_TENANTS, DAILY_DECLINES_UNTAGGED];
 const DAILY_DECLINES_EXCLUDED_STATUSES = new Set(['paid']);
 
 async function fetchDailyDeclinesOutstanding() {
@@ -4959,7 +4963,7 @@ async function fetchDailyDeclinesOutstanding() {
   } while (cursor);
 
   const buckets = {};
-  for (const t of DAILY_DECLINES_TENANTS) {
+  for (const t of DAILY_DECLINES_ALL_BUCKETS) {
     buckets[t] = { count: 0, totalOverdue: 0, customers: [], configured: true };
   }
 
@@ -4969,8 +4973,10 @@ async function fetchDailyDeclinesOutstanding() {
     const status = cv[DAILY_DECLINES_COLS.status]?.text || '';
     if (DAILY_DECLINES_EXCLUDED_STATUSES.has(status.toLowerCase())) continue;
 
-    const tenant = cv[DAILY_DECLINES_COLS.company]?.text || '';
-    if (!buckets[tenant]) continue;
+    const companyText = cv[DAILY_DECLINES_COLS.company]?.text || '';
+    const bucket = DAILY_DECLINES_TENANTS.includes(companyText)
+      ? companyText
+      : DAILY_DECLINES_UNTAGGED;
 
     const amountOverdue = parseFloat(cv[DAILY_DECLINES_COLS.balance]?.text || '0') || 0;
     if (amountOverdue <= 0) continue;
@@ -4990,7 +4996,7 @@ async function fetchDailyDeclinesOutstanding() {
       if (raw) paymentUrl = JSON.parse(raw)?.url || null;
     } catch { /* ignore */ }
 
-    buckets[tenant].customers.push({
+    buckets[bucket].customers.push({
       customerId:    item.id,
       company:       item.name || null,
       email:         cv[DAILY_DECLINES_COLS.email]?.text || null,
@@ -5000,19 +5006,20 @@ async function fetchDailyDeclinesOutstanding() {
       amountOverdue,
       status,
       planTier:      null,
+      companyRaw:    bucket === DAILY_DECLINES_UNTAGGED ? (companyText || null) : null,
       url:           paymentUrl || `https://answeringlegal-unit.monday.com/boards/${DAILY_DECLINES_BOARD_ID}/pulses/${item.id}`,
     });
-    buckets[tenant].count += 1;
-    buckets[tenant].totalOverdue += amountOverdue;
+    buckets[bucket].count += 1;
+    buckets[bucket].totalOverdue += amountOverdue;
   }
 
-  for (const t of DAILY_DECLINES_TENANTS) {
+  for (const t of DAILY_DECLINES_ALL_BUCKETS) {
     buckets[t].customers.sort((a, b) => (b.amountOverdue || 0) - (a.amountOverdue || 0));
   }
 
   const combined = {
-    count:        DAILY_DECLINES_TENANTS.reduce((s, t) => s + buckets[t].count, 0),
-    totalOverdue: DAILY_DECLINES_TENANTS.reduce((s, t) => s + buckets[t].totalOverdue, 0),
+    count:        DAILY_DECLINES_ALL_BUCKETS.reduce((s, t) => s + buckets[t].count, 0),
+    totalOverdue: DAILY_DECLINES_ALL_BUCKETS.reduce((s, t) => s + buckets[t].totalOverdue, 0),
   };
 
   return {

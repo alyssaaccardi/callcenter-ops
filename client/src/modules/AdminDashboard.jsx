@@ -589,6 +589,9 @@ export default function AdminDashboard() {
             <OutstandingTenant label="RS — Ring Savvy"       tenant={outstanding?.RS} />
             <OutstandingTenant label="ARE"                   tenant={outstanding?.ARE} />
             <OutstandingTenant label="TS"                    tenant={outstanding?.TS} />
+            {outstanding?.UNTAGGED?.count > 0 && (
+              <OutstandingTenant label="UNTAGGED — set Company on Monday board" tenant={outstanding.UNTAGGED} />
+            )}
           </div>
         </Card>
 
