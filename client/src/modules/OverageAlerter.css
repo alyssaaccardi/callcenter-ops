@@ -1,0 +1,306 @@
+/* ── Overage Alerter — module-specific styles ─────────────────────────
+   Primitives come from components/ui and styles/tokens.css. What's here
+   is the page scaffold, the threshold bar, the summary tiles, and the
+   month heat strip that carries most of the meaning in this module. */
+
+.oa-root {
+  padding: 28px 32px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  color: var(--text);
+}
+
+/* ── Page header ─────────────────────────────────────────────────── */
+.oa-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+}
+.oa-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--track-micro);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.oa-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-h1);
+  line-height: var(--lh-h1);
+  font-weight: var(--fw-bold);
+  margin: 2px 0 4px;
+  color: var(--text-strong);
+}
+.oa-sub {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  max-width: 68ch;
+}
+
+.oa-error {
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--crit-050);
+  border: 1px solid var(--crit-100);
+  color: var(--crit-700);
+  font-size: var(--fs-sm);
+}
+
+.oa-muted { color: var(--text-muted); }
+.oa-mono  { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.oa-num   { text-align: right; }
+
+/* ── Launch / running ────────────────────────────────────────────── */
+.oa-launch { min-height: 320px; display: grid; place-items: center; }
+
+.oa-running {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-8) var(--sp-4);
+}
+.oa-running-spinner {
+  width: 34px; height: 34px;
+  border-radius: var(--r-full);
+  border: 3px solid var(--border);
+  border-top-color: var(--royal-600);
+  animation: oa-spin 0.8s linear infinite;
+}
+@keyframes oa-spin { to { transform: rotate(360deg); } }
+
+.oa-running-phase {
+  font-family: var(--font-display);
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-semibold);
+  color: var(--text-strong);
+  text-transform: capitalize;
+}
+.oa-running-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 280px;
+  font-size: var(--fs-sm);
+}
+.oa-running-line {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  color: var(--text-muted);
+}
+
+/* ── Threshold bar ───────────────────────────────────────────────── */
+.oa-controls-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--sp-4);
+  align-items: end;
+}
+.oa-control { display: flex; flex-direction: column; gap: 6px; }
+.oa-control-label {
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
+  color: var(--text);
+}
+.oa-control-label strong {
+  font-family: var(--font-mono);
+  color: var(--royal-700);
+}
+.oa-control-hint {
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+}
+.oa-range { width: 100%; accent-color: var(--royal-600); }
+
+.oa-controls-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.oa-reset {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--royal-600);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.oa-reset:hover { color: var(--royal-700); }
+
+/* ── Summary tiles ───────────────────────────────────────────────── */
+.oa-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-4);
+}
+.oa-tile {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--sp-4) var(--sp-5);
+  box-shadow: var(--elev-1);
+}
+.oa-tile-label {
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--track-micro);
+  color: var(--text-muted);
+  font-weight: var(--fw-semibold);
+}
+.oa-tile-value {
+  font-family: var(--font-display);
+  font-size: var(--fs-h2);
+  font-weight: var(--fw-bold);
+  color: var(--text-strong);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Table ───────────────────────────────────────────────────────── */
+.oa-table-card { padding: 0; overflow: hidden; }
+.oa-table-scroll { overflow-x: auto; }
+.oa-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+.oa-table th {
+  text-align: left;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border-strong);
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--track-micro);
+  color: var(--text-muted);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.oa-table th.oa-num { text-align: right; }
+.oa-sortable { cursor: pointer; user-select: none; }
+.oa-sortable:hover { color: var(--text); }
+.oa-th-expand { width: 28px; }
+
+.oa-table td {
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.oa-row { cursor: pointer; transition: background var(--dur-fast) var(--ease); }
+.oa-row:hover { background: var(--surface-sunken); }
+.oa-td-expand { color: var(--text-muted); text-align: center; }
+
+.oa-cust { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.oa-cust-name {
+  font-weight: var(--fw-semibold);
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 30ch;
+}
+.oa-cust-sub {
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 34ch;
+}
+
+/* ── Month heat strip ────────────────────────────────────────────── */
+.oa-months-th, .oa-months-td { min-width: 200px; }
+.oa-strip { display: flex; gap: 3px; }
+.oa-cell {
+  width: 14px;
+  height: 22px;
+  border-radius: 3px;
+  flex: none;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+}
+.oa-cell[data-tone="sev1"] { background: var(--warn-050); border-color: var(--warn-100); }
+.oa-cell[data-tone="sev2"] { background: var(--warn-100); border-color: var(--warn-500); }
+.oa-cell[data-tone="sev3"] { background: var(--crit-100); border-color: var(--crit-500); }
+.oa-cell[data-tone="sev4"] { background: var(--crit-600); border-color: var(--crit-700); }
+/* A waived month still shows the customer went over, but hollow — they
+   weren't actually made to pay for it. */
+.oa-cell[data-waived="yes"] {
+  background: repeating-linear-gradient(
+    45deg, transparent, transparent 3px, var(--border-strong) 3px, var(--border-strong) 4px
+  );
+}
+
+/* ── Expanded detail ─────────────────────────────────────────────── */
+.oa-detail-row > td { background: var(--surface-sunken); padding: 0; }
+.oa-detail { padding: var(--sp-4) var(--sp-6) var(--sp-5) 48px; }
+.oa-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+.oa-detail-table th {
+  position: static;
+  background: none;
+  border-bottom: 1px solid var(--border);
+  padding: 6px var(--sp-3);
+}
+.oa-detail-table td {
+  padding: 6px var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+.oa-detail-table tr:last-child td { border-bottom: none; }
+.oa-waived-tag { margin-left: var(--sp-2); }
+.oa-detail-note {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+}
+
+.oa-pct-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--r-full);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.oa-pct-pill[data-tone="sev1"] { background: var(--warn-050); color: var(--warn-700); }
+.oa-pct-pill[data-tone="sev2"] { background: var(--warn-100); color: var(--warn-700); }
+.oa-pct-pill[data-tone="sev3"] { background: var(--crit-100); color: var(--crit-700); }
+.oa-pct-pill[data-tone="sev4"] { background: var(--crit-600); color: var(--white); }
+.oa-pct-pill[data-tone="none"] { background: var(--surface-sunken); color: var(--text-muted); }
+
+/* ── Legend ──────────────────────────────────────────────────────── */
+.oa-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+.oa-legend .oa-cell { width: 12px; height: 12px; margin-left: var(--sp-3); }
+
+@media (max-width: 900px) {
+  .oa-root { padding: 20px 16px 48px; }
+  .oa-cust-name, .oa-cust-sub { max-width: 20ch; }
+}

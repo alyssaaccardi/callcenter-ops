@@ -6541,6 +6541,344 @@ app.get('/api/minute-auditor/results/:jobId', requireRole(...MINUTE_AUDITOR_ROLE
   res.json(job);
 });
 
+// ─── Overage Alerter ─────────────────────────────────────────────────────────
+// Which customers keep paying minute overages? Pulls every invoice carrying an
+// "Overage" line from both ChargeOver tenants, files each under the cycle whose
+// minutes it bills, and measures the overage against the customer's plan size.
+//
+// Three ChargeOver behaviors drive the shape of this code:
+//   1. The "Overage" item id is PER-TENANT (AL 52, RS 39), and RS reuses id 52
+//      for an unrelated "200 minutes free" item. Ids are resolved by name at
+//      run time — hardcoding 52 silently audits the wrong item on RS.
+//   2. CO drops a `date:` filter when it's combined with a `line_items.item_id:`
+//      filter — no error, it just returns unfiltered rows (a
+//      GREATER_EQUAL:2026-06-01 query returns 2018 invoices). The window is
+//      therefore enforced here, by walking date:desc pages until we pass the
+//      cutoff.
+//   3. `expand=line_items` returns line items on the LIST endpoint, so the
+//      minutes and rate come back without a detail call per invoice.
+const OVERAGE_ALERTER_ROLES = ['super_admin', 'call_center_ops', 'billing'];
+// Rolling window. 13 months so a full 12 months of usage cycles is covered even
+// though each invoice bills the PREVIOUS cycle (Sept invoices → August usage).
+const OVERAGE_ALERTER_WINDOW_MONTHS = 13;
+const overageAlerterJobs = new Map();
+
+// "YYYY-MM" arithmetic. delta is signed.
+function shiftYearMonth(ym, delta) {
+  const m = String(ym).match(/^(\d{4})-(\d{2})/);
+  if (!m) return null;
+  const d = new Date(Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+// Classify a tenant's overage-related items. Charged items are what we count;
+// waived items still mark the month (the customer DID go over) but are flagged
+// so a waived month is visibly different from one they actually paid.
+// Excluded: "Overage Protection Discount 500-Test" and "Overage Charges-Test"
+// (test/scratch items) and anything that is a protection/discount add-on rather
+// than an overage charge.
+async function resolveOverageItems(tenant) {
+  const items = await chargeoverListAll(tenant, '/item', {});
+  const charged = [];
+  const waived = [];
+  for (const it of items) {
+    const name = String(it.name || '').trim();
+    if (!/overage/i.test(name)) continue;
+    if (String(it.item_type || '').toLowerCase() === 'discount') continue;
+    if (/test/i.test(name)) continue;
+    if (/protection|discount/i.test(name)) continue;
+    (/waiv/i.test(name) ? waived : charged).push({ id: it.item_id, name });
+  }
+  return { charged, waived };
+}
+
+// Walk date:desc pages of invoices carrying `itemId`, stopping at `cutoffDate`
+// (inclusive, "YYYY-MM-DD"). See note 2 above for why the cutoff can't be a
+// query filter.
+async function fetchOverageInvoices(tenant, itemId, cutoffDate, progressCb) {
+  const PAGE = 200;
+  const out = [];
+  let offset = 0;
+  while (true) {
+    const page = await chargeoverGet(tenant, '/invoice', {
+      where: `line_items.item_id:EQUALS:${itemId}`,
+      expand: 'line_items',
+      order: 'date:desc',
+      limit: PAGE,
+      offset,
+    });
+    if (!Array.isArray(page) || page.length === 0) break;
+    let reachedCutoff = false;
+    for (const inv of page) {
+      const date = String(inv.date || '').slice(0, 10);
+      if (!date) continue;
+      if (date < cutoffDate) { reachedCutoff = true; continue; }
+      out.push(inv);
+    }
+    progressCb?.(out.length);
+    if (reachedCutoff || page.length < PAGE) break;
+    offset += page.length;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return out;
+}
+
+// The customer's plan size in minutes, from their subscription. Prefers a live
+// subscription; falls back to the most recent one so a just-canceled customer
+// still shows the plan their overages were measured against.
+function planMinutesForCustomer(pkgs) {
+  if (!Array.isArray(pkgs) || pkgs.length === 0) return { planMinutes: null, planRate: null, subStatus: null };
+  const active = pkgs.find(p => String(p.package_status_str || '').startsWith('active'));
+  const sub = active || pkgs.slice().sort((a, b) =>
+    String(b.package_id).localeCompare(String(a.package_id), undefined, { numeric: true }))[0];
+  return {
+    planMinutes: parseNumericPlan(sub?.custom_2),
+    planRate:    parseRate(sub?.custom_1),
+    subStatus:   sub?.package_status_str || null,
+  };
+}
+
+// Longest run of consecutive calendar months in `months` (sorted "YYYY-MM"),
+// plus the run that ends at the most recent one.
+function overageStreaks(months) {
+  if (months.length === 0) return { maxStreak: 0, currentStreak: 0 };
+  let maxStreak = 1;
+  let run = 1;
+  for (let i = 1; i < months.length; i++) {
+    run = shiftYearMonth(months[i - 1], 1) === months[i] ? run + 1 : 1;
+    if (run > maxStreak) maxStreak = run;
+  }
+  // `run` is still the length of the final run, which ends at the last month.
+  return { maxStreak, currentStreak: run };
+}
+
+async function runOverageAlerterJob(jobId) {
+  const job = overageAlerterJobs.get(jobId);
+  if (!job) return;
+
+  const now = new Date();
+  const cutoffDate = new Date(Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth() - OVERAGE_ALERTER_WINDOW_MONTHS, 1,
+  )).toISOString().slice(0, 10);
+
+  try {
+    // ── Phase 1: customers + subscriptions (plan size lives on the sub) ──
+    job.phase = 'prefetching';
+    const tenants = ['AL', 'RS'].filter(t => CHARGEOVER_TENANTS[t]?.auth);
+    if (tenants.length === 0) throw new Error('No ChargeOver tenant is configured');
+
+    const prefetched = {};
+    await Promise.all(tenants.map(async t => {
+      prefetched[t] = await prefetchTenantData(t, (label, n) => { job.prefetch[label] = n; });
+    }));
+
+    // ── Phase 2: every overage invoice in the window, per tenant ──
+    job.phase = 'fetching invoices';
+    const invoiceRows = [];
+    for (const tenant of tenants) {
+      const { charged, waived } = await resolveOverageItems(tenant);
+      job.itemsResolved[tenant] = {
+        charged: charged.map(i => `${i.id} "${i.name}"`),
+        waived:  waived.map(i => `${i.id} "${i.name}"`),
+      };
+      if (charged.length === 0) {
+        console.warn(`[overage-alerter] ${tenant}: no "Overage" item found — skipping tenant`);
+        continue;
+      }
+      const waivedIds = new Set(waived.map(i => i.id));
+      const wanted = new Set([...charged, ...waived].map(i => i.id));
+
+      // An invoice can carry both a charged and a waived overage line, so it
+      // comes back from more than one item query — dedupe by invoice id before
+      // reading line items or those minutes get counted twice.
+      const invoicesById = new Map();
+      for (const item of [...charged, ...waived]) {
+        const invs = await fetchOverageInvoices(tenant, item.id, cutoffDate,
+          n => { job.prefetch[`${tenant} overage invoices`] = invoicesById.size + n; });
+        for (const inv of invs) invoicesById.set(String(inv.invoice_id), inv);
+      }
+      job.prefetch[`${tenant} overage invoices`] = invoicesById.size;
+
+      for (const inv of invoicesById.values()) {
+        // A voided invoice was never collected — ops voids overage invoices
+        // when an account goes to non-payment. It isn't an overage the
+        // customer was charged for.
+        if (inv.is_void || inv.void_datetime) continue;
+        for (const line of (inv.line_items || [])) {
+          if (!wanted.has(line.item_id)) continue;
+          const minutes = Number(line.line_quantity);
+          if (!Number.isFinite(minutes) || minutes <= 0) continue;
+          invoiceRows.push({
+            tenant,
+            customerId: String(inv.customer_id),
+            invoiceId:  inv.invoice_id,
+            invoiceDate: String(inv.date || '').slice(0, 10),
+            // The invoice bills the PREVIOUS cycle — CO's own line reads
+            // "Minute overage usage charge occurring in the previous billing
+            // cycle" — so a 9/15 invoice is August's usage.
+            usageMonth: shiftYearMonth(String(inv.date || '').slice(0, 7), -1),
+            minutes,
+            rate:   parseRate(line.line_rate),
+            amount: Number(line.line_total) || 0,
+            waived: waivedIds.has(line.item_id),
+            itemName: line.item_name || null,
+          });
+        }
+      }
+    }
+    job.invoiceCount = invoiceRows.length;
+
+    // ── Phase 3: roll up per customer per usage month ──
+    job.phase = 'aggregating';
+    const byCustomer = new Map();   // "TENANT:customerId" → record
+    for (const row of invoiceRows) {
+      if (!row.usageMonth) continue;
+      // customer_ids overlap between AL and RS — always key by tenant too.
+      const key = `${row.tenant}:${row.customerId}`;
+      let rec = byCustomer.get(key);
+      if (!rec) {
+        const cust = prefetched[row.tenant]?.customerById.get(row.customerId) || null;
+        const pkgs = prefetched[row.tenant]?.packagesByCustomer.get(row.customerId) || [];
+        const plan = planMinutesForCustomer(pkgs);
+        rec = {
+          key,
+          tenant: row.tenant,
+          customerId: row.customerId,
+          company: cust?.company || null,
+          email: cust?.superuser_email || cust?.email || null,
+          customerStatus: cust?.customer_status_str || null,
+          ...plan,
+          months: new Map(),
+        };
+        byCustomer.set(key, rec);
+      }
+      let m = rec.months.get(row.usageMonth);
+      if (!m) {
+        m = { month: row.usageMonth, minutes: 0, amount: 0, rate: null, waivedMinutes: 0, waivedAmount: 0, invoices: [] };
+        rec.months.set(row.usageMonth, m);
+      }
+      if (row.waived) { m.waivedMinutes += row.minutes; m.waivedAmount += row.amount; }
+      else            { m.minutes       += row.minutes; m.amount       += row.amount; }
+      if (m.rate == null && row.rate != null) m.rate = row.rate;
+      m.invoices.push({
+        invoiceId: row.invoiceId, invoiceDate: row.invoiceDate,
+        minutes: row.minutes, amount: row.amount, waived: row.waived, itemName: row.itemName,
+      });
+    }
+
+    // ── Phase 4: per-customer percentages and streaks ──
+    const results = [];
+    for (const rec of byCustomer.values()) {
+      const months = [...rec.months.values()].sort((a, b) => a.month.localeCompare(b.month));
+      for (const m of months) {
+        const totalMinutes = m.minutes + m.waivedMinutes;
+        // "% over plan" = overage minutes as a share of the plan. A 400-minute
+        // plan with 668 overage minutes is 167% over.
+        m.pctOverPlan = rec.planMinutes > 0 ? (totalMinutes / rec.planMinutes) * 100 : null;
+        m.totalMinutes = totalMinutes;
+        m.totalAmount  = m.amount + m.waivedAmount;
+        m.fullyWaived  = m.minutes === 0 && m.waivedMinutes > 0;
+      }
+      const { maxStreak, currentStreak } = overageStreaks(months.map(m => m.month));
+      results.push({
+        ...rec,
+        months,
+        monthCount: months.length,
+        firstMonth: months[0]?.month || null,
+        lastMonth:  months[months.length - 1]?.month || null,
+        maxStreak,
+        currentStreak,
+        totalMinutes: months.reduce((s, m) => s + m.totalMinutes, 0),
+        totalAmount:  months.reduce((s, m) => s + m.totalAmount, 0),
+        // Worst single month, for sorting/triage.
+        peakPctOverPlan: months.reduce((s, m) => m.pctOverPlan != null && m.pctOverPlan > s ? m.pctOverPlan : s, 0),
+      });
+      job.done = results.length;
+    }
+    results.sort((a, b) => b.currentStreak - a.currentStreak || b.totalAmount - a.totalAmount);
+
+    // The most recent usage month anywhere in the data — the client uses this
+    // to tell an ongoing streak from one that ended months ago.
+    const latestMonth = results.reduce((s, r) => (r.lastMonth && r.lastMonth > s ? r.lastMonth : s), '');
+
+    job.results = results;
+    job.total = results.length;
+    job.done = results.length;
+    job.latestMonth = latestMonth || null;
+    job.windowCutoffDate = cutoffDate;
+    job.windowMonths = OVERAGE_ALERTER_WINDOW_MONTHS;
+    job.status = 'done';
+    job.phase = 'done';
+    job.finishedAt = Date.now();
+  } catch (e) {
+    console.error('[overage-alerter] job failed:', e.message);
+    job.status = 'error';
+    job.error = e.message;
+    job.finishedAt = Date.now();
+  }
+}
+
+app.post('/api/overage-alerter/run', requireRole(...OVERAGE_ALERTER_ROLES), (req, res) => {
+  const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  overageAlerterJobs.set(jobId, {
+    status: 'running',
+    phase: 'starting',
+    prefetch: {},
+    itemsResolved: {},
+    results: [],
+    total: 0,
+    done: 0,
+    invoiceCount: 0,
+    startedAt: Date.now(),
+    finishedAt: null,
+  });
+
+  runOverageAlerterJob(jobId).catch(err => {
+    const job = overageAlerterJobs.get(jobId);
+    if (job) { job.status = 'error'; job.error = err.message; }
+  });
+
+  const cutoff = Date.now() - 2 * 60 * 60 * 1000;
+  for (const [id, j] of overageAlerterJobs.entries()) {
+    if ((j.finishedAt || j.startedAt) < cutoff) overageAlerterJobs.delete(id);
+  }
+
+  res.json({ jobId });
+});
+
+app.get('/api/overage-alerter/stream/:jobId', requireRole(...OVERAGE_ALERTER_ROLES), (req, res) => {
+  const job = overageAlerterJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const interval = setInterval(() => {
+    const current = overageAlerterJobs.get(req.params.jobId);
+    if (!current) { clearInterval(interval); res.end(); return; }
+    const payload = {
+      done: current.done, total: current.total, status: current.status,
+      phase: current.phase, prefetch: current.prefetch, invoiceCount: current.invoiceCount,
+    };
+    res.write(`data: ${JSON.stringify({ type: 'progress', ...payload })}\n\n`);
+    if (current.status === 'done' || current.status === 'error') {
+      res.write(`data: ${JSON.stringify({ type: 'done', ...payload, error: current.error || null })}\n\n`);
+      clearInterval(interval);
+      res.end();
+    }
+  }, 700);
+
+  req.on('close', () => clearInterval(interval));
+});
+
+app.get('/api/overage-alerter/results/:jobId', requireRole(...OVERAGE_ALERTER_ROLES), (req, res) => {
+  const job = overageAlerterJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job);
+});
+
 // ─── Salesperson Auditor ─────────────────────────────────────────────────────
 // Same CSV as the minute auditor, different question: is the CO salesperson
 // field on the matched customer a real salesperson? Real salespeople in CO

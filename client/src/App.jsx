@@ -28,6 +28,7 @@ import AdminTVPage from './pages/AdminTVPage';
 import WhatsNew from './components/WhatsNew';
 import ZendeskAuditor from './modules/ZendeskAuditor';
 import MinuteAuditor from './modules/MinuteAuditor';
+import OverageAlerter from './modules/OverageAlerter';
 import SalespersonAuditor from './modules/SalespersonAuditor';
 import NoChargeLeaderboard from './modules/NoChargeLeaderboard';
 import MitelLeaderboard from './modules/MitelLeaderboard';
@@ -95,6 +96,7 @@ function DashboardInner({ user, defaultModule }) {
     'zendesk-auditor':  isAnalytics ? <ZendeskAuditor /> : null,
     'minute-auditor':   isBilling ? <MinuteAuditor /> : null,
     'salesperson-auditor': isBilling ? <SalespersonAuditor /> : null,
+    'overage-alerter':  isBilling ? <OverageAlerter /> : null,
     'nocharge-leaderboard': isBilling ? <NoChargeLeaderboard /> : null,
     'ring-leader':      isNewsletter ? <RingLeader /> : null,
     scriptor:           isScribe    ? <Scriptor /> : null,
