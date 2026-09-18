@@ -6585,9 +6585,15 @@ app.get('/api/minute-auditor/results/:jobId', requireRole(...MINUTE_AUDITOR_ROLE
 //   3. `expand=line_items` returns line items on the LIST endpoint, so the
 //      minutes and rate come back without a detail call per invoice.
 const OVERAGE_ALERTER_ROLES = ['super_admin', 'call_center_ops', 'billing'];
-// Rolling window. 13 months so a full 12 months of usage cycles is covered even
-// though each invoice bills the PREVIOUS cycle (Sept invoices → August usage).
-const OVERAGE_ALERTER_WINDOW_MONTHS = 13;
+// How many billing cycles each customer is shown. Three is what a biller can
+// act on: enough to tell a chronic overager from a one-off spike, without a
+// wall of history. Longer-range analysis lives on the Monday board instead.
+const OVERAGE_ALERTER_CYCLES = 3;
+// Invoice-date window to fetch. Wider than the cycles shown because each
+// invoice bills the PREVIOUS cycle, customers bill on different days of the
+// month (the 1st and the 15th), and the newest cycle may not have invoiced yet.
+// Trimmed to exactly OVERAGE_ALERTER_CYCLES per customer after aggregation.
+const OVERAGE_ALERTER_WINDOW_MONTHS = 5;
 const overageAlerterJobs = new Map();
 
 // ── Run-time estimation ──────────────────────────────────────────────
@@ -6872,9 +6878,23 @@ async function runOverageAlerterJob(jobId) {
     }
 
     // ── Phase 4: per-customer percentages and streaks ──
+    // Everything is measured over the most recent OVERAGE_ALERTER_CYCLES
+    // cycles. The floor is a calendar month, not "the customer's last three
+    // entries": a customer who overaged in January, February and August has not
+    // been over for three cycles running, and counting their entries would say
+    // they had. Anything older drops out, and a customer with nothing left
+    // drops off the list.
+    const newestMonth = [...byCustomer.values()]
+      .flatMap(rec => [...rec.months.keys()])
+      .reduce((a, b) => (b > a ? b : a), '');
+    const monthFloor = newestMonth ? shiftYearMonth(newestMonth, -(OVERAGE_ALERTER_CYCLES - 1)) : null;
+
     const results = [];
     for (const rec of byCustomer.values()) {
-      const months = [...rec.months.values()].sort((a, b) => a.month.localeCompare(b.month));
+      const months = [...rec.months.values()]
+        .filter(m => !monthFloor || m.month >= monthFloor)
+        .sort((a, b) => a.month.localeCompare(b.month));
+      if (months.length === 0) continue;
       for (const m of months) {
         const totalMinutes = m.minutes + m.waivedMinutes;
         // "% over plan" = overage minutes as a share of the plan. A 400-minute
@@ -6912,6 +6932,8 @@ async function runOverageAlerterJob(jobId) {
     job.latestMonth = latestMonth || null;
     job.windowCutoffDate = cutoffDate;
     job.windowMonths = OVERAGE_ALERTER_WINDOW_MONTHS;
+    job.cycles = OVERAGE_ALERTER_CYCLES;
+    job.monthFloor = monthFloor;
     job.status = 'done';
     job.phase = 'done';
     job.finishedAt = Date.now();

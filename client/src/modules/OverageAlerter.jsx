@@ -280,6 +280,7 @@ export default function OverageAlerter() {
   /* ── derived ───────────────────────────────────────────────────── */
 
   const latestMonth = data?.latestMonth || null;
+  const cycles = data?.cycles || 3;
 
   // Every month present in the window, oldest → newest. This is the x-axis of
   // the heat strip, so every row lines up even when a customer only overaged
@@ -348,7 +349,7 @@ export default function OverageAlerter() {
             <EmptyState
               glyph="📈"
               title="Find customers who keep paying overages"
-              description="Pulls every overage invoice from both ChargeOver tenants over the last 13 months, files each one under the cycle it bills, and measures the overage against each customer's plan. Expect this to take about six minutes — it reads every customer, subscription and overage invoice in AL and RS. You'll get a progress bar and a countdown while it works."
+              description="Shows which customers were billed minute overages over their last three billing cycles, measured against the plan on their subscription. Covers both Answering Legal and Ring Savvy. It reads every customer and subscription in both accounts, so give it a few minutes — you'll get a progress bar and a countdown while it works."
               actions={<Button onClick={handleRun}>Run the audit</Button>}
             />
           </Card>
@@ -402,7 +403,7 @@ export default function OverageAlerter() {
             <Button variant="secondary" onClick={handleRun}>Re-run</Button>
           </div>
         }
-        meta={data ? `${fmtNum(data.invoiceCount)} overage invoices · ${fmtNum(data.results?.length)} customers · through ${fmtMonth(latestMonth)}` : null}
+        meta={data ? `${fmtNum(data.results?.length)} customers over plan · last ${data.cycles || 3} billing cycles · through ${fmtMonth(latestMonth)}` : null}
       />
       {error && <div className="oa-error">{error}</div>}
 
@@ -414,7 +415,7 @@ export default function OverageAlerter() {
               Consecutive months <strong>{minStreak}+</strong>
             </label>
             <input
-              id="oa-streak" type="range" min="1" max="12" step="1"
+              id="oa-streak" type="range" min="1" max={cycles} step="1"
               value={minStreak} onChange={e => setMinStreak(Number(e.target.value))}
               className="oa-range"
             />
@@ -434,7 +435,7 @@ export default function OverageAlerter() {
           </div>
 
           <Input
-            label="Min overage billed (window)"
+            label="Min overage billed"
             type="number" min="0" step="500" value={minTotal}
             onChange={e => setMinTotal(Number(e.target.value) || 0)}
           />
@@ -471,7 +472,7 @@ export default function OverageAlerter() {
       <div className="oa-tiles">
         <Tile label="Customers flagged" value={fmtNum(summary.count)} />
         <Tile label={`Overage billed in ${fmtMonth(latestMonth)}`} value={fmtMoney(summary.latestAmount)} />
-        <Tile label="Overage billed in window" value={fmtMoney(summary.totalAmount)} />
+        <Tile label="Overage billed in these cycles" value={fmtMoney(summary.totalAmount)} />
         <Tile label="Avg peak over plan" value={fmtPct(summary.avgPeak)} />
       </div>
 
@@ -494,7 +495,7 @@ export default function OverageAlerter() {
                   <th>Customer</th>
                   <th className="oa-num">Plan</th>
                   <th className="oa-num oa-sortable" onClick={() => setSortKey('currentStreak')}>Streak{sortArrow('currentStreak')}</th>
-                  <th className="oa-months-th">Overage by usage month — % over plan</th>
+                  <th className="oa-months-th">Overage by billing cycle — % over plan</th>
                   <th className="oa-num oa-sortable" onClick={() => setSortKey('peakPctOverPlan')}>Peak{sortArrow('peakPctOverPlan')}</th>
                   <th className="oa-num oa-sortable" onClick={() => setSortKey('totalAmount')}>Billed{sortArrow('totalAmount')}</th>
                   <th className="oa-outreach-th">Outreach</th>
@@ -614,7 +615,7 @@ export default function OverageAlerter() {
                               </table>
                               <div className="oa-detail-note">
                                 Plan size is the customer’s current ChargeOver subscription ({r.planMinutes ? `${fmtNum(r.planMinutes)} min` : 'not set'}).
-                                Each invoice bills the previous cycle, so it’s filed under the month the minutes were used.
+                                Each invoice bills the previous cycle, so it’s filed under the month the minutes were used. Only the last three cycles are shown — the Monday board keeps the longer history.
                               </div>
                             </div>
                           </td>
@@ -776,7 +777,7 @@ function PageHead({ actions, meta }) {
         <div className="oa-eyebrow">Billing</div>
         <h1 className="oa-title">Overage Alerter</h1>
         <p className="oa-sub">
-          {meta || 'Customers billed for minute overages in consecutive months, measured against their plan.'}
+          {meta || 'Customers billed for minute overages over their last three billing cycles, measured against their plan.'}
         </p>
       </div>
       {actions}
