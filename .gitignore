@@ -12,3 +12,10 @@ xcally-buffer.json
 overage-alerter-calibration.json
 overage-outreach-config.json
 overage-outreach-log.json
+
+# Runtime state, not source. tv-sessions.json holds live TV display session
+# tokens and status-store.json holds current UP/DOWN state — both are
+# per-environment and this repo is public. The server recreates either file on
+# demand if it is missing.
+tv-sessions.json
+status-store.json
