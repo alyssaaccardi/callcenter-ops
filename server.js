@@ -7078,12 +7078,16 @@ const MONDAY_OUTREACH = {
     last:   process.env.MONDAY_OUTREACH_COL_LAST   || '',
     count:  process.env.MONDAY_OUTREACH_COL_COUNT  || '',
     link:   process.env.MONDAY_OUTREACH_COL_LINK   || '',
+    plan:   process.env.MONDAY_OUTREACH_COL_PLAN   || '',
   },
   sub: {
     sentBy:   process.env.MONDAY_OUTREACH_SUBCOL_SENT_BY   || '',
     sentTo:   process.env.MONDAY_OUTREACH_SUBCOL_SENT_TO   || '',
     template: process.env.MONDAY_OUTREACH_SUBCOL_TEMPLATE  || '',
     override: process.env.MONDAY_OUTREACH_SUBCOL_OVERRIDE  || '',
+    usage:    process.env.MONDAY_OUTREACH_SUBCOL_USAGE     || '',
+    streak:   process.env.MONDAY_OUTREACH_SUBCOL_STREAK    || '',
+    plan:     process.env.MONDAY_OUTREACH_SUBCOL_PLAN      || '',
     date:     'date0',   // Monday's default subitem date column
   },
 };
@@ -7191,8 +7195,32 @@ async function ensureMondayOutreachItem({ tenant, customerId, company, email, co
   return { itemId: data?.create_item?.id || null, reachOuts: 0 };
 }
 
+// A plain-language summary of why this customer was contacted, written onto the
+// reach-out itself. Usage moves every month, so a snapshot taken at send time is
+// the only version that still makes sense when someone reads the board later.
+function formatUsageSnapshot({ planMinutes, currentStreak, months }) {
+  const lines = [];
+  lines.push(planMinutes ? `Plan: ${Number(planMinutes).toLocaleString()} minutes/month`
+                         : 'Plan: not set on the ChargeOver subscription');
+  if (currentStreak) lines.push(`Billed an overage ${currentStreak} month${currentStreak === 1 ? '' : 's'} running.`);
+  lines.push('');
+  const recent = (Array.isArray(months) ? months : []).slice(-3);
+  if (recent.length === 0) {
+    lines.push('No overage months on record.');
+  } else {
+    lines.push(`Last ${recent.length} month${recent.length === 1 ? '' : 's'} of overage:`);
+    for (const m of recent) {
+      const mins = Number(m.totalMinutes) || 0;
+      const pct  = m.pctOverPlan != null ? `${Math.round(m.pctOverPlan)}% over plan` : 'plan unknown';
+      const amt  = Number(m.totalAmount) || 0;
+      lines.push(`  ${m.month}: ${mins.toLocaleString()} overage min — ${pct} — $${amt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+    }
+  }
+  return lines.join('\n');
+}
+
 // One subitem per email, then refresh the parent's rollup columns.
-async function recordMondayReachOut({ itemId, sentAt, sentBy, sentTo, templateId, override, reachOuts }) {
+async function recordMondayReachOut({ itemId, sentAt, sentBy, sentTo, templateId, override, reachOuts, usage }) {
   const day = String(sentAt).slice(0, 10);
   const subVals = {};
   if (MONDAY_OUTREACH.sub.date)     subVals[MONDAY_OUTREACH.sub.date]     = { date: day };
@@ -7200,6 +7228,11 @@ async function recordMondayReachOut({ itemId, sentAt, sentBy, sentTo, templateId
   if (MONDAY_OUTREACH.sub.sentTo && sentTo) subVals[MONDAY_OUTREACH.sub.sentTo] = { email: sentTo, text: sentTo };
   if (MONDAY_OUTREACH.sub.template) subVals[MONDAY_OUTREACH.sub.template] = String(templateId ?? '');
   if (MONDAY_OUTREACH.sub.override) subVals[MONDAY_OUTREACH.sub.override] = { checked: override ? 'true' : 'false' };
+  if (usage) {
+    if (MONDAY_OUTREACH.sub.usage)  subVals[MONDAY_OUTREACH.sub.usage]  = { text: formatUsageSnapshot(usage) };
+    if (MONDAY_OUTREACH.sub.streak && usage.currentStreak) subVals[MONDAY_OUTREACH.sub.streak] = String(usage.currentStreak);
+    if (MONDAY_OUTREACH.sub.plan   && usage.planMinutes)   subVals[MONDAY_OUTREACH.sub.plan]   = String(usage.planMinutes);
+  }
 
   await mondayGql(
     `mutation ($parent: ID!, $name: String!, $vals: JSON!) {
@@ -7210,6 +7243,7 @@ async function recordMondayReachOut({ itemId, sentAt, sentBy, sentTo, templateId
   const parentVals = {};
   if (MONDAY_OUTREACH.col.last)  parentVals[MONDAY_OUTREACH.col.last]  = { date: day };
   if (MONDAY_OUTREACH.col.count) parentVals[MONDAY_OUTREACH.col.count] = String(reachOuts);
+  if (MONDAY_OUTREACH.col.plan && usage?.planMinutes) parentVals[MONDAY_OUTREACH.col.plan] = String(usage.planMinutes);
   if (Object.keys(parentVals).length) {
     await mondayGql(
       `mutation ($board: ID!, $item: ID!, $vals: JSON!) {
@@ -7315,6 +7349,22 @@ async function handleOutreachSend(req, res) {
   const customerId = String(req.body?.customerId || '').trim();
   const override = req.body?.override === true;
 
+  // Usage context comes from the audit the sender is looking at, so the board
+  // records the same picture that justified the email. Sanitised rather than
+  // trusted: only the fields we render, coerced to numbers, capped at the three
+  // months we display.
+  const rawUsage = req.body?.usage;
+  const usage = rawUsage && typeof rawUsage === 'object' ? {
+    planMinutes:   Number(rawUsage.planMinutes) || null,
+    currentStreak: Number(rawUsage.currentStreak) || null,
+    months: (Array.isArray(rawUsage.months) ? rawUsage.months : []).slice(-3).map(m => ({
+      month:        String(m?.month || '').slice(0, 7),
+      totalMinutes: Number(m?.totalMinutes) || 0,
+      pctOverPlan:  m?.pctOverPlan == null ? null : Number(m.pctOverPlan),
+      totalAmount:  Number(m?.totalAmount) || 0,
+    })).filter(m => /^\d{4}-\d{2}$/.test(m.month)),
+  } : null;
+
   if (!['AL', 'RS'].includes(tenant)) return res.status(400).json({ error: 'tenant must be AL or RS' });
   if (!customerId) return res.status(400).json({ error: 'customerId is required' });
 
@@ -7405,7 +7455,7 @@ async function handleOutreachSend(req, res) {
         itemId, sentAt: entry.sentAt,
         sentBy: req.user?.name || req.user?.email || null,
         sentTo: entry.toEmail, templateId: messageId,
-        override: entry.override, reachOuts,
+        override: entry.override, reachOuts, usage,
       });
       log[key] = { ...log[key], mondayItemId: itemId, mondaySynced: true, reachOuts };
       saveOutreachLog(log);

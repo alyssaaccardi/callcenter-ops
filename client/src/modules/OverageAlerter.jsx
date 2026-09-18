@@ -235,6 +235,16 @@ export default function OverageAlerter() {
     try {
       const r = await api.post('/api/overage-alerter/outreach/send', {
         tenant: row.tenant, customerId: row.customerId, override: !!override,
+        // Send the usage picture the operator is actually looking at, so the
+        // Monday record explains why this email went out.
+        usage: {
+          planMinutes: row.planMinutes,
+          currentStreak: row.currentStreak,
+          months: (row.months || []).slice(-3).map(m => ({
+            month: m.month, totalMinutes: m.totalMinutes,
+            pctOverPlan: m.pctOverPlan, totalAmount: m.totalAmount,
+          })),
+        },
       });
       setOutreach(prev => ({ ...prev, log: { ...prev.log, [row.key]: r.data.entry } }));
       setSendTarget(null);
