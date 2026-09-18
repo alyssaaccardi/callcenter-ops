@@ -424,3 +424,11 @@
   box-shadow: var(--elev-3);
   z-index: 60;
 }
+
+.oa-board-link {
+  font-size: var(--fs-sm);
+  color: var(--royal-600);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.oa-board-link:hover { text-decoration: underline; }

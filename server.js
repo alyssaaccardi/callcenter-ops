@@ -7024,15 +7024,177 @@ function loadOutreachConfig() {
 }
 
 function saveOutreachConfig(cfg) {
-  fs.writeFileSync(OVERAGE_OUTREACH_CONFIG_FILE, JSON.stringify(cfg, null, 2));
+  const tmp = `${OVERAGE_OUTREACH_CONFIG_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2));
+  fs.renameSync(tmp, OVERAGE_OUTREACH_CONFIG_FILE);
 }
 
 function loadOutreachLog() {
   try { return JSON.parse(fs.readFileSync(OVERAGE_OUTREACH_LOG_FILE, 'utf8')); } catch { return {}; }
 }
 
+// Write via a temp file and rename. A plain writeFileSync that is interrupted
+// (deploy, crash, full disk) leaves a truncated file, and since a parse failure
+// falls back to {} that would silently erase the entire send history — the one
+// piece of state here that cannot be reconstructed from anywhere else.
+// rename() is atomic within a filesystem, so a reader sees either the old file
+// or the new one, never a half-written one.
 function saveOutreachLog(log) {
-  fs.writeFileSync(OVERAGE_OUTREACH_LOG_FILE, JSON.stringify(log, null, 2));
+  const tmp = `${OVERAGE_OUTREACH_LOG_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(log, null, 2));
+  fs.renameSync(tmp, OVERAGE_OUTREACH_LOG_FILE);
+}
+
+// Sends are read-modify-write against that file. Two billers clicking at the
+// same moment would otherwise both read the pre-send log and the second write
+// would drop the first person's entry — losing a record of an email that really
+// was sent. Serialising the send handler on one promise chain removes the race;
+// this is a single Node process, so an in-process queue is sufficient.
+let outreachWriteChain = Promise.resolve();
+function withOutreachLock(fn) {
+  const run = outreachWriteChain.then(fn, fn);
+  // Keep the chain alive even when a send rejects.
+  outreachWriteChain = run.then(() => {}, () => {});
+  return run;
+}
+
+// ─── Overage Outreach: Monday mirror ─────────────────────────────────────────
+// Every reach-out is written to a Monday board in the Billing workspace: one
+// item per customer, one subitem per email. That gives billing a place to read
+// and annotate the history outside this portal, and it means the record
+// survives anything that happens to this server.
+//
+// The parent item carries a "Last Reach Out" date and a "Reach Outs" count that
+// are updated on every send. The alerter needs a last-sent date for roughly a
+// thousand visible rows, and reading a rollup column costs one paginated query
+// where walking every subitem would get slower as history accumulates.
+const MONDAY_OUTREACH = {
+  boardId:    process.env.MONDAY_OUTREACH_BOARD_ID    || '',
+  subBoardId: process.env.MONDAY_OUTREACH_SUBBOARD_ID || '',
+  col: {
+    tenant: process.env.MONDAY_OUTREACH_COL_TENANT || '',
+    coId:   process.env.MONDAY_OUTREACH_COL_CO_ID  || '',
+    email:  process.env.MONDAY_OUTREACH_COL_EMAIL  || '',
+    last:   process.env.MONDAY_OUTREACH_COL_LAST   || '',
+    count:  process.env.MONDAY_OUTREACH_COL_COUNT  || '',
+    link:   process.env.MONDAY_OUTREACH_COL_LINK   || '',
+  },
+  sub: {
+    sentBy:   process.env.MONDAY_OUTREACH_SUBCOL_SENT_BY   || '',
+    sentTo:   process.env.MONDAY_OUTREACH_SUBCOL_SENT_TO   || '',
+    template: process.env.MONDAY_OUTREACH_SUBCOL_TEMPLATE  || '',
+    override: process.env.MONDAY_OUTREACH_SUBCOL_OVERRIDE  || '',
+    date:     'date0',   // Monday's default subitem date column
+  },
+};
+
+function mondayOutreachConfigured() {
+  return !!(process.env.MONDAY_API_KEY && MONDAY_OUTREACH.boardId && MONDAY_OUTREACH.col.coId);
+}
+
+// GraphQL variables rather than string interpolation — company names carry
+// quotes and apostrophes that would otherwise break the query or, worse, be
+// injected into it.
+async function mondayGql(query, variables) {
+  const resp = await axios.post('https://api.monday.com/v2',
+    { query, variables },
+    { headers: { Authorization: process.env.MONDAY_API_KEY, 'Content-Type': 'application/json' }, timeout: 25000 });
+  if (resp.data?.errors) throw new Error(JSON.stringify(resp.data.errors).slice(0, 300));
+  return resp.data?.data;
+}
+
+// "TENANT:id" → { itemId, lastReachOut, reachOuts }. Cached briefly: the table
+// asks for this on every load and the data only changes when someone sends.
+let mondayOutreachCache = { at: 0, index: null };
+const MONDAY_OUTREACH_CACHE_MS = 60 * 1000;
+
+async function fetchMondayOutreachIndex(force = false) {
+  if (!mondayOutreachConfigured()) return {};
+  if (!force && mondayOutreachCache.index && Date.now() - mondayOutreachCache.at < MONDAY_OUTREACH_CACHE_MS) {
+    return mondayOutreachCache.index;
+  }
+  const index = {};
+  let cursor = null;
+  const fields = `id name column_values (ids: ["${MONDAY_OUTREACH.col.tenant}","${MONDAY_OUTREACH.col.coId}","${MONDAY_OUTREACH.col.last}","${MONDAY_OUTREACH.col.count}"]) { id text }`;
+  do {
+    const query = cursor
+      ? `query ($cursor: String!) { next_items_page (limit: 200, cursor: $cursor) { cursor items { ${fields} } } }`
+      : `query ($board: [ID!]) { boards (ids: $board) { items_page (limit: 200) { cursor items { ${fields} } } } }`;
+    const data = await mondayGql(query, cursor ? { cursor } : { board: [MONDAY_OUTREACH.boardId] });
+    const page = cursor ? data?.next_items_page : data?.boards?.[0]?.items_page;
+    if (!page) break;
+    for (const item of page.items || []) {
+      const cv = {};
+      for (const c of item.column_values || []) cv[c.id] = c.text;
+      const tenant = String(cv[MONDAY_OUTREACH.col.tenant] || '').trim().toUpperCase();
+      const coId   = String(cv[MONDAY_OUTREACH.col.coId] || '').trim();
+      if (!tenant || !coId) continue;
+      index[`${tenant}:${coId}`] = {
+        itemId: item.id,
+        lastReachOut: cv[MONDAY_OUTREACH.col.last] || null,
+        reachOuts: parseInt(cv[MONDAY_OUTREACH.col.count], 10) || 0,
+      };
+    }
+    cursor = page.cursor;
+  } while (cursor);
+
+  mondayOutreachCache = { at: Date.now(), index };
+  return index;
+}
+
+// Find the customer's item, creating it the first time they're contacted.
+// The local log remembers the item id so the usual path is a straight write;
+// the board search is the fallback for when that mapping is missing (fresh
+// server, restored file) and stops us creating a duplicate item.
+async function ensureMondayOutreachItem({ tenant, customerId, company, email, coUrl, knownItemId }) {
+  if (knownItemId) return knownItemId;
+
+  const index = await fetchMondayOutreachIndex(true);
+  const hit = index[`${tenant}:${customerId}`];
+  if (hit?.itemId) return hit.itemId;
+
+  const colVals = {};
+  if (MONDAY_OUTREACH.col.tenant) colVals[MONDAY_OUTREACH.col.tenant] = { labels: [tenant] };
+  if (MONDAY_OUTREACH.col.coId)   colVals[MONDAY_OUTREACH.col.coId]   = String(customerId);
+  if (MONDAY_OUTREACH.col.email && email) colVals[MONDAY_OUTREACH.col.email] = { email, text: email };
+  if (MONDAY_OUTREACH.col.link && coUrl)  colVals[MONDAY_OUTREACH.col.link]  = { url: coUrl, text: 'ChargeOver' };
+
+  const data = await mondayGql(
+    `mutation ($board: ID!, $name: String!, $vals: JSON!) {
+       create_item (board_id: $board, item_name: $name, column_values: $vals) { id }
+     }`,
+    { board: MONDAY_OUTREACH.boardId, name: company || `ChargeOver #${customerId}`, vals: JSON.stringify(colVals) });
+  return data?.create_item?.id || null;
+}
+
+// One subitem per email, then refresh the parent's rollup columns.
+async function recordMondayReachOut({ itemId, sentAt, sentBy, sentTo, templateId, override, reachOuts }) {
+  const day = String(sentAt).slice(0, 10);
+  const subVals = {};
+  if (MONDAY_OUTREACH.sub.date)     subVals[MONDAY_OUTREACH.sub.date]     = { date: day };
+  if (MONDAY_OUTREACH.sub.sentBy)   subVals[MONDAY_OUTREACH.sub.sentBy]   = sentBy || '';
+  if (MONDAY_OUTREACH.sub.sentTo && sentTo) subVals[MONDAY_OUTREACH.sub.sentTo] = { email: sentTo, text: sentTo };
+  if (MONDAY_OUTREACH.sub.template) subVals[MONDAY_OUTREACH.sub.template] = String(templateId ?? '');
+  if (MONDAY_OUTREACH.sub.override) subVals[MONDAY_OUTREACH.sub.override] = { checked: override ? 'true' : 'false' };
+
+  await mondayGql(
+    `mutation ($parent: ID!, $name: String!, $vals: JSON!) {
+       create_subitem (parent_item_id: $parent, item_name: $name, column_values: $vals) { id }
+     }`,
+    { parent: itemId, name: `Overage email — ${day}`, vals: JSON.stringify(subVals) });
+
+  const parentVals = {};
+  if (MONDAY_OUTREACH.col.last)  parentVals[MONDAY_OUTREACH.col.last]  = { date: day };
+  if (MONDAY_OUTREACH.col.count) parentVals[MONDAY_OUTREACH.col.count] = String(reachOuts);
+  if (Object.keys(parentVals).length) {
+    await mondayGql(
+      `mutation ($board: ID!, $item: ID!, $vals: JSON!) {
+         change_multiple_column_values (board_id: $board, item_id: $item, column_values: $vals) { id }
+       }`,
+      { board: MONDAY_OUTREACH.boardId, item: itemId, vals: JSON.stringify(parentVals) });
+  }
+  // The board changed, so the cached index is stale.
+  mondayOutreachCache = { at: 0, index: null };
 }
 
 // Same "TENANT:id" key the alerter rows use — customer ids collide across AL
@@ -7049,14 +7211,48 @@ function daysSince(iso) {
 
 // Config + the whole send log. The client merges the log into the result rows so
 // a last-sent date shows without re-running the six-minute audit.
-app.get('/api/overage-alerter/outreach', requireRole(...OVERAGE_ALERTER_ROLES), (req, res) => {
+app.get('/api/overage-alerter/outreach', requireRole(...OVERAGE_ALERTER_ROLES), async (req, res) => {
   const config = loadOutreachConfig();
+  const log = loadOutreachLog();
+
+  // Monday is the shared record — someone may have logged a reach-out there
+  // that this server never saw. Merge it in, keeping whichever date is later,
+  // so the table never shows a customer as less recently contacted than they
+  // actually were. A Monday outage degrades to the local log rather than
+  // failing the page.
+  let mondayIndex = {};
+  let mondayError = null;
+  try {
+    mondayIndex = await fetchMondayOutreachIndex();
+  } catch (e) {
+    mondayError = e.message;
+    console.warn('[overage-outreach] monday index unavailable:', e.message);
+  }
+  for (const [key, m] of Object.entries(mondayIndex)) {
+    if (!m.lastReachOut) continue;
+    const local = log[key];
+    const mondayAt = new Date(`${m.lastReachOut}T00:00:00Z`).toISOString();
+    if (!local?.sentAt || mondayAt > local.sentAt) {
+      log[key] = { ...(local || {}), sentAt: mondayAt, tenant: key.split(':')[0],
+                   customerId: key.split(':')[1], mondayItemId: m.itemId,
+                   reachOuts: m.reachOuts, fromMonday: !local?.sentAt };
+    } else if (local && !local.mondayItemId) {
+      log[key] = { ...local, mondayItemId: m.itemId };
+    }
+  }
+
   res.json({
     config,
-    log: loadOutreachLog(),
+    log,
     cooldownDays: OVERAGE_OUTREACH_COOLDOWN_DAYS,
     // Drives the "not set up yet" warning in the portal.
     ready: { AL: !!config.AL?.messageId, RS: !!config.RS?.messageId },
+    monday: {
+      configured: mondayOutreachConfigured(),
+      boardUrl: MONDAY_OUTREACH.boardId
+        ? `https://answeringlegal-unit.monday.com/boards/${MONDAY_OUTREACH.boardId}` : null,
+      error: mondayError,
+    },
   });
 });
 
@@ -7081,6 +7277,16 @@ app.put('/api/overage-alerter/outreach/config', requireRole('super_admin', 'call
 });
 
 app.post('/api/overage-alerter/outreach/send', requireRole(...OVERAGE_ALERTER_ROLES), async (req, res) => {
+  // The cooldown check and the log write have to be one critical section: two
+  // simultaneous clicks on the same customer must not both pass the cooldown.
+  try {
+    await withOutreachLock(() => handleOutreachSend(req, res));
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+async function handleOutreachSend(req, res) {
   const tenant = String(req.body?.tenant || '').toUpperCase();
   const customerId = String(req.body?.customerId || '').trim();
   const override = req.body?.override === true;
@@ -7142,11 +7348,51 @@ app.post('/api/overage-alerter/outreach/send', requireRole(...OVERAGE_ALERTER_RO
     // Kept so an override is visible in the history rather than silent.
     override: override && !!previous,
   };
-  log[key] = { ...entry, previousSentAt: previous?.sentAt || null };
+  const reachOuts = (previous?.reachOuts || 0) + 1;
+
+  // Record locally FIRST. The email has already left ChargeOver at this point,
+  // so the one unacceptable outcome is finishing with no record of it. The
+  // local write is synchronous and cannot fail on a network problem; Monday is
+  // mirrored afterwards and is allowed to fail without losing the fact of the
+  // send.
+  log[key] = {
+    ...entry,
+    previousSentAt: previous?.sentAt || null,
+    reachOuts,
+    mondayItemId: previous?.mondayItemId || null,
+    mondaySynced: false,
+  };
   saveOutreachLog(log);
 
-  res.json({ ok: true, entry: log[key] });
-});
+  let mondayWarning = null;
+  if (mondayOutreachConfigured()) {
+    try {
+      const itemId = await ensureMondayOutreachItem({
+        tenant, customerId,
+        company: customer.company,
+        email: customer.email,
+        coUrl: customer.coUrl || chargeoverCustomerUrl(tenant, customerId),
+        knownItemId: previous?.mondayItemId || null,
+      });
+      if (!itemId) throw new Error('Monday did not return an item id');
+      await recordMondayReachOut({
+        itemId, sentAt: entry.sentAt,
+        sentBy: req.user?.name || req.user?.email || null,
+        sentTo: entry.toEmail, templateId: messageId,
+        override: entry.override, reachOuts,
+      });
+      log[key] = { ...log[key], mondayItemId: itemId, mondaySynced: true };
+      saveOutreachLog(log);
+    } catch (e) {
+      // The customer HAS been emailed. Surface the mirroring failure without
+      // implying the send failed, and leave mondaySynced false so it's visible.
+      mondayWarning = `The email was sent, but writing it to the Monday board failed: ${e.message}`;
+      console.error(`[overage-outreach] monday mirror failed ${key}:`, e.message);
+    }
+  }
+
+  res.json({ ok: true, entry: log[key], warning: mondayWarning });
+}
 
 // ─── Salesperson Auditor ─────────────────────────────────────────────────────
 // Same CSV as the minute auditor, different question: is the CO salesperson

@@ -238,8 +238,12 @@ export default function OverageAlerter() {
       });
       setOutreach(prev => ({ ...prev, log: { ...prev.log, [row.key]: r.data.entry } }));
       setSendTarget(null);
-      setToast(`Emailed ${row.company || row.customerId}${r.data.entry?.toEmail ? ` at ${r.data.entry.toEmail}` : ''}`);
-      setTimeout(() => setToast(''), 6000);
+      // A warning here means the email DID go out but the Monday mirror failed —
+      // say so plainly rather than reporting a clean success.
+      setToast(r.data.warning
+        ? `Emailed ${row.company || row.customerId} — but it didn't reach the Monday board. ${r.data.warning}`
+        : `Emailed ${row.company || row.customerId}${r.data.entry?.toEmail ? ` at ${r.data.entry.toEmail}` : ''}`);
+      setTimeout(() => setToast(''), r.data.warning ? 14000 : 6000);
     } catch (e) {
       const d = e.response?.data;
       setSendError(d?.message || d?.error || e.message);
@@ -379,6 +383,11 @@ export default function OverageAlerter() {
       <PageHead
         actions={
           <div className="oa-head-actions">
+            {outreach.monday?.boardUrl && (
+              <a className="oa-board-link" href={outreach.monday.boardUrl} target="_blank" rel="noopener noreferrer">
+                Outreach board ↗
+              </a>
+            )}
             <Button variant="ghost" onClick={() => { loadOutreach(); setSettingsOpen(true); }}>Email settings</Button>
             <Button variant="secondary" onClick={handleRun}>Re-run</Button>
           </div>
@@ -638,6 +647,9 @@ export default function OverageAlerter() {
               <div><dt>Sent from</dt><dd>ChargeOver {sendTarget.tenant === 'AL' ? 'Answering Legal' : 'Ring Savvy'}</dd></div>
               <div><dt>Template</dt><dd className="oa-mono">#{outreach.config?.[sendTarget.tenant]?.messageId ?? '—'}</dd></div>
               <div><dt>Overage streak</dt><dd>{sendTarget.currentStreak} consecutive months, peak {fmtPct(sendTarget.peakPctOverPlan)} over plan</dd></div>
+              {outreach.monday?.configured && (
+                <div><dt>Recorded on</dt><dd>the Overage Outreach board in Monday</dd></div>
+              )}
             </dl>
             {sendCooldownActive(outreach, sendTarget) && (
               <div className="oa-warn">
@@ -688,6 +700,12 @@ export default function OverageAlerter() {
             Leave a field blank to disable sending for that tenant. Sending is refused without a
             template id — ChargeOver would otherwise fall back to its default welcome email.
           </div>
+          {outreach.monday?.error && (
+            <div className="oa-warn">
+              Monday is unreachable right now ({outreach.monday.error}). Last-sent dates are falling
+              back to this server's own log, so a reach-out logged elsewhere may not be showing.
+            </div>
+          )}
           {sendError && <div className="oa-error">{sendError}</div>}
         </div>
       </Modal>
