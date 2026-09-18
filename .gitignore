@@ -5,3 +5,10 @@ node_modules/
 users.json
 scriptor-store.json
 xcally-buffer.json
+
+# Overage Alerter runtime state. The outreach log holds customer email
+# addresses, and all three are per-environment — committing them would also
+# overwrite production's copies on deploy.
+overage-alerter-calibration.json
+overage-outreach-config.json
+overage-outreach-log.json

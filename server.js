@@ -3369,6 +3369,33 @@ async function chargeoverGet(tenant, endpoint, params = {}, attempt = 0) {
   }
 }
 
+// POST counterpart to chargeoverGet. Same auth, deliberately different retry
+// policy: the action endpoints this calls SEND EMAIL, and a timeout or 5xx may
+// mean the mail already left. Retrying those could email a customer twice, so
+// only an explicit 429 (rate limit, which means ChargeOver rejected the request
+// outright) is retried — everything else is surfaced to the caller.
+async function chargeoverPost(tenant, endpoint, body = {}, attempt = 0) {
+  const cfg = CHARGEOVER_TENANTS[tenant];
+  if (!cfg?.url || !cfg?.auth) throw new Error(`ChargeOver tenant "${tenant}" not configured`);
+  try {
+    const resp = await axios.post(`${cfg.url}${endpoint}`, body, {
+      headers: { Authorization: `Basic ${cfg.auth}`, 'Content-Type': 'application/json' },
+      timeout: 20000,
+    });
+    return resp.data?.response ?? resp.data ?? null;
+  } catch (e) {
+    if (e.response?.status === 429 && attempt < 2) {
+      const retryAfter = parseInt(e.response?.headers?.['retry-after'], 10);
+      const delay = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(retryAfter * 1000, 15000)
+        : 1000 * (attempt + 1);
+      await new Promise(r => setTimeout(r, delay));
+      return chargeoverPost(tenant, endpoint, body, attempt + 1);
+    }
+    throw e;
+  }
+}
+
 // ChargeOver custom_3 values → AUDITOR_CATEGORIES (case-insensitive keys).
 // null value means "treat as unset" (Unknown / blank) — AI should fill in.
 const CHARGEOVER_CATEGORY_MAP = {
@@ -6563,6 +6590,72 @@ const OVERAGE_ALERTER_ROLES = ['super_admin', 'call_center_ops', 'billing'];
 const OVERAGE_ALERTER_WINDOW_MONTHS = 13;
 const overageAlerterJobs = new Map();
 
+// ── Run-time estimation ──────────────────────────────────────────────
+// This job takes minutes, and a progress display that just spins reads as a
+// hang — users report it as a bug. ChargeOver's list endpoints return no total
+// count (the response envelope is code/status/message/details/response and
+// nothing else), so there's no exact denominator to divide by. Instead each
+// completed run records how many records it pulled and how long that took, and
+// the next run divides against those numbers. The seed below is a real measured
+// run so the very first run on a fresh install still shows a sane estimate; it
+// is overwritten the first time a run finishes here.
+const OVERAGE_CALIBRATION_FILE = path.join(__dirname, 'overage-alerter-calibration.json');
+const OVERAGE_CALIBRATION_SEED = { totalItems: 36445, totalMs: 362000 };
+
+function loadOverageCalibration() {
+  try {
+    const c = JSON.parse(fs.readFileSync(OVERAGE_CALIBRATION_FILE, 'utf8'));
+    if (c && c.totalItems > 0 && c.totalMs > 0) return c;
+  } catch { /* fall through to the seed */ }
+  return OVERAGE_CALIBRATION_SEED;
+}
+
+function saveOverageCalibration(totalItems, totalMs) {
+  if (!(totalItems > 0) || !(totalMs > 0)) return;
+  try {
+    fs.writeFileSync(OVERAGE_CALIBRATION_FILE,
+      JSON.stringify({ totalItems, totalMs, updatedAt: new Date().toISOString() }, null, 2));
+  } catch (e) {
+    console.warn('[overage-alerter] could not save calibration:', e.message);
+  }
+}
+
+// Fraction complete + seconds remaining. Records fetched is the progress
+// signal: every counter in job.prefetch is a running total of rows pulled, and
+// each page costs about the same, so rows are a fair proxy for work done.
+// Early on (before enough rows to extrapolate from) the estimate comes from the
+// previous run's wall time; after that it comes from this run's own rate, so a
+// slow day self-corrects instead of lying.
+function overageAlerterProgress(job) {
+  const elapsedMs = Date.now() - job.startedAt;
+  if (job.status === 'done' || job.status === 'error') {
+    return { pct: 100, etaSeconds: 0, elapsedMs };
+  }
+  const items = Object.values(job.prefetch || {}).reduce((s, n) => s + (Number(n) || 0), 0);
+  const expected = job.calibration?.totalItems || OVERAGE_CALIBRATION_SEED.totalItems;
+  // Aggregating is the last, short phase — the row counters have stopped moving
+  // by then, so pin it high rather than letting it sit wherever fetching ended.
+  const raw = job.phase === 'aggregating' ? 0.98 : items / expected;
+  const fraction = Math.max(0, Math.min(raw, 0.98));
+
+  let etaMs;
+  if (fraction >= 0.05) {
+    etaMs = elapsedMs * (1 - fraction) / fraction;
+  } else {
+    const baseline = job.calibration?.totalMs || OVERAGE_CALIBRATION_SEED.totalMs;
+    etaMs = Math.max(0, baseline - elapsedMs);
+  }
+  // Smooth it so the number counts down instead of jittering between ticks.
+  const prev = job.etaMs;
+  job.etaMs = prev == null ? etaMs : prev * 0.7 + etaMs * 0.3;
+
+  return {
+    pct: Math.round(fraction * 100),
+    etaSeconds: Math.max(0, Math.round(job.etaMs / 1000)),
+    elapsedMs,
+  };
+}
+
 // "YYYY-MM" arithmetic. delta is signed.
 function shiftYearMonth(ym, delta) {
   const m = String(ym).match(/^(\d{4})-(\d{2})/);
@@ -6623,6 +6716,15 @@ async function fetchOverageInvoices(tenant, itemId, cutoffDate, progressCb) {
   return out;
 }
 
+// The ChargeOver admin profile URL for a customer. CO hands this back on the
+// record as `url_self` (correctly pointed at that tenant's own subdomain), so
+// it's read rather than constructed. The fallback derives it from the tenant's
+// API base for the rare record that arrives without one.
+function chargeoverCustomerUrl(tenant, customerId) {
+  const base = String(CHARGEOVER_TENANTS[tenant]?.url || '').replace(/\/api\/v3\/?$/, '');
+  return base ? `${base}/admin/r/customer/view/${customerId}` : null;
+}
+
 // The customer's plan size in minutes, from their subscription. Prefers a live
 // subscription; falls back to the most recent one so a just-canceled customer
 // still shows the plan their overages were measured against.
@@ -6655,6 +6757,8 @@ function overageStreaks(months) {
 async function runOverageAlerterJob(jobId) {
   const job = overageAlerterJobs.get(jobId);
   if (!job) return;
+
+  job.calibration = loadOverageCalibration();
 
   const now = new Date();
   const cutoffDate = new Date(Date.UTC(
@@ -6747,6 +6851,7 @@ async function runOverageAlerterJob(jobId) {
           company: cust?.company || null,
           email: cust?.superuser_email || cust?.email || null,
           customerStatus: cust?.customer_status_str || null,
+          coUrl: cust?.url_self || chargeoverCustomerUrl(row.tenant, row.customerId),
           ...plan,
           months: new Map(),
         };
@@ -6810,6 +6915,11 @@ async function runOverageAlerterJob(jobId) {
     job.status = 'done';
     job.phase = 'done';
     job.finishedAt = Date.now();
+    // Calibrate the next run's estimate off this one.
+    saveOverageCalibration(
+      Object.values(job.prefetch || {}).reduce((s, n) => s + (Number(n) || 0), 0),
+      job.finishedAt - job.startedAt,
+    );
   } catch (e) {
     console.error('[overage-alerter] job failed:', e.message);
     job.status = 'error';
@@ -6843,7 +6953,10 @@ app.post('/api/overage-alerter/run', requireRole(...OVERAGE_ALERTER_ROLES), (req
     if ((j.finishedAt || j.startedAt) < cutoff) overageAlerterJobs.delete(id);
   }
 
-  res.json({ jobId });
+  // Hand back the expected duration up front so the progress panel opens with a
+  // real countdown instead of "estimating…" for the first few seconds.
+  const cal = loadOverageCalibration();
+  res.json({ jobId, estimatedSeconds: Math.round(cal.totalMs / 1000) });
 });
 
 app.get('/api/overage-alerter/stream/:jobId', requireRole(...OVERAGE_ALERTER_ROLES), (req, res) => {
@@ -6861,6 +6974,7 @@ app.get('/api/overage-alerter/stream/:jobId', requireRole(...OVERAGE_ALERTER_ROL
     const payload = {
       done: current.done, total: current.total, status: current.status,
       phase: current.phase, prefetch: current.prefetch, invoiceCount: current.invoiceCount,
+      ...overageAlerterProgress(current),
     };
     res.write(`data: ${JSON.stringify({ type: 'progress', ...payload })}\n\n`);
     if (current.status === 'done' || current.status === 'error') {
@@ -6876,7 +6990,162 @@ app.get('/api/overage-alerter/stream/:jobId', requireRole(...OVERAGE_ALERTER_ROL
 app.get('/api/overage-alerter/results/:jobId', requireRole(...OVERAGE_ALERTER_ROLES), (req, res) => {
   const job = overageAlerterJobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
-  res.json(job);
+  // Carries the same estimate as the stream — this endpoint is also the
+  // fallback the client polls when the stream is cut short mid-run.
+  res.json({ ...job, ...overageAlerterProgress(job) });
+});
+
+// ─── Overage Outreach (ChargeOver canned email) ──────────────────────────────
+// Lets billing email a repeat-overage customer straight from the alerter, using
+// a ChargeOver email template ("canned email") on that customer's own tenant.
+// Going through ChargeOver rather than Zendesk means branding and the sending
+// address come from whichever instance the customer lives in — AL mail looks
+// like AL, RS like RS — with no brand mapping on our side.
+//
+// SAFETY: ChargeOver's POST /customer/:id/_action/email treats `message_id` as
+// OPTIONAL, and when it is omitted it sends a DEFAULT WELCOME MESSAGE. Emailing
+// a years-old client a welcome note is precisely the kind of mistake that is
+// impossible to take back, so every path here refuses to call the endpoint
+// unless a template id has been configured for that tenant.
+//
+// ChargeOver records every send in its own Email Log (Report Center → Logs),
+// which stays the authoritative record. The log kept here is a local index so
+// the portal can show a last-sent date and enforce the re-send window without
+// an API that ChargeOver doesn't expose.
+const OVERAGE_OUTREACH_CONFIG_FILE = path.join(__dirname, 'overage-outreach-config.json');
+const OVERAGE_OUTREACH_LOG_FILE    = path.join(__dirname, 'overage-outreach-log.json');
+const OVERAGE_OUTREACH_COOLDOWN_DAYS = 30;
+
+function loadOutreachConfig() {
+  try {
+    const c = JSON.parse(fs.readFileSync(OVERAGE_OUTREACH_CONFIG_FILE, 'utf8'));
+    return { AL: c.AL || {}, RS: c.RS || {} };
+  } catch { return { AL: {}, RS: {} }; }
+}
+
+function saveOutreachConfig(cfg) {
+  fs.writeFileSync(OVERAGE_OUTREACH_CONFIG_FILE, JSON.stringify(cfg, null, 2));
+}
+
+function loadOutreachLog() {
+  try { return JSON.parse(fs.readFileSync(OVERAGE_OUTREACH_LOG_FILE, 'utf8')); } catch { return {}; }
+}
+
+function saveOutreachLog(log) {
+  fs.writeFileSync(OVERAGE_OUTREACH_LOG_FILE, JSON.stringify(log, null, 2));
+}
+
+// Same "TENANT:id" key the alerter rows use — customer ids collide across AL
+// and RS, so the tenant has to be part of the key.
+function outreachKey(tenant, customerId) {
+  return `${tenant}:${customerId}`;
+}
+
+function daysSince(iso) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  return (Date.now() - t) / 86400000;
+}
+
+// Config + the whole send log. The client merges the log into the result rows so
+// a last-sent date shows without re-running the six-minute audit.
+app.get('/api/overage-alerter/outreach', requireRole(...OVERAGE_ALERTER_ROLES), (req, res) => {
+  const config = loadOutreachConfig();
+  res.json({
+    config,
+    log: loadOutreachLog(),
+    cooldownDays: OVERAGE_OUTREACH_COOLDOWN_DAYS,
+    // Drives the "not set up yet" warning in the portal.
+    ready: { AL: !!config.AL?.messageId, RS: !!config.RS?.messageId },
+  });
+});
+
+app.put('/api/overage-alerter/outreach/config', requireRole('super_admin', 'call_center_ops'), (req, res) => {
+  const incoming = req.body || {};
+  const cfg = loadOutreachConfig();
+  for (const tenant of ['AL', 'RS']) {
+    if (!(tenant in incoming)) continue;
+    const raw = incoming[tenant]?.messageId;
+    if (raw === null || raw === '' || raw === undefined) {
+      cfg[tenant] = { ...cfg[tenant], messageId: null };
+      continue;
+    }
+    const id = parseInt(String(raw), 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: `${tenant}: template id must be a positive number` });
+    }
+    cfg[tenant] = { ...cfg[tenant], messageId: id, label: String(incoming[tenant]?.label || '').slice(0, 120) || null };
+  }
+  saveOutreachConfig(cfg);
+  res.json({ config: cfg, ready: { AL: !!cfg.AL?.messageId, RS: !!cfg.RS?.messageId } });
+});
+
+app.post('/api/overage-alerter/outreach/send', requireRole(...OVERAGE_ALERTER_ROLES), async (req, res) => {
+  const tenant = String(req.body?.tenant || '').toUpperCase();
+  const customerId = String(req.body?.customerId || '').trim();
+  const override = req.body?.override === true;
+
+  if (!['AL', 'RS'].includes(tenant)) return res.status(400).json({ error: 'tenant must be AL or RS' });
+  if (!customerId) return res.status(400).json({ error: 'customerId is required' });
+
+  const cfg = loadOutreachConfig();
+  const messageId = cfg[tenant]?.messageId;
+  // The guard that matters: no template configured means ChargeOver would fall
+  // back to its welcome email. Refuse rather than send the wrong thing.
+  if (!messageId) {
+    return res.status(400).json({
+      error: `No ChargeOver email template is configured for ${tenant}. Set one in the portal before sending — without it ChargeOver sends a welcome email instead.`,
+    });
+  }
+
+  const log = loadOutreachLog();
+  const key = outreachKey(tenant, customerId);
+  const previous = log[key];
+  if (previous?.sentAt && !override) {
+    const age = daysSince(previous.sentAt);
+    if (age != null && age < OVERAGE_OUTREACH_COOLDOWN_DAYS) {
+      return res.status(409).json({
+        error: 'cooldown',
+        message: `Last emailed ${Math.floor(age)} day${Math.floor(age) === 1 ? '' : 's'} ago. The re-send window is ${OVERAGE_OUTREACH_COOLDOWN_DAYS} days.`,
+        lastSentAt: previous.sentAt,
+        daysAgo: Math.floor(age),
+      });
+    }
+  }
+
+  // Confirm the customer exists and capture who the mail will actually reach,
+  // so the log records the real recipient rather than what the browser claimed.
+  let customer = null;
+  try {
+    customer = await lookupChargeoverById(tenant, customerId);
+  } catch (e) {
+    return res.status(502).json({ error: `ChargeOver lookup failed: ${e.message}` });
+  }
+  if (!customer) return res.status(404).json({ error: `Customer ${customerId} not found in ${tenant}` });
+
+  try {
+    await chargeoverPost(tenant, `/customer/${encodeURIComponent(customerId)}/_action/email`, { message_id: messageId });
+  } catch (e) {
+    const detail = e.response?.data?.message || e.message;
+    console.error(`[overage-outreach] send failed ${key}:`, detail);
+    return res.status(502).json({ error: `ChargeOver refused the send: ${detail}` });
+  }
+
+  const entry = {
+    sentAt: new Date().toISOString(),
+    tenant,
+    customerId,
+    company: customer.company || null,
+    toEmail: customer.email || null,
+    messageId,
+    byEmail: req.user?.email || null,
+    // Kept so an override is visible in the history rather than silent.
+    override: override && !!previous,
+  };
+  log[key] = { ...entry, previousSentAt: previous?.sentAt || null };
+  saveOutreachLog(log);
+
+  res.json({ ok: true, entry: log[key] });
 });
 
 // ─── Salesperson Auditor ─────────────────────────────────────────────────────

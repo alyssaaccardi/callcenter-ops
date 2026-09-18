@@ -1,9 +1,18 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import api from '../api';
-import { Button, Card, Input, Select, Badge, Checkbox, EmptyState } from '../components/ui';
+import { Button, Card, Input, Select, Badge, Checkbox, EmptyState, Modal } from '../components/ui';
 import './OverageAlerter.css';
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
+
+// The job's internal phase names, in words a biller would use.
+const PHASE_COPY = {
+  starting:            'Starting up',
+  prefetching:         'Reading customers and subscriptions',
+  'fetching invoices': 'Reading overage invoices',
+  aggregating:         'Working out the numbers',
+  done:                'Finishing up',
+};
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -23,6 +32,38 @@ function fmtMoney(n) {
 function fmtPct(n) {
   if (n == null || !Number.isFinite(Number(n))) return '—';
   return Math.round(Number(n)).toLocaleString() + '%';
+}
+
+// "about 4 minutes left" — deliberately vague at the top end, precise near the
+// finish. A countdown that claims "3:47" and then slips reads as broken; a
+// rounded estimate that lands early reads as fast.
+function fmtEta(seconds) {
+  if (seconds == null) return null;
+  if (seconds <= 5)  return 'almost done';
+  if (seconds < 60)  return 'less than a minute left';
+  const mins = Math.round(seconds / 60);
+  if (mins === 1)    return 'about a minute left';
+  return `about ${mins} minutes left`;
+}
+
+function fmtElapsed(ms) {
+  if (!ms) return '0:00';
+  const total = Math.floor(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+// "12 Sep 2026" — a send date is read at a glance, not compared precisely.
+function fmtDate(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function daysSince(iso) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  return Math.floor((Date.now() - t) / 86400000);
 }
 
 function fmtNum(n) {
@@ -52,7 +93,7 @@ function streakTone(streak, ongoing) {
 export default function OverageAlerter() {
   const [view, setView]         = useState('idle');   // idle | running | results
   const [error, setError]       = useState('');
-  const [progress, setProgress] = useState({ phase: '', prefetch: {}, invoiceCount: 0, total: 0 });
+  const [progress, setProgress] = useState({ phase: '', prefetch: {}, invoiceCount: 0, total: 0, pct: 0, etaSeconds: null, elapsedMs: 0 });
   const [data, setData]         = useState(null);     // full job payload
 
   // ── Thresholds. These are the knobs — every one of them filters the
@@ -67,6 +108,16 @@ export default function OverageAlerter() {
   const [sort, setSort]             = useState({ key: 'currentStreak', dir: 'desc' });
   const [expanded, setExpanded]     = useState(() => new Set());
 
+  // Outreach: ChargeOver template config + the local send log that powers the
+  // last-sent column and the re-send window.
+  const [outreach, setOutreach] = useState({ config: { AL: {}, RS: {} }, log: {}, cooldownDays: 30, ready: {} });
+  const [sendTarget, setSendTarget] = useState(null);   // row awaiting confirmation
+  const [sending, setSending]       = useState(false);
+  const [sendError, setSendError]   = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [draftCfg, setDraftCfg]     = useState({ AL: '', RS: '' });
+  const [toast, setToast]           = useState('');
+
   const readerRef = useRef(null);
   useEffect(() => () => { try { readerRef.current?.cancel(); } catch { /* ok */ } }, []);
 
@@ -80,12 +131,26 @@ export default function OverageAlerter() {
 
   /* ── run ───────────────────────────────────────────────────────── */
 
+  const loadOutreach = useCallback(async () => {
+    try {
+      const r = await api.get('/api/overage-alerter/outreach');
+      setOutreach(r.data);
+      setDraftCfg({
+        AL: r.data.config?.AL?.messageId ? String(r.data.config.AL.messageId) : '',
+        RS: r.data.config?.RS?.messageId ? String(r.data.config.RS.messageId) : '',
+      });
+    } catch { /* non-fatal — the table still works, sending just won't */ }
+  }, []);
+
   const loadResults = useCallback(async (jobId) => {
     const resp = await api.get(`/api/overage-alerter/results/${jobId}`);
     if (resp.data?.status === 'error') { setError(resp.data.error || 'Job failed'); return false; }
     setData(resp.data);
+    // Template config + send log land with the results, so the last-sent column
+    // is populated the moment the table renders.
+    await loadOutreach();
     return true;
-  }, []);
+  }, [loadOutreach]);
 
   // The stream can be cut short by Cloudflare around the 100s mark and this
   // job routinely runs longer than that, so a severed stream falls back to
@@ -95,8 +160,11 @@ export default function OverageAlerter() {
     while (Date.now() - started < 15 * 60 * 1000) {
       try {
         const resp = await api.get(`/api/overage-alerter/results/${jobId}`);
-        const { status, phase, prefetch, invoiceCount, total } = resp.data || {};
-        setProgress({ phase, prefetch: prefetch || {}, invoiceCount: invoiceCount || 0, total: total || 0 });
+        const { status, phase, prefetch, invoiceCount, total, pct, etaSeconds, elapsedMs } = resp.data || {};
+        setProgress({
+          phase, prefetch: prefetch || {}, invoiceCount: invoiceCount || 0, total: total || 0,
+          pct: pct || 0, etaSeconds: etaSeconds ?? null, elapsedMs: elapsedMs || 0,
+        });
         if (status === 'done' || status === 'error') return;
       } catch { /* keep polling */ }
       await new Promise(r => setTimeout(r, 2500));
@@ -129,6 +197,7 @@ export default function OverageAlerter() {
             setProgress({
               phase: msg.phase, prefetch: msg.prefetch || {},
               invoiceCount: msg.invoiceCount || 0, total: msg.total || 0,
+              pct: msg.pct || 0, etaSeconds: msg.etaSeconds ?? null, elapsedMs: msg.elapsedMs || 0,
             });
             if (msg.type === 'done') doneReceived = true;
           } catch { /* skip malformed event */ }
@@ -143,11 +212,14 @@ export default function OverageAlerter() {
   const handleRun = async () => {
     setError('');
     setData(null);
-    setProgress({ phase: 'starting', prefetch: {}, invoiceCount: 0, total: 0 });
+    setProgress({ phase: 'starting', prefetch: {}, invoiceCount: 0, total: 0, pct: 0, etaSeconds: null, elapsedMs: 0 });
     setView('running');
     try {
       const resp = await api.post('/api/overage-alerter/run');
-      const { jobId } = resp.data;
+      const { jobId, estimatedSeconds } = resp.data;
+      // Seed the countdown from the last run's time so it never shows a blank
+      // or an "estimating…" gap while the first rows come back.
+      if (estimatedSeconds) setProgress(p => ({ ...p, etaSeconds: estimatedSeconds }));
       await startStream(jobId);
       const ok = await loadResults(jobId);
       setView(ok ? 'results' : 'idle');
@@ -156,6 +228,40 @@ export default function OverageAlerter() {
       setView('idle');
     }
   };
+
+  const doSend = useCallback(async (row, override) => {
+    setSending(true);
+    setSendError('');
+    try {
+      const r = await api.post('/api/overage-alerter/outreach/send', {
+        tenant: row.tenant, customerId: row.customerId, override: !!override,
+      });
+      setOutreach(prev => ({ ...prev, log: { ...prev.log, [row.key]: r.data.entry } }));
+      setSendTarget(null);
+      setToast(`Emailed ${row.company || row.customerId}${r.data.entry?.toEmail ? ` at ${r.data.entry.toEmail}` : ''}`);
+      setTimeout(() => setToast(''), 6000);
+    } catch (e) {
+      const d = e.response?.data;
+      setSendError(d?.message || d?.error || e.message);
+    } finally {
+      setSending(false);
+    }
+  }, []);
+
+  const saveConfig = useCallback(async () => {
+    try {
+      const r = await api.put('/api/overage-alerter/outreach/config', {
+        AL: { messageId: draftCfg.AL || null },
+        RS: { messageId: draftCfg.RS || null },
+      });
+      setOutreach(prev => ({ ...prev, config: r.data.config, ready: r.data.ready }));
+      setSettingsOpen(false);
+      setToast('Email template settings saved');
+      setTimeout(() => setToast(''), 4000);
+    } catch (e) {
+      setSendError(e.response?.data?.error || e.message);
+    }
+  }, [draftCfg]);
 
   /* ── derived ───────────────────────────────────────────────────── */
 
@@ -228,15 +334,25 @@ export default function OverageAlerter() {
             <EmptyState
               glyph="📈"
               title="Find customers who keep paying overages"
-              description="Pulls every overage invoice from both ChargeOver tenants over the last 13 months, files each one under the cycle it bills, and measures the overage against each customer's plan. Takes a few minutes — it reads every customer, subscription and overage invoice in AL and RS."
+              description="Pulls every overage invoice from both ChargeOver tenants over the last 13 months, files each one under the cycle it bills, and measures the overage against each customer's plan. Expect this to take about six minutes — it reads every customer, subscription and overage invoice in AL and RS. You'll get a progress bar and a countdown while it works."
               actions={<Button onClick={handleRun}>Run the audit</Button>}
             />
           </Card>
         ) : (
           <Card pad className="oa-launch">
             <div className="oa-running">
-              <div className="oa-running-spinner" aria-hidden="true" />
-              <div className="oa-running-phase">{progress.phase || 'starting'}…</div>
+              <div className="oa-running-phase">{PHASE_COPY[progress.phase] || 'Starting up'}</div>
+              <div className="oa-running-eta">{fmtEta(progress.etaSeconds) || 'estimating…'}</div>
+
+              <div className="oa-progress" role="progressbar"
+                   aria-valuenow={progress.pct} aria-valuemin={0} aria-valuemax={100}>
+                <div className="oa-progress-fill" style={{ width: `${Math.max(2, progress.pct)}%` }} />
+              </div>
+              <div className="oa-progress-meta">
+                <span className="oa-mono">{progress.pct}%</span>
+                <span className="oa-muted">elapsed {fmtElapsed(progress.elapsedMs)}</span>
+              </div>
+
               <div className="oa-running-detail">
                 {prefetchLines.length === 0
                   ? <span className="oa-muted">Connecting to ChargeOver…</span>
@@ -246,6 +362,11 @@ export default function OverageAlerter() {
                       </div>
                     ))}
               </div>
+
+              <p className="oa-running-note">
+                This reads every customer, subscription and overage invoice in both ChargeOver
+                tenants — a few minutes is normal. You can leave this tab open; it keeps running.
+              </p>
             </div>
           </Card>
         )}
@@ -256,7 +377,12 @@ export default function OverageAlerter() {
   return (
     <div className="oa-root">
       <PageHead
-        actions={<Button variant="secondary" onClick={handleRun}>Re-run</Button>}
+        actions={
+          <div className="oa-head-actions">
+            <Button variant="ghost" onClick={() => { loadOutreach(); setSettingsOpen(true); }}>Email settings</Button>
+            <Button variant="secondary" onClick={handleRun}>Re-run</Button>
+          </div>
+        }
         meta={data ? `${fmtNum(data.invoiceCount)} overage invoices · ${fmtNum(data.results?.length)} customers · through ${fmtMonth(latestMonth)}` : null}
       />
       {error && <div className="oa-error">{error}</div>}
@@ -352,6 +478,7 @@ export default function OverageAlerter() {
                   <th className="oa-months-th">Overage by usage month — % over plan</th>
                   <th className="oa-num oa-sortable" onClick={() => setSortKey('peakPctOverPlan')}>Peak{sortArrow('peakPctOverPlan')}</th>
                   <th className="oa-num oa-sortable" onClick={() => setSortKey('totalAmount')}>Billed{sortArrow('totalAmount')}</th>
+                  <th className="oa-outreach-th">Outreach</th>
                 </tr>
               </thead>
               <tbody>
@@ -366,7 +493,23 @@ export default function OverageAlerter() {
                         <td>
                           <div className="oa-cust">
                             <Badge tone={r.tenant === 'AL' ? 'info' : 'accent'} size="sm">{r.tenant}</Badge>
-                            <span className="oa-cust-name">{r.company || `CO #${r.customerId}`}</span>
+                            {r.coUrl ? (
+                              <a
+                                className="oa-cust-name oa-cust-link"
+                                href={r.coUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                // The row itself toggles the month detail, so a
+                                // click on the name must not also expand it.
+                                onClick={e => e.stopPropagation()}
+                                title="Open this customer in ChargeOver"
+                              >
+                                {r.company || `CO #${r.customerId}`}
+                                <span className="oa-ext" aria-hidden="true">↗</span>
+                              </a>
+                            ) : (
+                              <span className="oa-cust-name">{r.company || `CO #${r.customerId}`}</span>
+                            )}
                             {r.subStatus && !String(r.subStatus).startsWith('active') && (
                               <Badge tone="neutral" size="sm">{r.subStatus}</Badge>
                             )}
@@ -401,10 +544,19 @@ export default function OverageAlerter() {
                         </td>
                         <td className="oa-num oa-mono">{fmtPct(r.peakPctOverPlan)}</td>
                         <td className="oa-num oa-mono">{fmtMoney(r.totalAmount)}</td>
+                        <td className="oa-outreach-td" onClick={e => e.stopPropagation()}>
+                          <OutreachCell
+                            row={r}
+                            entry={outreach.log?.[r.key]}
+                            cooldownDays={outreach.cooldownDays}
+                            ready={!!outreach.ready?.[r.tenant]}
+                            onSend={() => { setSendError(''); setSendTarget(r); }}
+                          />
+                        </td>
                       </tr>
                       {isOpen && (
                         <tr className="oa-detail-row">
-                          <td colSpan={7}>
+                          <td colSpan={8}>
                             <div className="oa-detail">
                               <table className="oa-detail-table">
                                 <thead>
@@ -458,6 +610,88 @@ export default function OverageAlerter() {
         </Card>
       )}
 
+      {toast && <div className="oa-toast">{toast}</div>}
+
+      <Modal
+        open={!!sendTarget}
+        onClose={() => { if (!sending) { setSendTarget(null); setSendError(''); } }}
+        title="Send overage email"
+        description={sendTarget ? `This emails the customer immediately through ChargeOver ${sendTarget.tenant === 'AL' ? 'Answering Legal' : 'Ring Savvy'}.` : ''}
+        footer={sendTarget && (
+          <>
+            <Button variant="ghost" onClick={() => { setSendTarget(null); setSendError(''); }} disabled={sending}>Cancel</Button>
+            <Button
+              onClick={() => doSend(sendTarget, sendCooldownActive(outreach, sendTarget))}
+              loading={sending}
+              disabled={sending}
+            >
+              {sendCooldownActive(outreach, sendTarget) ? 'Send anyway' : 'Send email'}
+            </Button>
+          </>
+        )}
+      >
+        {sendTarget && (
+          <div className="oa-confirm">
+            <dl className="oa-confirm-list">
+              <div><dt>Customer</dt><dd>{sendTarget.company || `CO #${sendTarget.customerId}`}</dd></div>
+              <div><dt>Goes to</dt><dd className="oa-mono">{sendTarget.email || <span className="oa-muted">no email on the ChargeOver record</span>}</dd></div>
+              <div><dt>Sent from</dt><dd>ChargeOver {sendTarget.tenant === 'AL' ? 'Answering Legal' : 'Ring Savvy'}</dd></div>
+              <div><dt>Template</dt><dd className="oa-mono">#{outreach.config?.[sendTarget.tenant]?.messageId ?? '—'}</dd></div>
+              <div><dt>Overage streak</dt><dd>{sendTarget.currentStreak} consecutive months, peak {fmtPct(sendTarget.peakPctOverPlan)} over plan</dd></div>
+            </dl>
+            {sendCooldownActive(outreach, sendTarget) && (
+              <div className="oa-warn">
+                This customer was emailed {daysSince(outreach.log[sendTarget.key].sentAt)} days ago, inside the
+                {' '}{outreach.cooldownDays}-day window. Sending again will email them a second time.
+              </div>
+            )}
+            {!sendTarget.email && (
+              <div className="oa-warn">
+                No email address on the ChargeOver record — ChargeOver will decide where this goes, and it may not reach anyone.
+              </div>
+            )}
+            {sendError && <div className="oa-error">{sendError}</div>}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        title="ChargeOver email templates"
+        description="Each tenant sends its own canned email, so Answering Legal and Ring Savvy keep their own branding and sending address."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setSettingsOpen(false)}>Cancel</Button>
+            <Button onClick={saveConfig}>Save</Button>
+          </>
+        }
+      >
+        <div className="oa-settings">
+          <p className="oa-settings-help">
+            Create the email template in each ChargeOver account, then paste its id here. The id is the
+            number in the URL while you’re editing the template
+            (<code>…/admin/…/message/<strong>1234</strong></code>). ChargeOver doesn’t expose templates
+            over its API, so these can’t be listed for you.
+          </p>
+          <Input
+            label="Answering Legal template id" mono inputMode="numeric"
+            placeholder="e.g. 1234" value={draftCfg.AL}
+            onChange={e => setDraftCfg(c => ({ ...c, AL: e.target.value.replace(/[^0-9]/g, '') }))}
+          />
+          <Input
+            label="Ring Savvy template id" mono inputMode="numeric"
+            placeholder="e.g. 5678" value={draftCfg.RS}
+            onChange={e => setDraftCfg(c => ({ ...c, RS: e.target.value.replace(/[^0-9]/g, '') }))}
+          />
+          <div className="oa-warn">
+            Leave a field blank to disable sending for that tenant. Sending is refused without a
+            template id — ChargeOver would otherwise fall back to its default welcome email.
+          </div>
+          {sendError && <div className="oa-error">{sendError}</div>}
+        </div>
+      </Modal>
+
       <div className="oa-legend">
         <span className="oa-muted">% over plan:</span>
         <span className="oa-cell" data-tone="sev1" /> under 50%
@@ -466,6 +700,43 @@ export default function OverageAlerter() {
         <span className="oa-cell" data-tone="sev4" /> 200%+
         <span className="oa-cell" data-tone="none" /> no overage
       </div>
+    </div>
+  );
+}
+
+// True when this customer was emailed inside the re-send window — drives both
+// the disabled button and the "Send anyway" wording in the dialog.
+function sendCooldownActive(outreach, row) {
+  if (!row) return false;
+  const entry = outreach.log?.[row.key];
+  if (!entry?.sentAt) return false;
+  const d = daysSince(entry.sentAt);
+  return d != null && d < (outreach.cooldownDays ?? 30);
+}
+
+function OutreachCell({ row, entry, cooldownDays, ready, onSend }) {
+  const sentAt = entry?.sentAt;
+  const days = sentAt ? daysSince(sentAt) : null;
+  const cooling = days != null && days < (cooldownDays ?? 30);
+
+  if (!ready) {
+    return <span className="oa-muted oa-outreach-note" title={`No ChargeOver template configured for ${row.tenant}`}>not set up</span>;
+  }
+  return (
+    <div className="oa-outreach">
+      <Button
+        size="sm"
+        variant={cooling ? 'ghost' : 'secondary'}
+        onClick={onSend}
+        title={cooling ? `Emailed ${days} days ago — inside the ${cooldownDays}-day window` : 'Email this customer via ChargeOver'}
+      >
+        {sentAt ? 'Email again' : 'Email'}
+      </Button>
+      <span className="oa-outreach-note">
+        {sentAt
+          ? <>Sent {fmtDate(sentAt)}{cooling && <span className="oa-cooldown"> · {cooldownDays - days}d left</span>}</>
+          : <span className="oa-muted">never emailed</span>}
+      </span>
     </div>
   );
 }
