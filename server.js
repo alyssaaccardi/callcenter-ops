@@ -7147,24 +7147,48 @@ async function fetchMondayOutreachIndex(force = false) {
 // the board search is the fallback for when that mapping is missing (fresh
 // server, restored file) and stops us creating a duplicate item.
 async function ensureMondayOutreachItem({ tenant, customerId, company, email, coUrl, knownItemId }) {
-  if (knownItemId) return knownItemId;
-
-  const index = await fetchMondayOutreachIndex(true);
-  const hit = index[`${tenant}:${customerId}`];
-  if (hit?.itemId) return hit.itemId;
-
   const colVals = {};
   if (MONDAY_OUTREACH.col.tenant) colVals[MONDAY_OUTREACH.col.tenant] = { labels: [tenant] };
   if (MONDAY_OUTREACH.col.coId)   colVals[MONDAY_OUTREACH.col.coId]   = String(customerId);
   if (MONDAY_OUTREACH.col.email && email) colVals[MONDAY_OUTREACH.col.email] = { email, text: email };
   if (MONDAY_OUTREACH.col.link && coUrl)  colVals[MONDAY_OUTREACH.col.link]  = { url: coUrl, text: 'ChargeOver' };
 
+  // Always consult the board. The reach-out count has to come from Monday, not
+  // from local state: the local log can be cleared or restored on a new server,
+  // and a count that silently restarts at 1 would misrepresent how many times a
+  // customer has actually been contacted. Monday is the shared record, so it
+  // owns the tally.
+  const index = await fetchMondayOutreachIndex(true);
+  const hit = index[`${tenant}:${customerId}`];
+  const itemId = knownItemId || hit?.itemId || null;
+
+  if (itemId) {
+    // Refresh the contact details rather than leaving whatever was captured the
+    // first time. Emails and company names change in ChargeOver, and a stale
+    // address on the board is actively misleading about where mail is going.
+    if (Object.keys(colVals).length) {
+      await mondayGql(
+        `mutation ($board: ID!, $item: ID!, $vals: JSON!) {
+           change_multiple_column_values (board_id: $board, item_id: $item, column_values: $vals) { id }
+         }`,
+        { board: MONDAY_OUTREACH.boardId, item: itemId, vals: JSON.stringify(colVals) });
+    }
+    if (company) {
+      await mondayGql(
+        `mutation ($board: ID!, $item: ID!, $name: JSON!) {
+           change_simple_column_value (board_id: $board, item_id: $item, column_id: "name", value: $name) { id }
+         }`,
+        { board: MONDAY_OUTREACH.boardId, item: itemId, name: company }).catch(() => {});
+    }
+    return { itemId, reachOuts: hit?.reachOuts || 0 };
+  }
+
   const data = await mondayGql(
     `mutation ($board: ID!, $name: String!, $vals: JSON!) {
        create_item (board_id: $board, item_name: $name, column_values: $vals) { id }
      }`,
     { board: MONDAY_OUTREACH.boardId, name: company || `ChargeOver #${customerId}`, vals: JSON.stringify(colVals) });
-  return data?.create_item?.id || null;
+  return { itemId: data?.create_item?.id || null, reachOuts: 0 };
 }
 
 // One subitem per email, then refresh the parent's rollup columns.
@@ -7348,7 +7372,6 @@ async function handleOutreachSend(req, res) {
     // Kept so an override is visible in the history rather than silent.
     override: override && !!previous,
   };
-  const reachOuts = (previous?.reachOuts || 0) + 1;
 
   // Record locally FIRST. The email has already left ChargeOver at this point,
   // so the one unacceptable outcome is finishing with no record of it. The
@@ -7358,7 +7381,7 @@ async function handleOutreachSend(req, res) {
   log[key] = {
     ...entry,
     previousSentAt: previous?.sentAt || null,
-    reachOuts,
+    reachOuts: (previous?.reachOuts || 0) + 1,
     mondayItemId: previous?.mondayItemId || null,
     mondaySynced: false,
   };
@@ -7367,7 +7390,7 @@ async function handleOutreachSend(req, res) {
   let mondayWarning = null;
   if (mondayOutreachConfigured()) {
     try {
-      const itemId = await ensureMondayOutreachItem({
+      const { itemId, reachOuts: priorReachOuts } = await ensureMondayOutreachItem({
         tenant, customerId,
         company: customer.company,
         email: customer.email,
@@ -7375,13 +7398,16 @@ async function handleOutreachSend(req, res) {
         knownItemId: previous?.mondayItemId || null,
       });
       if (!itemId) throw new Error('Monday did not return an item id');
+      // Whichever record has seen more sends wins, so neither a cleared local
+      // log nor a board edit can quietly lower the count.
+      const reachOuts = Math.max(priorReachOuts, previous?.reachOuts || 0) + 1;
       await recordMondayReachOut({
         itemId, sentAt: entry.sentAt,
         sentBy: req.user?.name || req.user?.email || null,
         sentTo: entry.toEmail, templateId: messageId,
         override: entry.override, reachOuts,
       });
-      log[key] = { ...log[key], mondayItemId: itemId, mondaySynced: true };
+      log[key] = { ...log[key], mondayItemId: itemId, mondaySynced: true, reachOuts };
       saveOutreachLog(log);
     } catch (e) {
       // The customer HAS been emailed. Surface the mirroring failure without
