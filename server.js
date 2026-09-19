@@ -6735,7 +6735,9 @@ function chargeoverCustomerUrl(tenant, customerId) {
 // subscription; falls back to the most recent one so a just-canceled customer
 // still shows the plan their overages were measured against.
 function planMinutesForCustomer(pkgs) {
-  if (!Array.isArray(pkgs) || pkgs.length === 0) return { planMinutes: null, planRate: null, subStatus: null };
+  if (!Array.isArray(pkgs) || pkgs.length === 0) {
+    return { planMinutes: null, planRate: null, subStatus: null, subChangedAt: null };
+  }
   const active = pkgs.find(p => String(p.package_status_str || '').startsWith('active'));
   const sub = active || pkgs.slice().sort((a, b) =>
     String(b.package_id).localeCompare(String(a.package_id), undefined, { numeric: true }))[0];
@@ -6743,6 +6745,25 @@ function planMinutesForCustomer(pkgs) {
     planMinutes: parseNumericPlan(sub?.custom_2),
     planRate:    parseRate(sub?.custom_1),
     subStatus:   sub?.package_status_str || null,
+    // What the subscription bills per month. ChargeOver's `mrr` on the package
+    // is the whole recurring amount — the plan plus any add-ons such as the
+    // carrier recovery fund — and is per customer, so it reflects negotiated
+    // pricing. The product's own list price does not: "Plan 800" lists at
+    // $1,250 while a customer on it can be paying $2,132, so the item price
+    // would be badly wrong here. Comes back on the package list we already
+    // fetch, at no extra cost.
+    monthlyCost: Number.isFinite(Number(sub?.mrr)) && Number(sub?.mrr) > 0 ? Number(sub.mrr) : null,
+    // When the subscription was last edited. ChargeOver keeps no plan-change
+    // history, and this is the closest thing it exposes: it moves on ANY change
+    // to the subscription, not only a plan swap — a bulk rate increase touched
+    // roughly two thirds of active subs inside one window, for instance.
+    //
+    // That imprecision is in the safe direction for what this guards. A plan
+    // change always updates it, so a recently re-planned customer is never
+    // missed; the cost is flagging some customers whose subscription was edited
+    // for another reason, which only prompts a look before emailing. Surfaced
+    // as "subscription changed", never as "plan changed".
+    subChangedAt: sub?.mod_datetime ? String(sub.mod_datetime).replace(' ', 'T') + 'Z' : null,
   };
 }
 

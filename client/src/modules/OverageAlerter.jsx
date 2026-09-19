@@ -66,6 +66,17 @@ function daysSince(iso) {
   return Math.floor((Date.now() - t) / 86400000);
 }
 
+// A subscription edited this recently is worth a second look before emailing:
+// they may have just been moved to a bigger plan, and "you keep going over"
+// is the wrong conversation to have a month later.
+const SUB_CHANGE_WARN_DAYS = 60;
+
+function subChangedRecently(row) {
+  if (!row?.subChangedAt) return null;
+  const d = daysSince(row.subChangedAt);
+  return d != null && d < SUB_CHANGE_WARN_DAYS ? d : null;
+}
+
 function fmtNum(n) {
   if (n == null || !Number.isFinite(Number(n))) return '—';
   return Math.round(Number(n)).toLocaleString();
@@ -117,6 +128,7 @@ export default function OverageAlerter() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftCfg, setDraftCfg]     = useState({ AL: '', RS: '' });
   const [toast, setToast]           = useState('');
+  const [showReplanned, setShowReplanned] = useState(false);
 
   const readerRef = useRef(null);
   useEffect(() => () => { try { readerRef.current?.cancel(); } catch { /* ok */ } }, []);
@@ -303,6 +315,13 @@ export default function OverageAlerter() {
       if (minTotal > 0 && !(r.totalAmount >= minTotal)) return false;
       if (q && !(`${r.company || ''} ${r.email || ''} ${r.customerId}`.toLowerCase().includes(q))) return false;
       return true;
+    }).map(r => {
+      // How far over they are in the newest cycle everyone shares, so the
+      // column compares like with like. A customer who wasn't billed an
+      // overage that cycle gets null, not zero — "no overage" and "exactly on
+      // plan" are different answers.
+      const m = r.months.find(x => x.month === latestMonth);
+      return { ...r, latestPct: m ? m.pctOverPlan : null, latestMinutes: m ? m.totalMinutes : null };
     });
   }, [data, tenant, minStreak, ongoingOnly, minPct, minTotal, search, latestMonth]);
 
@@ -313,9 +332,33 @@ export default function OverageAlerter() {
       if (typeof av === 'string' || typeof bv === 'string') {
         return String(av ?? '').localeCompare(String(bv ?? '')) * dir;
       }
-      return ((av ?? 0) - (bv ?? 0)) * dir;
+      // Missing values sink to the bottom whichever way the sort runs.
+      // Treating them as 0 would rank "no plan on the subscription" as the
+      // smallest plan, and "no overage this cycle" as nought percent over —
+      // both are absent facts, not low ones.
+      const aMissing = av == null, bMissing = bv == null;
+      if (aMissing && bMissing) return 0;
+      if (aMissing) return 1;
+      if (bMissing) return -1;
+      return (av - bv) * dir;
     });
   }, [rows, sort]);
+
+  // Customers whose subscription was changed inside the cycles on screen are
+  // held separately. They turn up constantly — a third of active subscriptions
+  // were edited in this window — and are usually the wrong people to email: the
+  // overages above may be exactly what prompted the change, and "you keep going
+  // over" lands badly a few weeks after someone moved them to a bigger plan.
+  const { mainRows, replannedRows } = useMemo(() => {
+    const floor = data?.monthFloor ? `${data.monthFloor}-01` : null;
+    if (!floor) return { mainRows: sorted, replannedRows: [] };
+    const main = [], replanned = [];
+    for (const r of sorted) {
+      const changed = r.subChangedAt ? String(r.subChangedAt).slice(0, 10) : null;
+      (changed && changed >= floor ? replanned : main).push(r);
+    }
+    return { mainRows: main, replannedRows: replanned };
+  }, [sorted, data]);
 
   const summary = useMemo(() => {
     const totalAmount = rows.reduce((s, r) => s + (r.totalAmount || 0), 0);
@@ -335,6 +378,150 @@ export default function OverageAlerter() {
   ));
 
   const sortArrow = (key) => (sort.key === key ? (sort.dir === 'desc' ? ' ▾' : ' ▴') : '');
+
+  /* One table row, shared by the main list and the re-planned group. */
+    const renderRow = (r) => {
+                  const isOpen = expanded.has(r.key);
+                  const ongoing = r.lastMonth === latestMonth;
+                  const byMonth = new Map(r.months.map(m => [m.month, m]));
+      return (
+                    <React.Fragment key={r.key}>
+                      <tr className="oa-row" onClick={() => toggleRow(r.key)}>
+                        <td className="oa-td-expand">{isOpen ? '▾' : '▸'}</td>
+                        <td>
+                          <div className="oa-cust">
+                            <Badge tone={r.tenant === 'AL' ? 'info' : 'accent'} size="sm">{r.tenant}</Badge>
+                            {r.coUrl ? (
+                              <a
+                                className="oa-cust-name oa-cust-link"
+                                href={r.coUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                // The row itself toggles the month detail, so a
+                                // click on the name must not also expand it.
+                                onClick={e => e.stopPropagation()}
+                                title="Open this customer in ChargeOver"
+                              >
+                                {r.company || `CO #${r.customerId}`}
+                                <span className="oa-ext" aria-hidden="true">↗</span>
+                              </a>
+                            ) : (
+                              <span className="oa-cust-name">{r.company || `CO #${r.customerId}`}</span>
+                            )}
+                            {r.subStatus && !String(r.subStatus).startsWith('active') && (
+                              <Badge tone="neutral" size="sm">{r.subStatus}</Badge>
+                            )}
+                            {subChangedRecently(r) != null && (
+                              <Badge tone="warn" size="sm" title={`Subscription last changed ${fmtDate(r.subChangedAt)} — check whether they were re-planned before emailing`}>
+                                sub changed {subChangedRecently(r)}d ago
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="oa-cust-sub">{r.email || `CO #${r.customerId}`}</div>
+                        </td>
+                        <td className="oa-num oa-mono">
+                          {r.planMinutes ? `${fmtNum(r.planMinutes)} min` : <span className="oa-muted">no plan</span>}
+                          <div className="oa-plan-cost">
+                            {r.monthlyCost != null
+                              ? `${fmtMoney(r.monthlyCost)}/mo`
+                              : <span className="oa-muted">cost unknown</span>}
+                          </div>
+                        </td>
+                        <td className="oa-num">
+                          <Badge tone={streakTone(r.currentStreak, ongoing)} size="sm">
+                            {r.currentStreak} mo{ongoing ? '' : ' (ended)'}
+                          </Badge>
+                        </td>
+                        <td className="oa-months-td">
+                          <div className="oa-strip">
+                            {monthAxis.map(ym => {
+                              const m = byMonth.get(ym);
+                              return (
+                                <span
+                                  key={ym}
+                                  className="oa-cell"
+                                  data-tone={m ? pctTone(m.pctOverPlan) : 'none'}
+                                  data-waived={m?.fullyWaived ? 'yes' : undefined}
+                                  title={m
+                                    ? `${fmtMonth(ym)} — ${fmtNum(m.totalMinutes)} overage min on a ${r.planMinutes || '?'} min plan (${fmtPct(m.pctOverPlan)} over), ${fmtMoney(m.totalAmount)}${m.fullyWaived ? ' — waived' : ''}`
+                                    : `${fmtMonth(ym)} — no overage`}
+                                />
+                              );
+                            })}
+                          </div>
+                        </td>
+                        <td className="oa-num">
+                          {r.latestPct == null
+                            ? <span className="oa-muted">—</span>
+                            : <span className="oa-pct-pill" data-tone={pctTone(r.latestPct)}
+                                    title={`${fmtNum(r.latestMinutes)} overage minutes in ${fmtMonth(latestMonth)}`}>
+                                {fmtPct(r.latestPct)}
+                              </span>}
+                        </td>
+                        <td className="oa-num oa-mono">{fmtPct(r.peakPctOverPlan)}</td>
+                        <td className="oa-num oa-mono">{fmtMoney(r.totalAmount)}</td>
+                        <td className="oa-outreach-td" onClick={e => e.stopPropagation()}>
+                          <OutreachCell
+                            row={r}
+                            entry={outreach.log?.[r.key]}
+                            cooldownDays={outreach.cooldownDays}
+                            ready={!!outreach.ready?.[r.tenant]}
+                            onSend={() => { setSendError(''); setSendTarget(r); }}
+                          />
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr className="oa-detail-row">
+                          <td colSpan={9}>
+                            <div className="oa-detail">
+                              <table className="oa-detail-table">
+                                <thead>
+                                  <tr>
+                                    <th>Usage month</th>
+                                    <th className="oa-num">Overage min</th>
+                                    <th className="oa-num">Plan</th>
+                                    <th className="oa-num">% over plan</th>
+                                    <th className="oa-num">Rate</th>
+                                    <th className="oa-num">Billed</th>
+                                    <th>Invoice date</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {r.months.slice().reverse().map(m => (
+                                    <tr key={m.month}>
+                                      <td>{fmtMonth(m.month)}</td>
+                                      <td className="oa-num oa-mono">{fmtNum(m.totalMinutes)}</td>
+                                      <td className="oa-num oa-mono">{r.planMinutes ? fmtNum(r.planMinutes) : '—'}</td>
+                                      <td className="oa-num">
+                                        <span className="oa-pct-pill" data-tone={pctTone(m.pctOverPlan)}>{fmtPct(m.pctOverPlan)}</span>
+                                      </td>
+                                      <td className="oa-num oa-mono">{m.rate != null ? `$${m.rate.toFixed(2)}` : '—'}</td>
+                                      <td className="oa-num oa-mono">
+                                        {fmtMoney(m.totalAmount)}
+                                        {m.waivedMinutes > 0 && (
+                                          <Badge tone="warn" size="sm" className="oa-waived-tag">
+                                            {m.fullyWaived ? 'waived' : `${fmtNum(m.waivedMinutes)} min waived`}
+                                          </Badge>
+                                        )}
+                                      </td>
+                                      <td className="oa-mono oa-muted">{m.invoices.map(i => i.invoiceDate).join(', ')}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              <div className="oa-detail-note">
+                                Plan size is the customer’s current ChargeOver subscription ({r.planMinutes ? `${fmtNum(r.planMinutes)} min` : 'not set'}),
+                                last changed {r.subChangedAt ? fmtDate(r.subChangedAt) : 'unknown'}.
+                                Each invoice bills the previous cycle, so it’s filed under the month the minutes were used. Only the last three cycles are shown — the Monday board keeps the longer history.
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+      );
+    };
+
 
   /* ── render ────────────────────────────────────────────────────── */
 
@@ -356,6 +543,7 @@ export default function OverageAlerter() {
         ) : (
           <Card pad className="oa-launch">
             <div className="oa-running">
+              <LoadingBout />
               <div className="oa-running-phase">{PHASE_COPY[progress.phase] || 'Starting up'}</div>
               <div className="oa-running-eta">{fmtEta(progress.etaSeconds) || 'estimating…'}</div>
 
@@ -470,10 +658,26 @@ export default function OverageAlerter() {
 
       {/* ── summary ────────────────────────────────────────────── */}
       <div className="oa-tiles">
-        <Tile label="Customers flagged" value={fmtNum(summary.count)} />
-        <Tile label={`Overage billed in ${fmtMonth(latestMonth)}`} value={fmtMoney(summary.latestAmount)} />
-        <Tile label="Overage billed in these cycles" value={fmtMoney(summary.totalAmount)} />
-        <Tile label="Avg peak over plan" value={fmtPct(summary.avgPeak)} />
+        <Tile
+          label="Customers shown"
+          value={fmtNum(summary.count)}
+          hint="How many customers match the filters you've set above."
+        />
+        <Tile
+          label={`Billed in ${fmtMonth(latestMonth)}`}
+          value={fmtMoney(summary.latestAmount)}
+          hint={`What these customers were charged in overage fees for ${fmtMonth(latestMonth)} alone — their most recent cycle.`}
+        />
+        <Tile
+          label="Billed across all 3 cycles"
+          value={fmtMoney(summary.totalAmount)}
+          hint="Total overage charges for these customers across the three cycles shown. Not their subscription cost — just the overage on top."
+        />
+        <Tile
+          label="Typical worst month"
+          value={fmtPct(summary.avgPeak)}
+          hint="Take each customer's worst single cycle, measure how far past their plan they went, and average those. 200% means the typical customer here used triple their plan in their worst month."
+        />
       </div>
 
       {/* ── table ──────────────────────────────────────────────── */}
@@ -492,138 +696,44 @@ export default function OverageAlerter() {
               <thead>
                 <tr>
                   <th className="oa-th-expand" />
-                  <th>Customer</th>
-                  <th className="oa-num">Plan</th>
-                  <th className="oa-num oa-sortable" onClick={() => setSortKey('currentStreak')}>Streak{sortArrow('currentStreak')}</th>
-                  <th className="oa-months-th">Overage by billing cycle — % over plan</th>
-                  <th className="oa-num oa-sortable" onClick={() => setSortKey('peakPctOverPlan')}>Peak{sortArrow('peakPctOverPlan')}</th>
-                  <th className="oa-num oa-sortable" onClick={() => setSortKey('totalAmount')}>Billed{sortArrow('totalAmount')}</th>
-                  <th className="oa-outreach-th">Outreach</th>
+                  <th><Hint text="The account in ChargeOver. Click a name to open their ChargeOver profile.">Customer</Hint></th>
+                  <th className="oa-num oa-plan-th">
+                    <span className="oa-sortable" onClick={() => setSortKey('planMinutes')}>
+                      <Hint text="Minutes included in their plan. Click to sort by plan size.">Plan</Hint>{sortArrow('planMinutes')}
+                    </span>
+                    <span className="oa-sortable oa-subsort" onClick={() => setSortKey('monthlyCost')}>
+                      <Hint text="What the subscription bills each month — the plan plus any add-ons, at the price this customer actually pays. Click to sort by monthly cost.">$/mo</Hint>{sortArrow('monthlyCost')}
+                    </span>
+                  </th>
+                  <th className="oa-num oa-sortable" onClick={() => setSortKey('currentStreak')}><Hint text="How many cycles in a row they've been billed an overage, counting back from the most recent. 3 means every cycle shown.">Streak</Hint>{sortArrow('currentStreak')}</th>
+                  <th className="oa-months-th"><Hint text="One square per cycle, oldest on the left. Colour shows how far over plan they went; an empty square means no overage that cycle. Hover a square for the detail.">Overage by billing cycle</Hint></th>
+                  <th className="oa-num oa-sortable" onClick={() => setSortKey('latestPct')}>
+                    <Hint text={`How far past their plan they went in ${fmtMonth(latestMonth)}, the most recent cycle. 100% means they used double their plan. A dash means they weren't billed an overage that cycle.`}>{fmtMonth(latestMonth)}</Hint>{sortArrow('latestPct')}
+                  </th>
+                  <th className="oa-num oa-sortable" onClick={() => setSortKey('peakPctOverPlan')}><Hint text="Their worst single cycle: how far past their plan they went. 100% means they used double their plan.">Peak</Hint>{sortArrow('peakPctOverPlan')}</th>
+                  <th className="oa-num oa-sortable" onClick={() => setSortKey('totalAmount')}><Hint text="Overage charges across the cycles shown — on top of their subscription.">Billed</Hint>{sortArrow('totalAmount')}</th>
+                  <th className="oa-outreach-th"><Hint text="Whether we've emailed this customer about their overages, and when.">Outreach</Hint></th>
                 </tr>
               </thead>
               <tbody>
-                {sorted.map(r => {
-                  const isOpen = expanded.has(r.key);
-                  const ongoing = r.lastMonth === latestMonth;
-                  const byMonth = new Map(r.months.map(m => [m.month, m]));
-                  return (
-                    <React.Fragment key={r.key}>
-                      <tr className="oa-row" onClick={() => toggleRow(r.key)}>
-                        <td className="oa-td-expand">{isOpen ? '▾' : '▸'}</td>
-                        <td>
-                          <div className="oa-cust">
-                            <Badge tone={r.tenant === 'AL' ? 'info' : 'accent'} size="sm">{r.tenant}</Badge>
-                            {r.coUrl ? (
-                              <a
-                                className="oa-cust-name oa-cust-link"
-                                href={r.coUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                // The row itself toggles the month detail, so a
-                                // click on the name must not also expand it.
-                                onClick={e => e.stopPropagation()}
-                                title="Open this customer in ChargeOver"
-                              >
-                                {r.company || `CO #${r.customerId}`}
-                                <span className="oa-ext" aria-hidden="true">↗</span>
-                              </a>
-                            ) : (
-                              <span className="oa-cust-name">{r.company || `CO #${r.customerId}`}</span>
-                            )}
-                            {r.subStatus && !String(r.subStatus).startsWith('active') && (
-                              <Badge tone="neutral" size="sm">{r.subStatus}</Badge>
-                            )}
-                          </div>
-                          <div className="oa-cust-sub">{r.email || `CO #${r.customerId}`}</div>
-                        </td>
-                        <td className="oa-num oa-mono">
-                          {r.planMinutes ? `${fmtNum(r.planMinutes)} min` : <span className="oa-muted">no plan</span>}
-                        </td>
-                        <td className="oa-num">
-                          <Badge tone={streakTone(r.currentStreak, ongoing)} size="sm">
-                            {r.currentStreak} mo{ongoing ? '' : ' (ended)'}
-                          </Badge>
-                        </td>
-                        <td className="oa-months-td">
-                          <div className="oa-strip">
-                            {monthAxis.map(ym => {
-                              const m = byMonth.get(ym);
-                              return (
-                                <span
-                                  key={ym}
-                                  className="oa-cell"
-                                  data-tone={m ? pctTone(m.pctOverPlan) : 'none'}
-                                  data-waived={m?.fullyWaived ? 'yes' : undefined}
-                                  title={m
-                                    ? `${fmtMonth(ym)} — ${fmtNum(m.totalMinutes)} overage min on a ${r.planMinutes || '?'} min plan (${fmtPct(m.pctOverPlan)} over), ${fmtMoney(m.totalAmount)}${m.fullyWaived ? ' — waived' : ''}`
-                                    : `${fmtMonth(ym)} — no overage`}
-                                />
-                              );
-                            })}
-                          </div>
-                        </td>
-                        <td className="oa-num oa-mono">{fmtPct(r.peakPctOverPlan)}</td>
-                        <td className="oa-num oa-mono">{fmtMoney(r.totalAmount)}</td>
-                        <td className="oa-outreach-td" onClick={e => e.stopPropagation()}>
-                          <OutreachCell
-                            row={r}
-                            entry={outreach.log?.[r.key]}
-                            cooldownDays={outreach.cooldownDays}
-                            ready={!!outreach.ready?.[r.tenant]}
-                            onSend={() => { setSendError(''); setSendTarget(r); }}
-                          />
-                        </td>
-                      </tr>
-                      {isOpen && (
-                        <tr className="oa-detail-row">
-                          <td colSpan={8}>
-                            <div className="oa-detail">
-                              <table className="oa-detail-table">
-                                <thead>
-                                  <tr>
-                                    <th>Usage month</th>
-                                    <th className="oa-num">Overage min</th>
-                                    <th className="oa-num">Plan</th>
-                                    <th className="oa-num">% over plan</th>
-                                    <th className="oa-num">Rate</th>
-                                    <th className="oa-num">Billed</th>
-                                    <th>Invoice date</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {r.months.slice().reverse().map(m => (
-                                    <tr key={m.month}>
-                                      <td>{fmtMonth(m.month)}</td>
-                                      <td className="oa-num oa-mono">{fmtNum(m.totalMinutes)}</td>
-                                      <td className="oa-num oa-mono">{r.planMinutes ? fmtNum(r.planMinutes) : '—'}</td>
-                                      <td className="oa-num">
-                                        <span className="oa-pct-pill" data-tone={pctTone(m.pctOverPlan)}>{fmtPct(m.pctOverPlan)}</span>
-                                      </td>
-                                      <td className="oa-num oa-mono">{m.rate != null ? `$${m.rate.toFixed(2)}` : '—'}</td>
-                                      <td className="oa-num oa-mono">
-                                        {fmtMoney(m.totalAmount)}
-                                        {m.waivedMinutes > 0 && (
-                                          <Badge tone="warn" size="sm" className="oa-waived-tag">
-                                            {m.fullyWaived ? 'waived' : `${fmtNum(m.waivedMinutes)} min waived`}
-                                          </Badge>
-                                        )}
-                                      </td>
-                                      <td className="oa-mono oa-muted">{m.invoices.map(i => i.invoiceDate).join(', ')}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                              <div className="oa-detail-note">
-                                Plan size is the customer’s current ChargeOver subscription ({r.planMinutes ? `${fmtNum(r.planMinutes)} min` : 'not set'}).
-                                Each invoice bills the previous cycle, so it’s filed under the month the minutes were used. Only the last three cycles are shown — the Monday board keeps the longer history.
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
+                {mainRows.map(renderRow)}
+
+                {replannedRows.length > 0 && (
+                  <tr className="oa-group-row">
+                    <td colSpan={9}>
+                      <button type="button" className="oa-group-toggle"
+                              onClick={() => setShowReplanned(v => !v)}
+                              aria-expanded={showReplanned}>
+                        <span className="oa-group-caret">{showReplanned ? '▾' : '▸'}</span>
+                        Subscription changed this period ({replannedRows.length})
+                        <span className="oa-group-note">
+                          usually not worth emailing — their plan was already adjusted
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                {showReplanned && replannedRows.map(renderRow)}
               </tbody>
             </table>
           </div>
@@ -657,6 +767,7 @@ export default function OverageAlerter() {
               <div><dt>Goes to</dt><dd className="oa-mono">{sendTarget.email || <span className="oa-muted">no email on the ChargeOver record</span>}</dd></div>
               <div><dt>Sent from</dt><dd>ChargeOver {sendTarget.tenant === 'AL' ? 'Answering Legal' : 'Ring Savvy'}</dd></div>
               <div><dt>Template</dt><dd className="oa-mono">#{outreach.config?.[sendTarget.tenant]?.messageId ?? '—'}</dd></div>
+              <div><dt>Plan</dt><dd>{sendTarget.planMinutes ? `${fmtNum(sendTarget.planMinutes)} min` : 'not set'}{sendTarget.monthlyCost != null ? ` · ${fmtMoney(sendTarget.monthlyCost)}/mo` : ''}</dd></div>
               <div><dt>Overage streak</dt><dd>{sendTarget.currentStreak} consecutive months, peak {fmtPct(sendTarget.peakPctOverPlan)} over plan</dd></div>
               {outreach.monday?.configured && (
                 <div><dt>Recorded on</dt><dd>the Overage Outreach board in Monday</dd></div>
@@ -666,6 +777,14 @@ export default function OverageAlerter() {
               <div className="oa-warn">
                 This customer was emailed {daysSince(outreach.log[sendTarget.key].sentAt)} days ago, inside the
                 {' '}{outreach.cooldownDays}-day window. Sending again will email them a second time.
+              </div>
+            )}
+            {subChangedRecently(sendTarget) != null && (
+              <div className="oa-warn">
+                This subscription was changed {subChangedRecently(sendTarget)} days ago
+                ({fmtDate(sendTarget.subChangedAt)}). If they were just moved to a bigger plan,
+                the overages above may predate it — worth checking before telling them they keep
+                going over. ChargeOver records any subscription edit here, not only plan changes.
               </div>
             )}
             {!sendTarget.email && (
@@ -770,6 +889,19 @@ function OutreachCell({ row, entry, cooldownDays, ready, onSend }) {
   );
 }
 
+// Six minutes is a long stare at a progress bar. A glove working a desk phone
+// like a speed bag — for the billing manager, who used to fight. Decorative
+// only: hidden from screen readers, and it holds still for anyone who has asked
+// the OS to reduce motion.
+function LoadingBout() {
+  return (
+    <div className="oa-bout" role="img" aria-label="Loading">
+      <span className="oa-bout__glove" aria-hidden="true">🥊</span>
+      <span className="oa-bout__phone" aria-hidden="true">☎️</span>
+    </div>
+  );
+}
+
 function PageHead({ actions, meta }) {
   return (
     <header className="oa-page-head">
@@ -785,11 +917,25 @@ function PageHead({ actions, meta }) {
   );
 }
 
-function Tile({ label, value }) {
+function Tile({ label, value, hint }) {
   return (
     <div className="oa-tile">
-      <div className="oa-tile-label">{label}</div>
+      <div className="oa-tile-label">
+        <Hint text={hint}>{label}</Hint>
+      </div>
       <div className="oa-tile-value">{value}</div>
     </div>
+  );
+}
+
+// A plain-English explanation on hover, and on keyboard focus so it isn't
+// mouse-only. Every number in this module is a derived figure someone has to
+// trust before acting on it, so none of them should need explaining twice.
+function Hint({ text, children }) {
+  if (!text) return children;
+  return (
+    <span className="oa-hint" data-hint={text} tabIndex={0} role="note" aria-label={`${children} — ${text}`}>
+      {children}
+    </span>
   );
 }

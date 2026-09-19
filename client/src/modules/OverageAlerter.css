@@ -432,3 +432,165 @@
   white-space: nowrap;
 }
 .oa-board-link:hover { text-decoration: underline; }
+
+/* ── Hover explanations ──────────────────────────────────────────────
+   Every figure in this module is derived from ChargeOver rather than read
+   off it, so each one carries a plain-English note. Shown on hover and on
+   keyboard focus, so it is not mouse-only. */
+.oa-hint {
+  position: relative;
+  border-bottom: 1px dotted var(--border-strong);
+  cursor: help;
+  outline: none;
+}
+.oa-hint::after {
+  content: attr(data-hint);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: 280px;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--ink-900);
+  color: var(--white);
+  font-family: var(--font-sans);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-regular);
+  line-height: 1.45;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+  box-shadow: var(--elev-3);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(3px);
+  transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), visibility var(--dur-fast);
+}
+.oa-hint:hover::after,
+.oa-hint:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.oa-hint:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+/* Column headers sit at the top of a scroll container, and `overflow-x: auto`
+   clips vertically as well — so a tooltip drawn above the header is cut off by
+   the container edge and whatever sits above it. Header tooltips therefore open
+   DOWNWARDS, into the table body where there is room. */
+.oa-table th .oa-hint::after {
+  top: calc(100% + 8px);
+  bottom: auto;
+  transform: translateY(-3px);
+}
+.oa-table th .oa-hint:hover::after,
+.oa-table th .oa-hint:focus-visible::after { transform: translateY(0); }
+
+/* A sticky `th` with a z-index makes its own stacking context, so a later
+   header would otherwise paint over an earlier one's tooltip. Lift whichever
+   header is being hovered above its neighbours. */
+.oa-table th:hover,
+.oa-table th:focus-within { z-index: 30; }
+
+/* the last columns would push their tooltip off the right edge */
+.oa-table th:nth-last-child(-n+3) .oa-hint::after { left: auto; right: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .oa-hint::after { transition: none; }
+}
+
+/* ── Loading animation ───────────────────────────────────────────────
+   A glove working a desk phone, for the billing manager who used to fight.
+   System emoji rather than hand-drawn art: they render correctly everywhere
+   and can't be subtly malformed. Decorative only — the wrapper carries the
+   accessible name and both glyphs are hidden from screen readers. */
+.oa-bout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 64px;
+  user-select: none;
+}
+.oa-bout__glove,
+.oa-bout__phone {
+  font-size: 40px;
+  line-height: 1;
+  display: inline-block;
+}
+/* the glove is mirrored so it faces the phone */
+.oa-bout__glove {
+  transform: scaleX(-1);
+  animation: oa-jab 1.15s cubic-bezier(0.3, 0, 0.2, 1) infinite;
+}
+@keyframes oa-jab {
+  0%, 20%   { transform: scaleX(-1) translateX(12px) rotate(6deg); }
+  40%       { transform: scaleX(-1) translateX(-14px) rotate(-6deg); }
+  54%       { transform: scaleX(-1) translateX(-8px) rotate(-3deg); }
+  75%, 100% { transform: scaleX(-1) translateX(12px) rotate(6deg); }
+}
+.oa-bout__phone {
+  animation: oa-rattle 1.15s ease-out infinite;
+}
+@keyframes oa-rattle {
+  0%, 36%   { transform: translateX(0) rotate(0deg); }
+  44%       { transform: translateX(9px) rotate(11deg); }
+  54%       { transform: translateX(-4px) rotate(-5deg); }
+  62%       { transform: translateX(2px) rotate(2deg); }
+  70%, 100% { transform: translateX(0) rotate(0deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oa-bout__glove { animation: none; transform: scaleX(-1); }
+  .oa-bout__phone { animation: none; }
+}
+
+/* ── Grouped-off rows ────────────────────────────────────────────────
+   Customers whose subscription changed inside the window shown. Held below
+   the main list and collapsed, because they are numerous and usually the
+   wrong people to contact. */
+.oa-group-row > td { padding: 0; background: var(--surface-sunken); border-bottom: 1px solid var(--border); }
+.oa-group-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.oa-group-toggle:hover { background: var(--ink-050); }
+.oa-group-caret { color: var(--text-muted); }
+.oa-group-note {
+  font-weight: var(--fw-regular);
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+}
+
+/* Monthly subscription cost, under the plan size. */
+.oa-plan-cost {
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Plan header carries two independent sorts: plan size and monthly cost. */
+.oa-plan-th { white-space: nowrap; }
+.oa-plan-th .oa-sortable { display: block; }
+.oa-plan-th .oa-subsort {
+  font-weight: var(--fw-regular);
+  opacity: 0.75;
+  margin-top: 1px;
+}
+.oa-plan-th .oa-subsort:hover { opacity: 1; }
