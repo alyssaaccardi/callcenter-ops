@@ -105,6 +105,69 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
+// ─── Tool-run notifications ──────────────────────────────────────────────────
+// Posts to Slack whenever someone kicks off one of the board's jobs, so tool
+// usage is visible without anyone having to watch the activity log.
+//
+// Driven by one registry rather than a call in each route handler: adding a
+// tool means adding a line here, and nobody has to remember to instrument a
+// new route by hand.
+//
+// Goes to a single incoming webhook (SLACK_TOOL_USAGE_URL). Incoming webhooks
+// are bound to one channel and cannot DM, so that URL should point at a
+// private channel. Unset means the whole feature no-ops.
+const TOOL_RUN_ROUTES = [
+  { method: 'POST', pattern: /^\/api\/overage-alerter\/run$/,           tool: 'Overage Alerter' },
+  { method: 'POST', pattern: /^\/api\/zendesk-auditor\/run$/,           tool: 'Zendesk Cancellation Auditor',
+    detail: req => req.file?.originalname },
+  { method: 'POST', pattern: /^\/api\/zendesk-auditor\/lookup$/,        tool: 'Zendesk Auditor lookup',
+    detail: req => req.body?.ticketId || req.body?.email },
+  { method: 'POST', pattern: /^\/api\/minute-auditor\/upload$/,         tool: 'Minute Auditor',
+    detail: req => req.file?.originalname },
+  { method: 'POST', pattern: /^\/api\/salesperson-auditor\/upload$/,    tool: 'Salesperson Auditor',
+    detail: req => req.file?.originalname },
+  { method: 'POST', pattern: /^\/api\/slack\/workflows\/[^/]+\/fire$/, tool: 'Slack workflow',
+    detail: req => req.body?.name || req.params?.id },
+];
+
+function postToolRunNotice({ tool, detail, user, email, when }) {
+  const url = process.env.SLACK_TOOL_USAGE_URL;
+  if (!url) return;
+  const who = user || email || 'Unknown user';
+  const lines = [`:wrench: *${tool}* run by *${who}*`, when];
+  if (detail) lines.push(`\u2022 ${detail}`);
+  if (email && email !== who) lines.push(`\u2022 ${email}`);
+  // Fire and forget. A Slack outage must never fail or slow a tool run, so
+  // failures are logged here and go no further.
+  axios.post(url, { text: lines.join('\n'), mrkdwn: true }, { timeout: 8000 })
+    .catch(err => console.error('[tool-usage] Slack post failed:', err.message));
+}
+
+app.use((req, res, next) => {
+  const route = TOOL_RUN_ROUTES.find(
+    r => r.method === req.method && r.pattern.test(req.path)
+  );
+  if (!route) return next();
+
+  // Read the user on finish, not now: for dev and API-key requests req.user is
+  // set inside the route's own requireAuth/requireRole, which has not run yet.
+  res.on('finish', () => {
+    // Only a run that actually started. A 400 for a missing file or a 403 for
+    // the wrong role is not someone using the tool.
+    if (res.statusCode >= 400) return;
+    let detail;
+    try { detail = route.detail?.(req); } catch { /* detail is optional */ }
+    postToolRunNotice({
+      tool: route.tool,
+      detail,
+      user: req.user?.name,
+      email: req.user?.email,
+      when: activityLogTimestamp(),
+    });
+  });
+  next();
+});
+
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
