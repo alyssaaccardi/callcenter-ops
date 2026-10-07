@@ -203,6 +203,16 @@ Two JSON files are written to the project root at runtime. They do not need to e
 
 **For hosted deployments:** ensure the process has write access to the project root, or mount a persistent volume at that path (important for platforms like Railway or Fly.io that use ephemeral filesystems).
 
+### AIRI QA review data
+
+`ai-bot-qc.db` stores AIRI QA reviews and audit history. On the production VPS it lives at `/opt/ccops/ai-bot-qc.db` and is excluded from deploy sync. A verified SQLite online backup runs daily at 03:00 server time to `/opt/ccops/backups/ai-bot-qc/`; snapshots are private (`0600`) and older than 30 days are pruned. The schedule is installed by `scripts/install-ai-bot-qc-backup-cron.sh`.
+
+For everyday reviewer instructions, see the [AIRI QA Quick Start](docs/AIRI-QA-QUICK-START.md). Admins, trainers, and bug investigators can use the more detailed [AIRI QA Team Guide](docs/AIRI-QA-TEAM-GUIDE.md).
+
+The AIRI QA Training & User Guide download is restricted to AIRI QA admins in the app. `deploy.sh` regenerates the Word document from both Markdown guides before syncing the application, so guide changes ship with the next deployment.
+
+To restore, stop the `ccops` process, preserve the current database and any `-wal` / `-shm` sidecars, copy the chosen snapshot to `ai-bot-qc.db`, verify SQLite integrity, then restart the process. Keep a copy of the pre-restore files until the restored review counts are confirmed.
+
 ---
 
 ## Hosting Recommendations

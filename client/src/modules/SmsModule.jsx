@@ -201,7 +201,7 @@ export default function SmsModule() {
               </div>
             </div>
 
-            <hr style={{ border: 'none', borderTop: '1px solid rgba(168,85,247,0.12)', margin: '14px 0' }} />
+            <hr style={{ border: 'none', borderTop: '1px solid rgba(1,146,219,0.12)', margin: '14px 0' }} />
 
             <div className="form-row">
               <label className="field-label">Or send to Individual (E.164)</label>
@@ -276,8 +276,8 @@ export default function SmsModule() {
                 {confirm.recipients.map((r, i) => (
                   <span key={i} style={{
                     fontSize: 12, fontWeight: 700, padding: '3px 10px',
-                    borderRadius: 20, background: 'rgba(168,85,247,0.1)',
-                    border: '1px solid rgba(168,85,247,0.25)', color: 'var(--purple, #a855f7)',
+                    borderRadius: 20, background: 'rgba(1,146,219,0.1)',
+                    border: '1px solid rgba(1,146,219,0.25)', color: 'var(--purple, #25A8D9)',
                   }}>{r}</span>
                 ))}
               </div>
@@ -286,7 +286,7 @@ export default function SmsModule() {
               <span className="field-label">Message</span>
               <div style={{
                 marginTop: 2, padding: '10px 12px', borderRadius: 8,
-                background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(168,85,247,0.12)',
+                background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(1,146,219,0.12)',
                 fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                 color: 'var(--text)',
               }}>{confirm.message}</div>

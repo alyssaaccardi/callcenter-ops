@@ -5,7 +5,7 @@
   inset: 0;
   overflow: hidden;
   background: #0e1520;
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   color: #f0f4ff;
 }
 
@@ -36,11 +36,11 @@
 
 .tv-page.tv-denied div { text-align: center; }
 .tv-page.tv-denied h2 {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 36px; letter-spacing: 0.1em;
   margin-bottom: 8px; color: #f0f4ff;
 }
-.tv-page.tv-denied p { color: #4a5a7a; font-size: 18px; font-family: 'Barlow Condensed', sans-serif; }
+.tv-page.tv-denied p { color: #4a5a7a; font-size: 18px; font-family: 'Bricolage Grotesque', sans-serif; }
 
 .tv-stripe-top {
   position: fixed; top: 0; left: 0; right: 0; height: 6px;
@@ -82,20 +82,20 @@
 }
 .tv-header-left { display: flex; align-items: center; gap: 14px; }
 .tv-header-logo { height: 56px; width: auto; flex-shrink: 0; object-fit: contain; filter: invert(1); mix-blend-mode: screen; }
-.tv-header-brand { font-family: 'Bebas Neue', sans-serif; font-size: 28px; letter-spacing: 0.12em; color: #f0f4ff; line-height: 1; }
+.tv-header-brand { font-family: 'Bricolage Grotesque', sans-serif; font-size: 28px; letter-spacing: 0.12em; color: #f0f4ff; line-height: 1; }
 .tv-header-sub { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #00c9b1; letter-spacing: 0.2em; text-transform: uppercase; margin-top: 2px; }
 .tv-header-center { text-align: center; display: flex; align-items: center; justify-content: center; }
 .tv-header-right { text-align: right; }
 .tv-dual-clock { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
 .tv-clock-entry { display: flex; align-items: baseline; gap: 5px; }
-.tv-clock-label { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700; color: #4a5a7a; letter-spacing: 0.12em; text-transform: uppercase; }
+.tv-clock-label { font-family: 'Bricolage Grotesque', sans-serif; font-size: 11px; font-weight: 700; color: #4a5a7a; letter-spacing: 0.12em; text-transform: uppercase; }
 .tv-clock-sep { width: 1px; height: 16px; background: rgba(255,255,255,0.15); }
 .tv-clock { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 600; color: #f0f4ff; letter-spacing: 0.05em; }
 .tv-date  { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #4a5a7a; margin-top: 2px; letter-spacing: 0.1em; text-transform: uppercase; }
 
 .tv-did-status-pill {
   display: inline-block; padding: 7px 28px;
-  border-radius: 24px; font-family: 'Barlow Condensed', sans-serif;
+  border-radius: 24px; font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 22px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
   border: 1px solid transparent; transition: background 0.4s, color 0.4s, border-color 0.4s;
 }
@@ -132,14 +132,14 @@
 
 .tv-panel-inner { padding: 10px 14px 10px 20px; flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
-.tv-panel-location { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 500; letter-spacing: 0.2em; text-transform: uppercase; color: #4a5a7a; margin-bottom: 1px; }
+.tv-panel-location { font-family: 'Bricolage Grotesque', sans-serif; font-size: 12px; font-weight: 500; letter-spacing: 0.2em; text-transform: uppercase; color: #4a5a7a; margin-bottom: 1px; }
 .tv-panel-carrier {
   display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 9px;
   letter-spacing: 0.15em; text-transform: uppercase; color: #00c9b1;
   background: rgba(0,201,177,0.08); padding: 1px 6px; border-radius: 3px;
   border: 1px solid rgba(0,201,177,0.2); margin-bottom: 4px;
 }
-.tv-panel-name { font-family: 'Bebas Neue', sans-serif; font-size: clamp(24px, 2.8vw, 42px); line-height: 0.9; letter-spacing: 0.04em; color: #f0f4ff; margin-bottom: 4px; }
+.tv-panel-name { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(24px, 2.8vw, 42px); line-height: 0.9; letter-spacing: 0.04em; color: #f0f4ff; margin-bottom: 4px; }
 
 /* ── ORB ── */
 .tv-orb-row { display: flex; align-items: center; gap: 12px; margin-bottom: 2px; }
@@ -155,21 +155,21 @@
 @keyframes tv-pulse-red          { 0%,100%{box-shadow:0 0 10px rgba(239,68,68,0.7)} 50%{box-shadow:0 0 30px rgba(239,68,68,1)} }
 @keyframes tv-pulse-red-ring     { 0%,100%{opacity:0.2;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.4)} }
 
-.tv-status-word { font-family: 'Bebas Neue', sans-serif; font-size: clamp(18px, 2.2vw, 30px); letter-spacing: 0.08em; transition: color 0.5s; }
+.tv-status-word { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(18px, 2.2vw, 30px); letter-spacing: 0.08em; transition: color 0.5s; }
 .tv-status-word.tv-up   { color: #22c55e; }
 .tv-status-word.tv-down { color: #ef4444; }
 
 /* ── DID COUNT ── */
 .tv-did-block { margin-bottom: 2px; }
-.tv-did-label { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 0.25em; text-transform: uppercase; color: #4a5a7a; margin-bottom: 1px; }
-.tv-did-number { font-family: 'Bebas Neue', sans-serif; font-size: clamp(28px, 3.2vw, 46px); line-height: 0.85; letter-spacing: -0.02em; transition: color 0.5s, transform 0.3s; }
+.tv-did-label { font-family: 'Bricolage Grotesque', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 0.25em; text-transform: uppercase; color: #4a5a7a; margin-bottom: 1px; }
+.tv-did-number { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(28px, 3.2vw, 46px); line-height: 0.85; letter-spacing: -0.02em; transition: color 0.5s, transform 0.3s; }
 .tv-did-number.tv-up   { color: #00c9b1; }
 .tv-did-number.tv-down { color: #f59e0b; }
 .tv-did-number.tv-pop  { animation: tv-did-pop 0.4s ease; }
 
 @keyframes tv-did-pop { 0%{transform:scale(1)} 40%{transform:scale(1.06)} 100%{transform:scale(1)} }
 
-.tv-panel-message { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(13px, 1.3vw, 16px); font-weight: 400; color: rgba(255,255,255,0.5); line-height: 1.2; }
+.tv-panel-message { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(13px, 1.3vw, 16px); font-weight: 400; color: rgba(255,255,255,0.5); line-height: 1.2; }
 .tv-panel-attribution { font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #4a5a7a; margin-top: 4px; letter-spacing: 0.06em; }
 
 /* ── AGENT STATS ── */
@@ -177,11 +177,11 @@
 .tv-agent-stats-row { display: flex; gap: 14px; }
 .tv-agent-stat { flex: 1; }
 .tv-standby-label { font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: #4a5a7a; margin-bottom: 1px; }
-.tv-here-count    { font-family: 'Bebas Neue', sans-serif; font-size: clamp(22px, 2.5vw, 36px); line-height: 1; color: #22c55e; transition: color 0.4s; }
+.tv-here-count    { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(22px, 2.5vw, 36px); line-height: 1; color: #22c55e; transition: color 0.4s; }
 .tv-here-count.tv-none    { color: #4a5a7a; }
-.tv-standby-count { font-family: 'Bebas Neue', sans-serif; font-size: clamp(22px, 2.5vw, 36px); line-height: 1; color: #f59e0b; transition: color 0.4s; }
+.tv-standby-count { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(22px, 2.5vw, 36px); line-height: 1; color: #f59e0b; transition: color 0.4s; }
 .tv-standby-count.tv-none { color: #4a5a7a; }
-.tv-standby-names { margin-top: 3px; font-size: 11px; color: rgba(240,244,255,0.45); line-height: 1.3; font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-standby-names { margin-top: 3px; font-size: 11px; color: rgba(240,244,255,0.45); line-height: 1.3; font-family: 'Bricolage Grotesque', sans-serif; letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── SYSTEMS BAR ── */
 .tv-systems-bar { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; flex-shrink: 0; padding-bottom: 10px; }
@@ -200,21 +200,21 @@
 .tv-sys-chip.tv-up   .tv-sys-chip-accent { background: linear-gradient(180deg, #00c9b1, #22c55e); }
 .tv-sys-chip.tv-down .tv-sys-chip-accent { background: linear-gradient(180deg, #f59e0b, #ef4444); }
 
-.tv-sys-chip-name { font-family: 'Bebas Neue', sans-serif; font-size: clamp(18px, 2vw, 26px); letter-spacing: 0.06em; color: #f0f4ff; white-space: nowrap; }
+.tv-sys-chip-name { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(18px, 2vw, 26px); letter-spacing: 0.06em; color: #f0f4ff; white-space: nowrap; }
 .tv-sys-chip-body { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .tv-sys-chip-status-row { display: flex; align-items: center; gap: 10px; }
 .tv-sys-chip-orb { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
 .tv-sys-chip-orb.tv-up   { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.8); animation: tv-breathe-green 3s ease-in-out infinite; }
 .tv-sys-chip-orb.tv-down { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.8); animation: tv-pulse-red 1s ease-in-out infinite; }
-.tv-sys-chip-word { font-family: 'Bebas Neue', sans-serif; font-size: clamp(16px, 1.8vw, 22px); letter-spacing: 0.08em; transition: color 0.4s; }
+.tv-sys-chip-word { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(16px, 1.8vw, 22px); letter-spacing: 0.08em; transition: color 0.4s; }
 .tv-sys-chip-word.tv-up   { color: #22c55e; }
 .tv-sys-chip-word.tv-down { color: #ef4444; }
-.tv-sys-chip-alert { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(11px, 1.3vw, 16px); font-weight: 600; color: #f59e0b; line-height: 1.2; }
+.tv-sys-chip-alert { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(11px, 1.3vw, 16px); font-weight: 600; color: #f59e0b; line-height: 1.2; }
 
 .tv-queue-stats { display: flex; align-items: center; gap: 12px; margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08); }
 .tv-queue-stat { display: flex; flex-direction: column; align-items: center; gap: 1px; flex: 1; }
-.tv-queue-stat-label { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(9px, 1vw, 12px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.1em; text-transform: uppercase; }
-.tv-queue-stat-value { font-family: 'Bebas Neue', sans-serif; font-size: clamp(18px, 2vw, 26px); letter-spacing: 0.04em; color: #c8d8f8; line-height: 1; }
+.tv-queue-stat-label { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(9px, 1vw, 12px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.1em; text-transform: uppercase; }
+.tv-queue-stat-value { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(18px, 2vw, 26px); letter-spacing: 0.04em; color: #c8d8f8; line-height: 1; }
 .tv-queue-stat-value.tv-queue-warn { color: #f59e0b; }
 .tv-queue-stat-divider { width: 1px; height: 26px; background: rgba(255,255,255,0.1); flex-shrink: 0; }
 
@@ -223,11 +223,11 @@
 .tv-did-pool-chip .tv-sys-chip-body { align-items: center; }
 .tv-did-pool-row { display: flex; align-items: center; gap: 12px; }
 .tv-did-pool-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.tv-did-pool-label { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(10px, 1.1vw, 14px); font-weight: 600; color: var(--tv-muted, #8899bb); letter-spacing: 0.08em; text-transform: uppercase; }
-.tv-did-pool-count { font-family: 'Bebas Neue', sans-serif; font-size: clamp(22px, 2.6vw, 36px); letter-spacing: 0.04em; color: #22c55e; line-height: 1; }
+.tv-did-pool-label { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(10px, 1.1vw, 14px); font-weight: 600; color: var(--tv-muted, #8899bb); letter-spacing: 0.08em; text-transform: uppercase; }
+.tv-did-pool-count { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(22px, 2.6vw, 36px); letter-spacing: 0.04em; color: #22c55e; line-height: 1; }
 .tv-did-pool-count.tv-zero { color: #ef4444; }
 .tv-did-pool-divider { width: 1px; height: 36px; background: rgba(255,255,255,0.12); }
-.tv-did-pool-unavailable { font-family: 'Bebas Neue', sans-serif; font-size: clamp(20px, 2.4vw, 32px); letter-spacing: 0.08em; color: #ef4444; }
+.tv-did-pool-unavailable { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(20px, 2.4vw, 32px); letter-spacing: 0.08em; color: #ef4444; }
 
 /* ── FOOTER ── */
 .tv-footer {
@@ -237,7 +237,7 @@
 }
 .tv-global-pill {
   display: inline-flex; align-items: center; gap: 10px; padding: 8px 28px;
-  border-radius: 40px; font-family: 'Bebas Neue', sans-serif; font-size: 20px; letter-spacing: 0.15em;
+  border-radius: 40px; font-family: 'Bricolage Grotesque', sans-serif; font-size: 20px; letter-spacing: 0.15em;
   transition: all 0.5s;
 }
 .tv-global-pill.tv-operational { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.4); color: #22c55e; }
@@ -300,15 +300,15 @@
 /* Mitel today's-calls table */
 .tv-mitel-stats { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; }
 .tv-mitel-stats-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
-.tv-mitel-stats-title { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(9px, 1vw, 12px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.1em; text-transform: uppercase; }
+.tv-mitel-stats-title { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(9px, 1vw, 12px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.1em; text-transform: uppercase; }
 .tv-mitel-stats-header .tv-mitel-stats-cols { display: flex; gap: 0; }
-.tv-mitel-stats-header .tv-mitel-stats-cols span { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(8px, 0.9vw, 11px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.08em; text-transform: uppercase; width: clamp(44px, 5vw, 64px); text-align: right; }
+.tv-mitel-stats-header .tv-mitel-stats-cols span { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(8px, 0.9vw, 11px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.08em; text-transform: uppercase; width: clamp(44px, 5vw, 64px); text-align: right; }
 .tv-mitel-stats-row { display: flex; align-items: baseline; justify-content: space-between; padding: 1px 0; transition: background 0.3s; border-radius: 3px; }
 .tv-mitel-stats-row.tv-queue-active { background: rgba(251,191,36,0.06); }
-.tv-mitel-stats-queue { font-family: 'Bebas Neue', sans-serif; font-size: clamp(13px, 1.4vw, 18px); letter-spacing: 0.05em; color: #8899bb; }
+.tv-mitel-stats-queue { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(13px, 1.4vw, 18px); letter-spacing: 0.05em; color: #8899bb; }
 .tv-mitel-stats-row.tv-queue-active .tv-mitel-stats-queue { color: #f0f4ff; }
 .tv-mitel-stats-cols { display: flex; gap: 0; }
-.tv-mitel-stats-cols span { font-family: 'Bebas Neue', sans-serif; font-size: clamp(13px, 1.4vw, 18px); letter-spacing: 0.04em; width: clamp(44px, 5vw, 64px); text-align: right; }
+.tv-mitel-stats-cols span { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(13px, 1.4vw, 18px); letter-spacing: 0.04em; width: clamp(44px, 5vw, 64px); text-align: right; }
 .tv-mitel-waiting { color: #4a5a7a; }
 .tv-mitel-waiting.has-waiting { color: #f59e0b; font-size: clamp(15px, 1.6vw, 22px); }
 .tv-mitel-answered { color: #22c55e; }
@@ -328,11 +328,11 @@
 }
 
 .tv-hourly-stats { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 3px; }
-.tv-hourly-stats-title { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(8px, 0.9vw, 11px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 1px; }
+.tv-hourly-stats-title { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(8px, 0.9vw, 11px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 1px; }
 .tv-hourly-stats-cols { display: flex; align-items: center; gap: 10px; }
 .tv-hourly-stats-col { display: flex; flex-direction: column; align-items: center; gap: 1px; flex: 1; }
-.tv-hourly-stats-label { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(9px, 1vw, 12px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.1em; text-transform: uppercase; }
-.tv-hourly-stats-value { font-family: 'Bebas Neue', sans-serif; font-size: clamp(16px, 1.8vw, 22px); letter-spacing: 0.04em; color: #c8d8f0; line-height: 1; }
+.tv-hourly-stats-label { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(9px, 1vw, 12px); font-weight: 700; color: #4a5a7a; letter-spacing: 0.1em; text-transform: uppercase; }
+.tv-hourly-stats-value { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(16px, 1.8vw, 22px); letter-spacing: 0.04em; color: #c8d8f0; line-height: 1; }
 .tv-hourly-stats-divider { width: 1px; height: 24px; background: rgba(255,255,255,0.1); flex-shrink: 0; }
 
 @keyframes tv-upPop       { from{opacity:0;transform:scale(0.5)} to{opacity:1;transform:scale(1)} }

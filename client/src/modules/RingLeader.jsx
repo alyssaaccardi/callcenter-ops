@@ -1006,11 +1006,11 @@ function newsletterToSlackMarkdown(month, n) {
 
 // Inlined CSS used only inside the exported HTML file (self-contained).
 const NEWSLETTER_EXPORT_CSS = `
-  :root { --p:#7c3aed; --pk:#ec4899; --t:#00c9b1; --tx:#1a1a3e; --mut:rgba(26,26,62,.55); --br:rgba(168,85,247,.15); }
+  :root { --p:#0192db; --pk:#19A5E2; --t:#13899f; --tx:#17181b; --mut:rgba(23,24,27,.55); --br:rgba(1,146,219,.15); }
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:'Helvetica Neue',Arial,sans-serif;background:#f6f5fb;color:var(--tx);padding:40px 20px;line-height:1.55;}
   .nl-doc{max-width:820px;margin:0 auto;background:#fff;border-radius:24px;box-shadow:0 20px 60px rgba(60,50,120,.08);overflow:hidden;}
-  .nl-cover{padding:56px 48px 40px;background:linear-gradient(135deg,rgba(124,58,237,.10),rgba(236,72,153,.10) 60%,rgba(6,182,212,.10));border-bottom:1px solid var(--br);}
+  .nl-cover{padding:56px 48px 40px;background:linear-gradient(135deg,rgba(1,146,219,.10),rgba(25,165,226,.10) 60%,rgba(19,137,159,.10));border-bottom:1px solid var(--br);}
   .nl-cover-badge{display:inline-block;padding:6px 12px;background:#fff;color:var(--p);font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;border-radius:999px;border:1px solid var(--br);}
   .nl-cover-title{margin-top:16px;font-size:34px;font-weight:800;letter-spacing:-.01em;line-height:1.15;}
   .nl-cover-month{margin-top:6px;font-size:14px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.12em;}
@@ -1023,10 +1023,10 @@ const NEWSLETTER_EXPORT_CSS = `
   .nl-lede{font-size:17px;line-height:1.55;color:#3a3560;}
   .nl-body{font-size:15px;line-height:1.6;color:#3a3560;}
   .nl-wins-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-  .nl-win-card{padding:16px;background:linear-gradient(135deg,rgba(124,58,237,.06),rgba(236,72,153,.04));border:1px solid var(--br);border-radius:12px;}
+  .nl-win-card{padding:16px;background:linear-gradient(135deg,rgba(1,146,219,.06),rgba(25,165,226,.04));border:1px solid var(--br);border-radius:12px;}
   .nl-win-title{font-weight:700;margin-bottom:4px;color:var(--p);}
   .nl-win-desc{font-size:14px;color:#3a3560;line-height:1.5;}
-  .nl-callout{padding:14px 16px;background:rgba(0,201,177,.06);border-left:4px solid var(--t);border-radius:8px;margin-bottom:10px;}
+  .nl-callout{padding:14px 16px;background:rgba(19,137,159,.06);border-left:4px solid var(--t);border-radius:8px;margin-bottom:10px;}
   .nl-callout-header{display:flex;gap:8px;align-items:center;margin-bottom:6px;}
   .nl-badge{padding:2px 8px;background:var(--t);color:#fff;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-radius:999px;}
   .nl-callout-person{font-size:13px;font-weight:600;color:var(--t);}
@@ -1038,7 +1038,7 @@ const NEWSLETTER_EXPORT_CSS = `
   .nl-spotlight-dept{font-size:11px;font-weight:600;color:#b35d00;letter-spacing:.1em;text-transform:uppercase;margin-top:2px;}
   .nl-spotlight-reason{font-size:14px;line-height:1.5;margin-top:8px;color:#3a3560;}
   .nl-welcomes-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-  .nl-welcome{padding:14px;background:rgba(6,182,212,.06);border:1px solid rgba(6,182,212,.25);border-radius:12px;}
+  .nl-welcome{padding:14px;background:rgba(19,137,159,.06);border:1px solid rgba(19,137,159,.25);border-radius:12px;}
   .nl-welcome-type{font-size:10px;font-weight:700;color:#0891b2;letter-spacing:.14em;text-transform:uppercase;}
   .nl-welcome-name{font-weight:800;font-size:16px;margin-top:2px;}
   .nl-welcome-meta{font-size:13px;color:var(--mut);margin-top:2px;}
@@ -1049,7 +1049,7 @@ const NEWSLETTER_EXPORT_CSS = `
   .nl-status-tag{padding:3px 10px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;border-radius:999px;background:rgba(148,148,180,.15);color:var(--mut);}
   .nl-status-released{background:rgba(34,197,94,.15);color:#15803d;}
   .nl-status-in-progress{background:rgba(245,158,11,.15);color:#b35d00;}
-  .nl-status-coming-soon{background:rgba(124,58,237,.15);color:var(--p);}
+  .nl-status-coming-soon{background:rgba(1,146,219,.15);color:var(--p);}
   .nl-product-desc{font-size:14px;color:#3a3560;line-height:1.5;}
   .nl-product-impact{margin-top:6px;font-size:13px;color:var(--p);}
   .nl-kpi-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
@@ -1061,7 +1061,7 @@ const NEWSLETTER_EXPORT_CSS = `
   .nl-kpi-arrow{font-size:14px;}
   .nl-kpi-prev{font-size:11px;color:var(--mut);font-weight:500;}
   .nl-kpi-explain{font-size:12px;color:var(--mut);margin-top:6px;line-height:1.4;}
-  .nl-fact-box{padding:20px;background:linear-gradient(135deg,rgba(251,191,36,.10),rgba(236,72,153,.06));border:1px solid rgba(251,191,36,.30);border-radius:14px;font-size:15px;line-height:1.55;color:#3a3560;font-style:italic;}
+  .nl-fact-box{padding:20px;background:linear-gradient(135deg,rgba(251,191,36,.10),rgba(25,165,226,.06));border:1px solid rgba(251,191,36,.30);border-radius:14px;font-size:15px;line-height:1.55;color:#3a3560;font-style:italic;}
   .nl-wc-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .nl-wc{padding:12px 14px;background:#f9f8ff;border-radius:10px;border:1px solid var(--br);}
   .nl-wc-cat{font-size:10px;font-weight:700;color:var(--pk);letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px;}

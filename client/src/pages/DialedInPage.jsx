@@ -462,10 +462,10 @@ export default function DialedInPage() {
               </div>
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, paddingTop: 8 }}>
                 <div style={{ fontSize: 'clamp(32px, 4vw, 56px)', lineHeight: 1 }}>🛳️</div>
-                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 'clamp(18px, 2.2vw, 30px)', letterSpacing: '0.06em', color: '#fbbf24', textAlign: 'center', lineHeight: 1.1 }}>
+                <div style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 'clamp(18px, 2.2vw, 30px)', letterSpacing: '0.06em', color: '#fbbf24', textAlign: 'center', lineHeight: 1.1 }}>
                   Bon Voyage, Amit!
                 </div>
-                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 'clamp(10px, 1.1vw, 14px)', fontWeight: 600, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(240,244,255,0.4)', textAlign: 'center' }}>
+                <div style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 'clamp(10px, 1.1vw, 14px)', fontWeight: 600, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(240,244,255,0.4)', textAlign: 'center' }}>
                   Fair winds &amp; following seas
                 </div>
               </div>

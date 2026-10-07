@@ -88,7 +88,16 @@ passport.deserializeUser((data, done) => {
   done(null, { email, name: record.name, role: record.role, additionalRoles: record.additionalRoles || [], picture: record.picture || '' });
 });
 
-const DEV_USER = { email: 'dev@local', name: 'Dev User', role: 'super_admin', additionalRoles: [] };
+// Dev-only identity. DEV_ROLE and DEV_EMAIL let a developer act as any role
+// locally to check gating from the other side — a tester really cannot reach
+// the coordinator's screens. Ignored entirely once GOOGLE_CLIENT_ID is set, so
+// it cannot apply in production.
+const DEV_USER = {
+  email: process.env.DEV_EMAIL || 'dev@local',
+  name:  process.env.DEV_NAME  || 'Dev User',
+  role:  process.env.DEV_ROLE  || 'super_admin',
+  additionalRoles: [],
+};
 const API_KEY_USER = { email: 'api-key@ccops', name: 'API Key', role: 'api', additionalRoles: [] };
 
 // Read-only API key — accepted on GET requests via X-API-Key header.

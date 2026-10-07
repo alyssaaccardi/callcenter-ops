@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
+import { authState } from '../api';
 
 const AuthContext = createContext(null);
 
@@ -10,7 +11,10 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     axios.get('/api/me', { withCredentials: true })
       .then(res => {
-        if (res.data.authenticated) setUser(res.data.user);
+        if (res.data.authenticated) {
+          authState.isGuest = !!res.data.user?.isGuest;
+          setUser(res.data.user);
+        }
         else setUser(null);
       })
       .catch(() => setUser(null))

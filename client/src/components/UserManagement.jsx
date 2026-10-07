@@ -13,6 +13,11 @@ const ROLES = [
   { value: 'scriptor',               label: 'The Rob-osetta Stone' },
   { value: 'rob_ai_board',           label: "Rob's AI Board" },
   { value: 'staffing',               label: 'Staffing' },
+  { value: 'qa_admin',               label: 'QA Coordinator' },
+  { value: 'qa_tester',              label: 'QA Tester' },
+  { value: 'qa_leadership',          label: 'QA Leadership' },
+  { value: 'ai_bot_qc',              label: 'AIRI QA Agent' },
+  { value: 'ai_bot_qc_admin',        label: 'AIRI QA Admin' },
 ];
 
 const ROLE_STYLE = {
@@ -27,6 +32,11 @@ const ROLE_STYLE = {
   scriptor:               { background: 'rgba(139,92,246,0.15)', color: '#c4b5fd' },
   rob_ai_board:           { background: 'rgba(249,115,22,0.15)', color: '#fb923c' },
   staffing:               { background: 'rgba(20,184,166,0.15)', color: '#5eead4' },
+  qa_admin:               { background: 'rgba(168,85,247,0.15)',  color: '#d8b4fe' },
+  qa_tester:              { background: 'rgba(139,92,246,0.15)',  color: '#c4b5fd' },
+  qa_leadership:          { background: 'rgba(99,102,241,0.15)',  color: '#a5b4fc' },
+  ai_bot_qc:              { background: 'rgba(14,116,144,0.18)', color: '#67e8f9' },
+  ai_bot_qc_admin:        { background: 'rgba(8,145,178,0.22)',  color: '#a5f3fc' },
 };
 
 const ROLE_LABEL = {
@@ -42,6 +52,11 @@ const ROLE_LABEL = {
   scriptor:               'The Rob-osetta Stone',
   rob_ai_board:           "Rob's AI Board",
   staffing:               'Staffing',
+  qa_admin:               'QA Coordinator',
+  qa_tester:              'QA Tester',
+  qa_leadership:          'QA Leadership',
+  ai_bot_qc:              'AIRI QA Agent',
+  ai_bot_qc_admin:        'AIRI QA Admin',
 };
 
 function TutorialRow({ t, onToggle, onReset }) {

@@ -17,7 +17,7 @@
   font-size: 26px;
   font-weight: 800;
   margin: 0 0 4px 0;
-  color: var(--text, #1a1a3e);
+  color: var(--text, #17181b);
 }
 
 .mitel-lb-sub {
@@ -38,7 +38,7 @@
   border-radius: 8px;
   border: 1.5px solid var(--border, rgba(107,122,153,0.22));
   background: var(--surface, #fff);
-  color: var(--text, #1a1a3e);
+  color: var(--text, #17181b);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -79,7 +79,7 @@
   border-radius: 8px;
   border: 1.5px solid var(--border, rgba(107,122,153,0.22));
   background: var(--surface, #fff);
-  color: var(--text, #1a1a3e);
+  color: var(--text, #17181b);
   font-size: 13px;
   font-weight: 600;
 }
@@ -183,7 +183,7 @@
   border-radius: 0 8px 8px 0;
 }
 
-.methodology strong { color: var(--text, #1a1a3e); }
+.methodology strong { color: var(--text, #17181b); }
 
 /* ── Exclusions ──────────────────────────────────────── */
 .excl-pill {
@@ -254,7 +254,7 @@
 .meta-value {
   font-size: 14px;
   font-weight: 700;
-  color: var(--text, #1a1a3e);
+  color: var(--text, #17181b);
 }
 
 .meta-sub {
@@ -272,7 +272,7 @@
 }
 
 .totals-tile {
-  background: linear-gradient(135deg, rgba(99,102,241,0.06), rgba(139,92,246,0.06));
+  background: linear-gradient(135deg, rgba(99,102,241,0.06), rgba(1,146,219,0.06));
   border: 1.5px solid rgba(99,102,241,0.18);
   border-radius: 12px;
   padding: 14px 16px;
@@ -313,7 +313,7 @@
   border-radius: 8px;
   border: 1.5px solid var(--border, rgba(107,122,153,0.22));
   background: var(--surface, #fff);
-  color: var(--text, #1a1a3e);
+  color: var(--text, #17181b);
   font-size: 13px;
 }
 
@@ -442,7 +442,7 @@
   margin: 0;
   font-size: 18px;
   font-weight: 800;
-  color: var(--text, #1a1a3e);
+  color: var(--text, #17181b);
 }
 
 .modal-close {
@@ -525,7 +525,7 @@
   resize: vertical;
   min-height: 220px;
   background: var(--surface-2, #fafbfc);
-  color: var(--text, #1a1a3e);
+  color: var(--text, #17181b);
 }
 
 .modal-actions {

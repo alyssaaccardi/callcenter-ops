@@ -331,7 +331,7 @@ body.dark .ma-brand-mark { filter: invert(1) brightness(1.1); }
 /* By-category tab: same group-header structure, warmer accent bar */
 .ma-group-header--category td {
   border-top-color: var(--violet-600);
-  background: rgba(124,58,237,0.04);
+  background: rgba(1,146,219,0.04);
 }
 .ma-group-header--category .ma-group-title {
   font-family: var(--font-mono);
@@ -345,7 +345,7 @@ body.dark .ma-brand-mark { filter: invert(1) brightness(1.1); }
   font-weight: var(--fw-semibold);
 }
 .ma-group-clickable { cursor: pointer; user-select: none; }
-.ma-group-clickable:hover td { background: rgba(124,58,237,0.08); }
+.ma-group-clickable:hover td { background: rgba(1,146,219,0.08); }
 .ma-group-caret {
   display: inline-block;
   width: 18px;

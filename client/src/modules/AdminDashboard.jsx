@@ -226,9 +226,11 @@ function MitelQueues({ queueStats }) {
 
 function DidChips({ didCounts, hubspotDids }) {
   const chips = [
-    { label: 'Mitel DIDs',    val: didCounts?.mitel,             color: '#7c3aed' },
-    { label: 'DID Pool',      val: hubspotDids?.didPool,         color: '#7c3aed' },
-    { label: 'Instant',       val: hubspotDids?.instantDidPool,  color: '#7c3aed' },
+    { label: 'Mitel DIDs',         val: didCounts?.mitel,            color: '#0192db' },
+    { label: 'DID Pool',           val: hubspotDids?.didPool,        color: '#0192db' },
+    { label: 'Instant',            val: hubspotDids?.instantDidPool, color: '#0192db' },
+    { label: 'Needs to be opened', val: hubspotDids?.needsToBeOpened, color: '#ef4444' },
+    { label: 'Needs to pay',      val: hubspotDids?.needsToPay,     color: '#f59e0b' },
   ];
   return (
     <>
@@ -236,8 +238,8 @@ function DidChips({ didCounts, hubspotDids }) {
         <div key={c.label} style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
           padding: '6px 12px', borderRadius: 999,
-          background: 'rgba(124,58,237,0.10)',
-          border: '1px solid rgba(124,58,237,0.30)',
+          background: c.color === '#0192db' ? 'rgba(1,146,219,0.10)' : 'rgba(15, 23, 42, 0.06)',
+          border: `1px solid ${c.color}40`,
           fontSize: 13, fontWeight: 600, color: c.color,
         }}>
           <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>{c.label}</span>

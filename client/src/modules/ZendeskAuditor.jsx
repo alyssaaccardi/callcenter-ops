@@ -5,17 +5,17 @@ import api from '../api';
 const CATEGORY_COLORS = {
   'Non-Payment':                           { bg: 'rgba(220,38,38,0.16)',    color: '#991b1b' },
   'Went to Competitor':                    { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
-  'Switched to AI Service':               { bg: 'rgba(6,182,212,0.12)',    color: '#0891b2' },
+  'Switched to AI Service':               { bg: 'rgba(19,137,159,0.12)',    color: '#0891b2' },
   'Price Too High':                        { bg: 'rgba(249,115,22,0.12)',   color: '#ea580c' },
   'Did Not Want to Pay Rate Increase / Overages': { bg: 'rgba(249,115,22,0.12)', color: '#c2410c' },
   'Billing Issue':                         { bg: 'rgba(234,179,8,0.15)',    color: '#a16207' },
-  'Downsizing Practice':                   { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
-  'Hired Staff':                           { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
-  'IVR / Auto Attendant':                  { bg: 'rgba(6,182,212,0.12)',    color: '#0e7490' },
+  'Downsizing Practice':                   { bg: 'rgba(1,146,219,0.12)',   color: '#0192db' },
+  'Hired Staff':                           { bg: 'rgba(1,146,219,0.12)',   color: '#0192db' },
+  'IVR / Auto Attendant':                  { bg: 'rgba(19,137,159,0.12)',    color: '#0e7490' },
   'Quality':                               { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
   'Call Forwarding Issue':                 { bg: 'rgba(239,68,68,0.12)',    color: '#b91c1c' },
-  'Closed Practice':                       { bg: 'rgba(139,92,246,0.12)',   color: '#7c3aed' },
-  'Retired':                               { bg: 'rgba(139,92,246,0.12)',   color: '#6d28d9' },
+  'Closed Practice':                       { bg: 'rgba(1,146,219,0.12)',   color: '#0192db' },
+  'Retired':                               { bg: 'rgba(1,146,219,0.12)',   color: '#6d28d9' },
   'Leaving Firm':                          { bg: 'rgba(107,114,128,0.12)', color: '#6b7280' },
   'Fired':                                 { bg: 'rgba(107,114,128,0.12)', color: '#6b7280' },
   'Not Enough Call Volume':               { bg: 'rgba(234,179,8,0.12)',    color: '#b45309' },
@@ -583,10 +583,10 @@ function SingleResult({ r, onClear }) {
               {/* AI panel */}
               <div style={{
                 padding: '10px 12px', borderRadius: 8,
-                background: r.aiCategory ? 'rgba(168,85,247,0.07)' : 'rgba(107,114,128,0.06)',
-                border: `1px solid ${r.aiCategory ? 'rgba(168,85,247,0.25)' : 'rgba(107,114,128,0.15)'}`,
+                background: r.aiCategory ? 'rgba(1,146,219,0.07)' : 'rgba(107,114,128,0.06)',
+                border: `1px solid ${r.aiCategory ? 'rgba(1,146,219,0.25)' : 'rgba(107,114,128,0.15)'}`,
               }}>
-                <div style={{ fontSize: 10, fontWeight: 800, color: '#a855f7', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: '#25A8D9', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>
                   Zendesk AI{r.confidence ? ` · ${r.confidence}` : ''}
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: r.aiCategory ? 'var(--text)' : 'var(--muted)' }}>

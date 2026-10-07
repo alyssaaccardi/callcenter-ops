@@ -12,12 +12,12 @@
 }
 
 .tc-placeholder-val {
-  color: rgba(60,50,120,0.25) !important;
+  color: rgba(69,79,87,0.25) !important;
 }
 
 .tc-placeholder-sub {
   font-size: 10px;
-  color: rgba(60,50,120,0.35);
+  color: rgba(69,79,87,0.35);
   margin-top: 3px;
   font-style: italic;
 }

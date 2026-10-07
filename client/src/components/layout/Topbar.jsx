@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 
@@ -60,7 +60,7 @@ function useClock(tz) {
   return time;
 }
 
-export default function Topbar() {
+export default function Topbar({ hideSystemStatus = false }) {
   const { status, darkMode, setDarkMode } = useApp();
   const { user } = useAuth();
   const firstName = user?.name?.split(' ')[0] || '';
@@ -107,9 +107,9 @@ export default function Topbar() {
             </>
           )}
         </div>
-        <div className={`global-badge ${allOp ? 'operational' : 'standby'}`}>
+        {!hideSystemStatus && <div className={`global-badge ${allOp ? 'operational' : 'standby'}`}>
           {allOp ? 'All Systems Operational' : 'System Degraded'}
-        </div>
+        </div>}
         <button
           className="dark-toggle-btn"
           onClick={() => setDarkMode(d => !d)}

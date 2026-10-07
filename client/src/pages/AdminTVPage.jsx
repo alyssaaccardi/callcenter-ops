@@ -62,9 +62,9 @@ function fmtHourEst(iso) {
 // completeness when they occasionally have declines.
 const TENANT_CHIP = {
   AL:  { bg: 'rgba(26,111,232,0.2)',  fg: '#60a5fa' },
-  RS:  { bg: 'rgba(0,201,177,0.2)',   fg: '#5eead4' },
+  RS:  { bg: 'rgba(19,137,159,0.2)',   fg: '#5eead4' },
   ARE: { bg: 'rgba(251,191,36,0.2)',  fg: '#fbbf24' },
-  TS:  { bg: 'rgba(168,85,247,0.2)',  fg: '#c4b5fd' },
+  TS:  { bg: 'rgba(1,146,219,0.2)',  fg: '#8BD8F0' },
 };
 
 function StatusPill({ label, state }) {
@@ -89,7 +89,7 @@ function StatusPill({ label, state }) {
 }
 
 function KpiTile({ label, value, sub, valueColor, danger, warn, href }) {
-  const color = danger ? '#f87171' : warn ? '#fbbf24' : (valueColor || '#f0f4ff');
+  const color = danger ? '#f87171' : warn ? '#fbbf24' : (valueColor || '#E4E9EC');
   const inner = (
     <>
       <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(240,244,255,0.55)', letterSpacing: 0.7, textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -140,9 +140,9 @@ function DidChip({ label, val }) {
     <div style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
       padding: '6px 12px', borderRadius: 999,
-      background: 'rgba(124,58,237,0.12)',
-      border: '1px solid rgba(124,58,237,0.35)',
-      fontSize: 13, fontWeight: 600, color: '#c4b5fd',
+      background: 'rgba(1,146,219,0.12)',
+      border: '1px solid rgba(1,146,219,0.35)',
+      fontSize: 13, fontWeight: 600, color: '#8BD8F0',
     }}>
       <span style={{ fontSize: 10, color: 'rgba(240,244,255,0.55)', fontWeight: 500, letterSpacing: 0.4, textTransform: 'uppercase' }}>{label}</span>
       <span style={{ fontVariantNumeric: 'tabular-nums' }}>{val ?? '—'}</span>
@@ -253,7 +253,7 @@ export default function AdminTVPage() {
 
   if (tokenValid === false) {
     return (
-      <div style={{ minHeight: '100vh', background: '#070d18', color: '#f0f4ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Barlow Condensed, sans-serif' }}>
+      <div style={{ minHeight: '100vh', background: '#111416', color: '#E4E9EC', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Bricolage Grotesque, sans-serif' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 44, fontWeight: 800, marginBottom: 12 }}>Session Expired</div>
           <div style={{ fontSize: 18, color: 'rgba(240,244,255,0.6)' }}>Reopen the Admin TV Dash from the sidebar to refresh.</div>
@@ -298,9 +298,9 @@ export default function AdminTVPage() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'radial-gradient(1200px 800px at 20% 0%, #0e1828 0%, #070d18 60%, #05080f 100%)',
-      color: '#f0f4ff',
-      fontFamily: 'Barlow Condensed, sans-serif',
+      background: 'radial-gradient(1200px 800px at 20% 0%, #202528 0%, #111416 60%, #0d1012 100%)',
+      color: '#E4E9EC',
+      fontFamily: 'Bricolage Grotesque, sans-serif',
       padding: 18,
       boxSizing: 'border-box',
     }}>

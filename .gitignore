@@ -19,3 +19,14 @@ overage-outreach-log.json
 # demand if it is missing.
 tv-sessions.json
 status-store.json
+
+# AI Receptionist Testing Platform database (SQLite + WAL sidecars)
+qa-platform.db
+qa-platform.db-wal
+qa-platform.db-shm
+
+# AI Bot QC review queue and audit history
+ai-bot-qc.db
+ai-bot-qc.db-wal
+ai-bot-qc.db-shm
+backups/

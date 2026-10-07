@@ -30,7 +30,7 @@
   display: block;
   font-size: 12px;
   font-weight: 600;
-  color: rgba(60,50,120,0.7);
+  color: rgba(69,79,87,0.7);
   margin: 14px 0 5px;
 }
 body.dark .sb-label { color: rgba(240,244,255,0.55); }
@@ -88,7 +88,7 @@ body.dark .sb-label { color: rgba(240,244,255,0.55); }
   margin-top: 8px;
   border-radius: 6px;
   overflow: hidden;
-  border: 1px solid rgba(168,85,247,0.12);
+  border: 1px solid rgba(1,146,219,0.12);
 }
 .sb-img-preview img {
   width: 100%;
@@ -243,7 +243,7 @@ body.dark .sb-label { color: rgba(240,244,255,0.55); }
 .sb-embed-code {
   display: block;
   background: rgba(0,0,0,0.05);
-  border: 1px solid rgba(168,85,247,0.12);
+  border: 1px solid rgba(1,146,219,0.12);
   border-radius: 6px;
   padding: 12px 14px;
   font-size: 11px;

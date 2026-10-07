@@ -5,7 +5,7 @@
   inset: 0;
   overflow: hidden;
   background: #0e1520;
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   color: #f0f4ff;
 }
 
@@ -76,7 +76,7 @@
 }
 
 .stv-header-brand {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 24px; letter-spacing: 0.1em; color: #f0f4ff; line-height: 1;
 }
 .stv-header-sub {
@@ -87,7 +87,7 @@
 
 .stv-header-center { text-align: center; }
 .stv-header-title {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 32px; letter-spacing: 0.22em;
   color: rgba(255,255,255,0.3); text-transform: uppercase;
 }
@@ -96,7 +96,7 @@
 .stv-dual-clock { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
 .stv-clock-entry { display: flex; align-items: baseline; gap: 5px; }
 .stv-clock-label {
-  font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700;
+  font-family: 'Bricolage Grotesque', sans-serif; font-size: 11px; font-weight: 700;
   color: #4a5a7a; letter-spacing: 0.12em; text-transform: uppercase;
 }
 .stv-clock-sep { width: 1px; height: 16px; background: rgba(255,255,255,0.15); }
@@ -117,7 +117,7 @@
 .stv-stat-strip .stv-stat { flex: 1; min-width: 130px; }
 
 .stv-stat-source-label {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 10px; font-weight: 700; letter-spacing: 0.18em;
   text-transform: uppercase; color: rgba(255,255,255,0.35);
   align-self: center; white-space: nowrap;
@@ -149,7 +149,7 @@
 .stv-stat.muted  .stv-stat-accent { background: linear-gradient(180deg, #334155, #475569); }
 
 .stv-stat-label {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 11px; font-weight: 700; letter-spacing: 0.2em;
   text-transform: uppercase; color: #4a5a7a;
 }
@@ -180,7 +180,7 @@
 @keyframes stv-breathe-amber      { 0%,100%{box-shadow:0 0 8px rgba(245,158,11,0.5)} 50%{box-shadow:0 0 18px rgba(245,158,11,1)} }
 
 .stv-stat-num {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: clamp(40px, 5vw, 62px); line-height: 0.88;
   letter-spacing: 0.02em; font-variant-numeric: tabular-nums;
 }
@@ -218,7 +218,7 @@
 .stv-chip.down .stv-chip-accent { background: linear-gradient(180deg, #f59e0b, #ef4444); }
 
 .stv-chip-name {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: clamp(14px, 1.6vw, 20px); letter-spacing: 0.06em;
   color: #f0f4ff; white-space: nowrap;
 }
@@ -230,14 +230,14 @@
 .stv-chip-orb.down { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.8); animation: stv-pulse-red 1s ease-in-out infinite; }
 
 .stv-chip-word {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: clamp(13px, 1.4vw, 18px); letter-spacing: 0.08em;
 }
 .stv-chip-word.up   { color: #22c55e; }
 .stv-chip-word.down { color: #ef4444; }
 
 .stv-chip-alert {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 11px; font-weight: 600; color: #f59e0b; line-height: 1.2;
 }
 
@@ -245,12 +245,12 @@
 .stv-chip-did-row { display: flex; align-items: center; gap: 10px; }
 .stv-chip-did-item { display: flex; flex-direction: column; align-items: center; }
 .stv-chip-did-label {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 10px; font-weight: 600; color: #4a5a7a;
   letter-spacing: 0.08em; text-transform: uppercase;
 }
 .stv-chip-did-count {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: clamp(16px, 1.8vw, 24px); letter-spacing: 0.04em;
   color: #22c55e; line-height: 1;
 }
@@ -289,7 +289,7 @@
   flex-shrink: 0;
 }
 .stv-panel-title {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 12px; font-weight: 700; letter-spacing: 0.2em;
   text-transform: uppercase; color: #4a5a7a;
 }
@@ -319,7 +319,7 @@
 .stv-task-card:hover { background: rgba(255,255,255,0.03); }
 
 .stv-task-name {
-  flex: 1; font-family: 'Barlow Condensed', sans-serif;
+  flex: 1; font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 17px; font-weight: 700; color: #e2e8f0;
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -389,7 +389,7 @@
 }
 
 .stv-tp-name {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: clamp(20px, 2.4vw, 30px); letter-spacing: 0.06em;
   color: #fbbf24; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -399,7 +399,7 @@
 .stv-tp-stat { display: flex; flex-direction: column; align-items: center; gap: 1px; }
 
 .stv-tp-num {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: clamp(24px, 2.8vw, 36px); color: #fbbf24; line-height: 1;
   letter-spacing: 0.03em;
 }
@@ -423,19 +423,19 @@
 
 .stv-lb-medal { font-size: 20px; width: 28px; text-align: center; flex-shrink: 0; }
 .stv-lb-rank {
-  font-family: 'Bebas Neue', sans-serif; font-size: 16px;
+  font-family: 'Bricolage Grotesque', sans-serif; font-size: 16px;
   color: #334155; width: 28px; text-align: center; flex-shrink: 0;
 }
 
 .stv-lb-name {
-  flex: 1; font-family: 'Barlow Condensed', sans-serif;
+  flex: 1; font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 22px; font-weight: 700; color: #e2e8f0;
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 .stv-lb-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
 .stv-lb-solved {
-  font-family: 'Bebas Neue', sans-serif; font-size: 30px; color: #00c9b1; line-height: 1;
+  font-family: 'Bricolage Grotesque', sans-serif; font-size: 30px; color: #00c9b1; line-height: 1;
 }
 .stv-lb-solved-label {
   font-family: 'IBM Plex Mono', monospace; font-size: 9px;
@@ -448,8 +448,8 @@
   padding-left: 14px; border-left: 1px solid rgba(255,255,255,0.06);
 }
 .stv-lb-calls-num {
-  font-family: 'Bebas Neue', sans-serif; font-size: 30px;
-  color: rgba(139,92,246,0.5); line-height: 1; letter-spacing: 0.02em;
+  font-family: 'Bricolage Grotesque', sans-serif; font-size: 30px;
+  color: rgba(1,146,219,0.5); line-height: 1; letter-spacing: 0.02em;
 }
 .stv-lb-calls-label {
   font-family: 'IBM Plex Mono', monospace; font-size: 9px;
@@ -472,7 +472,7 @@
   gap: 8px; height: 100%; padding: 32px 0; color: #334155;
 }
 .stv-empty-icon { font-size: 28px; opacity: 0.4; }
-.stv-empty-text { font-family: 'Barlow Condensed', sans-serif; font-size: 17px; letter-spacing: 0.05em; }
+.stv-empty-text { font-family: 'Bricolage Grotesque', sans-serif; font-size: 17px; letter-spacing: 0.05em; }
 
 /* ── Footer ── */
 .stv-footer {
@@ -482,7 +482,7 @@
 }
 .stv-global-pill {
   display: inline-flex; align-items: center; gap: 10px; padding: 7px 28px;
-  border-radius: 40px; font-family: 'Bebas Neue', sans-serif;
+  border-radius: 40px; font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 18px; letter-spacing: 0.15em; transition: all 0.5s;
 }
 .stv-global-pill.up   { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.4); color: #22c55e; }
@@ -503,7 +503,7 @@
 .stv-loading {
   display: flex; align-items: center; justify-content: center;
   height: 100vh; background: #0e1520;
-  color: #4a5a7a; font-family: 'Bebas Neue', 'Barlow Condensed', sans-serif;
+  color: #4a5a7a; font-family: 'Bricolage Grotesque', 'Bricolage Grotesque', sans-serif;
   font-size: 42px; letter-spacing: 0.1em; gap: 16px;
 }
 .stv-spinner {

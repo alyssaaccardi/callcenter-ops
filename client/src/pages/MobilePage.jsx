@@ -122,7 +122,7 @@ export default function MobilePage() {
     <div style={{
       background: '#0e1520',
       minHeight: '100vh',
-      fontFamily: "'Barlow Condensed', sans-serif",
+      fontFamily: "'Bricolage Grotesque', sans-serif",
       color: '#f0f4ff',
       display: 'flex',
       flexDirection: 'column',
@@ -137,7 +137,7 @@ export default function MobilePage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <img src="/al-logo.png" alt="AL" style={{ width: 42, height: 42, borderRadius: '50%', border: '2px solid #00c9b1', objectFit: 'cover' }} onError={e => e.target.style.display='none'} />
           <div>
-            <div style={{ fontFamily: "'Bebas Neue'", fontSize: 22, letterSpacing: '0.1em' }}>CC OPS</div>
+            <div style={{ fontFamily: "'Bricolage Grotesque'", fontSize: 22, letterSpacing: '0.1em' }}>CC OPS</div>
             <div style={{ fontFamily: "'IBM Plex Mono'", fontSize: 9, color: '#00c9b1', letterSpacing: '0.2em', textTransform: 'uppercase' }}>Mobile</div>
           </div>
         </div>
@@ -157,7 +157,7 @@ export default function MobilePage() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
               <div>
                 <div style={{ fontFamily: "'IBM Plex Mono'", fontSize: 9, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#4a5a7a' }}>DID Status</div>
-                <div style={{ fontFamily: "'Bebas Neue'", fontSize: 22, letterSpacing: '0.1em', color: didOn ? '#00c9b1' : '#f59e0b', marginTop: 2 }}>
+                <div style={{ fontFamily: "'Bricolage Grotesque'", fontSize: 22, letterSpacing: '0.1em', color: didOn ? '#00c9b1' : '#f59e0b', marginTop: 2 }}>
                   {didOn ? 'Online' : 'Offline'}
                 </div>
               </div>
@@ -210,7 +210,7 @@ export default function MobilePage() {
                     display: 'flex', alignItems: 'center', gap: 8,
                     width: '100%', padding: '12px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)',
                     background: firing === wf.name ? 'rgba(0,201,177,0.1)' : 'rgba(255,255,255,0.04)',
-                    color: '#f0f4ff', fontFamily: "'Barlow Condensed'", fontSize: 15, fontWeight: 600,
+                    color: '#f0f4ff', fontFamily: "'Bricolage Grotesque'", fontSize: 15, fontWeight: 600,
                     cursor: 'pointer', marginBottom: 8, opacity: !wf.url ? 0.4 : 1,
                   }}
                 >
@@ -227,7 +227,7 @@ export default function MobilePage() {
         {activeTab === 'sms' && (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <div style={{ fontFamily: "'Bebas Neue'", fontSize: 22, letterSpacing: '0.1em' }}>SMS Messaging</div>
+              <div style={{ fontFamily: "'Bricolage Grotesque'", fontSize: 22, letterSpacing: '0.1em' }}>SMS Messaging</div>
             </div>
             <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
               <div style={{ fontFamily: "'IBM Plex Mono'", fontSize: 9, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#4a5a7a', marginBottom: 10 }}>Message</div>
@@ -235,7 +235,7 @@ export default function MobilePage() {
                 value={message}
                 onChange={e => setMessage(e.target.value)}
                 placeholder="Compose your message..."
-                style={{ width: '100%', minHeight: 88, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 8, color: '#f0f4ff', fontFamily: "'Barlow Condensed'", fontSize: 16, padding: '10px 12px', resize: 'none', outline: 'none' }}
+                style={{ width: '100%', minHeight: 88, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 8, color: '#f0f4ff', fontFamily: "'Bricolage Grotesque'", fontSize: 16, padding: '10px 12px', resize: 'none', outline: 'none' }}
               />
               <div style={{ fontFamily: "'IBM Plex Mono'", fontSize: 10, color: '#4a5a7a', textAlign: 'right', marginTop: 4 }}>
                 {message.length} / 160
@@ -244,7 +244,7 @@ export default function MobilePage() {
             <button
               onClick={sendSms}
               disabled={sending}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', padding: 14, borderRadius: 8, border: 'none', background: '#00c9b1', color: '#0e1520', fontFamily: "'Bebas Neue'", fontSize: 18, letterSpacing: '0.1em', cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', padding: 14, borderRadius: 8, border: 'none', background: '#00c9b1', color: '#0e1520', fontFamily: "'Bricolage Grotesque'", fontSize: 18, letterSpacing: '0.1em', cursor: 'pointer' }}
             >
               {sending ? '⟳ Sending...' : '📤 Send Message'}
             </button>
@@ -255,11 +255,11 @@ export default function MobilePage() {
         {activeTab === 'agents' && (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <div style={{ fontFamily: "'Bebas Neue'", fontSize: 22, letterSpacing: '0.1em' }}>Agent Board</div>
+              <div style={{ fontFamily: "'Bricolage Grotesque'", fontSize: 22, letterSpacing: '0.1em' }}>Agent Board</div>
               <button
                 onClick={fetchAgents}
                 disabled={loadingAgents}
-                style={{ padding: '7px 14px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.06)', color: '#f0f4ff', fontFamily: "'Barlow Condensed'", fontSize: 14, cursor: 'pointer' }}
+                style={{ padding: '7px 14px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.06)', color: '#f0f4ff', fontFamily: "'Bricolage Grotesque'", fontSize: 14, cursor: 'pointer' }}
               >
                 {loadingAgents ? '⟳' : '↻ Refresh'}
               </button>
@@ -303,7 +303,7 @@ export default function MobilePage() {
                   </div>
                   <button
                     onClick={() => moveAgent(a.id, agentTab === 'here' ? 'standby' : 'here')}
-                    style={{ padding: '7px 14px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.07)', background: agentTab === 'here' ? 'rgba(239,68,68,0.12)' : 'rgba(0,201,177,0.12)', color: agentTab === 'here' ? '#ef4444' : '#00c9b1', fontFamily: "'Barlow Condensed'", fontSize: 13, cursor: 'pointer' }}
+                    style={{ padding: '7px 14px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.07)', background: agentTab === 'here' ? 'rgba(239,68,68,0.12)' : 'rgba(0,201,177,0.12)', color: agentTab === 'here' ? '#ef4444' : '#00c9b1', fontFamily: "'Bricolage Grotesque'", fontSize: 13, cursor: 'pointer' }}
                   >
                     {agentTab === 'here' ? '→ Standby' : '→ Here'}
                   </button>
@@ -316,7 +316,7 @@ export default function MobilePage() {
         {/* LOG TAB */}
         {activeTab === 'log' && (
           <div>
-            <div style={{ fontFamily: "'Bebas Neue'", fontSize: 22, letterSpacing: '0.1em', marginBottom: 12 }}>Activity Log</div>
+            <div style={{ fontFamily: "'Bricolage Grotesque'", fontSize: 22, letterSpacing: '0.1em', marginBottom: 12 }}>Activity Log</div>
             {mobileLog.length === 0 && (
               <div style={{ textAlign: 'center', padding: 24, color: '#4a5a7a', fontFamily: "'IBM Plex Mono'", fontSize: 12 }}>No activity yet.</div>
             )}
@@ -383,7 +383,7 @@ function CCCardMobile({ name, isUp, didCount, changedBy, onToggle }) {
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <div>
-          <div style={{ fontFamily: "'Bebas Neue'", fontSize: 24, letterSpacing: '0.08em' }}>{name}</div>
+          <div style={{ fontFamily: "'Bricolage Grotesque'", fontSize: 24, letterSpacing: '0.08em' }}>{name}</div>
           {didCount !== undefined && (
             <div style={{ fontFamily: "'IBM Plex Mono'", fontSize: 10, color: '#00c9b1', marginTop: 2 }}>
               📞 DIDs: {didCount}
@@ -418,7 +418,7 @@ function SysRow({ name, isUp, onToggle }) {
 function StatBox({ num, label, color }) {
   return (
     <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 8, padding: '12px 8px', textAlign: 'center' }}>
-      <div style={{ fontFamily: "'Bebas Neue'", fontSize: 38, lineHeight: 1, color }}>{num}</div>
+      <div style={{ fontFamily: "'Bricolage Grotesque'", fontSize: 38, lineHeight: 1, color }}>{num}</div>
       <div style={{ fontFamily: "'IBM Plex Mono'", fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#4a5a7a', marginTop: 2 }}>{label}</div>
     </div>
   );

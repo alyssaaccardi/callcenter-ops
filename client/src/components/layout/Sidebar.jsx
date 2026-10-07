@@ -28,6 +28,8 @@ const ALL_NAV_ITEMS = [
   { id: 'scriptor',         icon: '🗿', label: 'The Rob-osetta Stone', roles: ['super_admin', 'scriptor'],            section: 'Tools'         },
   { id: 'rob-ai-board',     icon: '🤖', label: "Rob's AI Board",   roles: ['super_admin', 'rob_ai_board'],           section: 'Sales'         },
   { id: 'belize-grid-watch', icon: '⚡', label: 'Belize Grid Watch', roles: ['super_admin', 'staffing'],              section: 'Staffing'      },
+  { id: 'qa-testing',       icon: '🎧', label: 'AI Receptionist Testing', roles: ['super_admin', 'qa_admin', 'qa_tester', 'qa_leadership'], section: 'QA' },
+  { id: 'ai-bot-qc',        icon: '🤖', label: 'AIRI QA', roles: ['super_admin', 'ai_bot_qc', 'ai_bot_qc_admin'], section: 'QA' },
 ];
 
 const ROLE_LABELS = {
@@ -42,6 +44,11 @@ const ROLE_LABELS = {
   scriptor:               'The Rob-osetta Stone',
   rob_ai_board:           "Rob's AI Board",
   staffing:               'Staffing',
+  qa_admin:               'QA Coordinator',
+  qa_tester:              'QA Tester',
+  qa_leadership:          'QA Leadership',
+  ai_bot_qc:              'AIRI QA Agent',
+  ai_bot_qc_admin:        'AIRI QA Admin',
 };
 
 const NAV_SECTION_LABEL = {
@@ -149,7 +156,6 @@ export default function Sidebar({ activeModule, onModuleChange }) {
             alt="Dialed In Dash"
             onError={e => { e.target.style.display = 'none'; }}
           />
-          {!collapsed && <div className="sidebar-brand-name">DIALED IN DASH</div>}
         </div>
       </div>
 

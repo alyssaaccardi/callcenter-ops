@@ -76,10 +76,12 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc:  ["'self'", "'unsafe-inline'"],
+      scriptSrc:  ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'"],
+      workerSrc:  ["'self'", 'blob:'],
       styleSrc:   ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc:    ["'self'", 'https://fonts.gstatic.com'],
       imgSrc:     ["'self'", 'data:', 'https://lh3.googleusercontent.com'],
+      mediaSrc:   ["'self'", 'blob:'],
       connectSrc: ["'self'"],
       frameSrc:   ["'self'", 'https://al-app-portal.vercel.app'],
     },
@@ -128,6 +130,8 @@ const TOOL_RUN_ROUTES = [
     detail: req => req.file?.originalname },
   { method: 'POST', pattern: /^\/api\/slack\/workflows\/[^/]+\/fire$/, tool: 'Slack workflow',
     detail: req => req.body?.name || req.params?.id },
+  { method: 'POST', pattern: /^\/api\/qa\/rounds\/[^/]+\/generate$/, tool: 'AI Receptionist Testing — brief generation' },
+  { method: 'POST', pattern: /^\/api\/qa\/rounds\/[^/]+\/assign$/,   tool: 'AI Receptionist Testing — assignment' },
 ];
 
 function postToolRunNotice({ tool, detail, user, email, when }) {
@@ -303,7 +307,7 @@ app.get('/api/users', requireRole('super_admin'), (req, res) => {
   res.json({ users: Object.entries(users).map(([email, u]) => ({ email, ...u })) });
 });
 
-const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor', 'billing', 'scriptor', 'staffing'];
+const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor', 'billing', 'scriptor', 'staffing', 'qa_admin', 'qa_tester', 'qa_leadership', 'ai_bot_qc', 'ai_bot_qc_admin'];
 
 app.post('/api/users', requireRole('super_admin'), (req, res) => {
   const { email, name, role, additionalRoles = [] } = req.body;
@@ -2344,9 +2348,11 @@ let hubspotDidCache = null;
 let hubspotDidCacheAt = 0;
 const HUBSPOT_CACHE_TTL = 60_000;
 
-const HS_STAGE_AVAILABLE     = '249924503';
-const HS_STAGE_INSTANT_AL    = '1214659642';
-const HS_STAGE_INSTANT_RS    = '1295878407';
+const HS_STAGE_AVAILABLE          = '249924503';
+const HS_STAGE_INSTANT_AL         = '1214659642';
+const HS_STAGE_INSTANT_RS         = '1295878407';
+const HS_STAGE_ONBOARDING_OPEN    = '237099698';
+const HS_STAGE_ONBOARDING_NEEDS_PAY = '240513402';
 
 app.get('/api/hubspot/dids', tvOrAuth, async (req, res) => {
   try {
@@ -2372,15 +2378,19 @@ app.get('/api/hubspot/dids', tvOrAuth, async (req, res) => {
       return r.data?.total ?? 0;
     }
 
-    const [didPool, instantAL, instantRS] = await Promise.all([
+    const [didPool, instantAL, instantRS, needsToBeOpened, needsToPay] = await Promise.all([
       countByStage(HS_STAGE_AVAILABLE),
       countByStage(HS_STAGE_INSTANT_AL),
       countByStage(HS_STAGE_INSTANT_RS),
+      countByStage(HS_STAGE_ONBOARDING_OPEN),
+      countByStage(HS_STAGE_ONBOARDING_NEEDS_PAY),
     ]);
 
     const result = {
       didPool,
       instantDidPool: instantAL + instantRS,
+      needsToBeOpened,
+      needsToPay,
       syncedAt: new Date().toISOString(),
     };
     hubspotDidCache   = result;
@@ -7794,6 +7804,13 @@ let _gridwatchRouter = null;
 import('./gridwatch.mjs')
   .then(m => { _gridwatchRouter = m.default; console.log('✅ Belize Grid Watch router loaded'); })
   .catch(err => console.error('❌ Failed to load Belize Grid Watch:', err.message));
+
+// ─── AI Receptionist Testing Platform ────────────────────────────────────────
+// Self-contained in ./qa: SQLite data layer, Claude brief generation, the
+// assignment engine and CSV/PDF export. Role gating lives on its own routes.
+const { router: qaRouter } = require('./qa/routes');
+app.use('/api/qa', qaRouter);
+app.use('/api/ai-bot-qc', require('./ai-bot-qc/routes'));
 
 app.use('/api/grid', requireRole('super_admin', 'staffing'), (req, res, next) => {
   if (!_gridwatchRouter) return res.status(503).json({ error: 'Grid Watch initializing' });

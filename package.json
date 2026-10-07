@@ -11,7 +11,10 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",
+    "@aws-sdk/client-s3": "^3.1145.0",
+    "@aws-sdk/s3-request-presigner": "^3.1145.0",
     "axios": "^1.7.2",
+    "better-sqlite3": "^11.10.0",
     "cors": "^2.8.5",
     "docx": "^9.7.1",
     "dotenv": "^16.4.5",
@@ -23,6 +26,7 @@
     "multer": "^2.2.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
+    "pdfkit": "^0.20.2",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
