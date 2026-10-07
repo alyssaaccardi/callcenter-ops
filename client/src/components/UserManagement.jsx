@@ -314,7 +314,7 @@ export default function UserManagement() {
               />
             </div>
             <div className="form-row">
-              <label className="field-label">Primary role</label>
+              <label className="field-label">Main role (sets landing page)</label>
               <select value={role} onChange={e => { setRole(e.target.value); setExtraRoles(prev => prev.filter(r => r !== e.target.value)); }}>
                 {ROLES.map(r => (
                   <option key={r.value} value={r.value}>{r.label}</option>
@@ -346,7 +346,7 @@ export default function UserManagement() {
               })}
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
-              Click to grant access. The primary role and Super Admin are excluded from this list.
+              Optional. Only add extra access beyond the main role. For a single-role user, leave all of these off.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>

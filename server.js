@@ -307,12 +307,15 @@ app.get('/api/users', requireRole('super_admin'), (req, res) => {
   res.json({ users: Object.entries(users).map(([email, u]) => ({ email, ...u })) });
 });
 
-const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor', 'billing', 'scriptor', 'staffing', 'qa_admin', 'qa_tester', 'qa_leadership', 'ai_bot_qc', 'ai_bot_qc_admin'];
+const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor', 'billing', 'scriptor', 'staffing', 'newsletter_contributor', 'rob_ai_board', 'qa_admin', 'qa_tester', 'qa_leadership', 'ai_bot_qc', 'ai_bot_qc_admin'];
 
 app.post('/api/users', requireRole('super_admin'), (req, res) => {
   const { email, name, role, additionalRoles = [] } = req.body;
   if (!email || !name || !role) return res.status(400).json({ error: 'email, name, and role are required' });
   if (!VALID_ROLES.includes(role)) return res.status(400).json({ error: 'invalid role' });
+  if (!/^[^\s@]+@answeringlegal\.com$/i.test(String(email).trim())) {
+    return res.status(400).json({ error: 'email must be an @answeringlegal.com address (check spelling)' });
+  }
   // Any valid role can be granted as an additional role. Filter out
   // the primary role (redundant) and super_admin (already grants all).
   const validExtra = [...new Set(
