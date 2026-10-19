@@ -265,7 +265,7 @@ app.get('/auth/google', authLimiter, (req, res, next) => {
 });
 
 app.get('/auth/google/callback', authLimiter,
-  passport.authenticate('google', { failureRedirect: '/login?error=unauthorized' }),
+  passport.authenticate('google', { failureRedirect: '/login?error=unauthorized', keepSessionInfo: true }),
   (req, res) => {
     const dest = req.session.returnTo || '/';
     delete req.session.returnTo;
