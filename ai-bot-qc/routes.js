@@ -1144,7 +1144,6 @@ router.put('/calls/:id/draft', (req, res) => {
       outcome_changed: outcome !== call.outcome,
     });
   }
-  notifyCallFlag(call.id);
   res.json({ ok: true, saved_at: now });
 });
 
@@ -1172,7 +1171,6 @@ router.post('/calls/:id/release', (req, res) => {
     addEvent(call.id, actor, 'released', { draft_saved: true });
   });
   release();
-  notifyCallFlag(call.id);
   res.json({ ok: true, released: true, saved_at: now });
 });
 
