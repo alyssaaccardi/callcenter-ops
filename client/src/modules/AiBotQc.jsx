@@ -956,7 +956,7 @@ export default function AiBotQc() {
                   <span>{selectedCallIds.length} selected</span>
                   <SelectField label="Assign to QA Agent" value={assignmentTarget} onChange={event => setAssignmentTarget(event.target.value)}>
                     <option value="">Choose agent</option>
-                    {agents.filter(agent => showAdminControls || agent.email === user?.email).map(agent => <option key={agent.email} value={agent.email}>{agent.name}</option>)}
+                    {agents.map(agent => <option key={agent.email} value={agent.email}>{agent.name}</option>)}
                   </SelectField>
                   <button className="botqc-assign-button" disabled={!selectedCallIds.length || !assignmentTarget || assigningCalls || reviewerPreview} onClick={assignSelectedCalls}>{assigningCalls ? 'Assigning…' : 'Assign selected'}</button>
                   <a className="botqc-criteria-link" href="/api/ai-bot-qc/review-criteria"><Download size={13} /> Review criteria</a>
