@@ -1389,32 +1389,6 @@ router.get('/dashboard', requireRole(...QC_ADMIN_ROLES), async (req, res) => {
   });
 });
 
-router.get('/changes', requireRole(...QC_ADMIN_ROLES), (req, res) => {
-  const period = ['7d', '30d', '90d'].includes(req.query.period) ? req.query.period : 'all';
-  const days = { '7d': 7, '30d': 30, '90d': 90 }[period];
-  const changes = db.prepare(`SELECT id, change_type, title, details, created_by_name, created_at
-    FROM bot_qc_changes ${days ? "WHERE created_at >= datetime('now', ?)" : ''}
-    ORDER BY id DESC LIMIT 50`).all(...(days ? [`-${days} days`] : []));
-  res.json({ changes });
-});
-
-router.post('/changes', requireRole(...QC_ADMIN_ROLES), (req, res) => {
-  const changeType = ['prompt', 'knowledge', 'call_flow', 'model_voice', 'other'].includes(req.body?.change_type)
-    ? req.body.change_type
-    : '';
-  const title = String(req.body?.title || '').trim().slice(0, 160);
-  const details = String(req.body?.details || '').trim().slice(0, 3000);
-  if (!changeType || !title) return res.status(400).json({ error: 'Choose a change type and enter a short title' });
-  const actor = actorFor(req);
-  const result = db.prepare(`INSERT INTO bot_qc_changes
-    (change_type, title, details, created_by_email, created_by_name)
-    VALUES (?, ?, ?, ?, ?)`)
-    .run(changeType, title, details, actor.email, actor.name);
-  const change = db.prepare(`SELECT id, change_type, title, details, created_by_name, created_at
-    FROM bot_qc_changes WHERE id = ?`).get(result.lastInsertRowid);
-  res.status(201).json({ change });
-});
-
 router.get('/history', requireRole(...QC_ADMIN_ROLES), (req, res) => {
   const rows = db.prepare(`SELECT e.*, c.customer, c.call_date, c.started_at_ns, c.object_key
     FROM bot_review_events e JOIN bot_calls c ON c.id = e.call_id

@@ -92,6 +92,10 @@ app.use(helmet({
 // posts can comfortably exceed the 100KB default).
 app.use(express.json({ limit: '5mb' }));
 
+if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
+  throw new Error('SESSION_SECRET must be set in production');
+}
+
 app.use(session({
   secret: process.env.SESSION_SECRET || 'dev-secret-change-in-prod',
   resave: false,
