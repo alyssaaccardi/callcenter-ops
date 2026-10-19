@@ -7,7 +7,7 @@ const {
   ListObjectsV2Command,
   GetObjectCommand,
 } = require('@aws-sdk/client-s3');
-const { requireRole } = require('../auth');
+const { requireRole, listUsers } = require('../auth');
 const { db, upsertCall, addEvent } = require('./db');
 const { createBusinessHours } = require('./business-time');
 
@@ -182,6 +182,7 @@ async function hubspotAiriRecords() {
       const properties = deal.properties || {};
       const record = {
         dealId: String(deal.id),
+        displayName: properties.account_name || properties.company_name || properties.dealname || '',
         inactive: HUBSPOT_AIRI_INACTIVE_STAGES.has(String(properties.dealstage || '')),
         forwardingNumber: properties.phone___s__forwarding_to_service || '',
         mainBusinessPhone: properties.main_business_phone || '',
@@ -260,6 +261,7 @@ async function forwardingQueue(nowMs = Date.now()) {
     const record = hubspotDetails.get(check.customer);
     return {
       ...check,
+      hubspot_account_name: record.displayName,
       forwarding_number: record?.forwardingNumber || '',
       main_business_phone: record?.mainBusinessPhone || '',
       phone_provider: record?.phoneProvider || '',
@@ -269,10 +271,14 @@ async function forwardingQueue(nowMs = Date.now()) {
   const visibleCompleted = completed.filter(check => {
     const record = hubspotRecordForCustomer(check.customer, hubspotRecords);
     return record && !record.inactive;
-  }).map(check => ({
-    ...check,
-    hubspot_deal_id: hubspotRecordForCustomer(check.customer, hubspotRecords)?.dealId || '',
-  }));
+  }).map(check => {
+    const record = hubspotRecordForCustomer(check.customer, hubspotRecords);
+    return {
+      ...check,
+      hubspot_account_name: record.displayName,
+      hubspot_deal_id: record.dealId || '',
+    };
+  });
   return {
     checks: activeChecks,
     completed: visibleCompleted,
@@ -445,6 +451,7 @@ async function syncArchive(bucket) {
 function callRow(row) {
   return {
     ...row,
+    hubspot_account_name: hubspotRecordForCustomer(row.customer, hubspotAiriCache.records)?.displayName || '',
     recording_keys: JSON.parse(row.recording_keys || '[]'),
     call_tags: JSON.parse(row.call_tags || '[]'),
     is_internal_test: Boolean(row.is_internal_test),
@@ -452,6 +459,32 @@ function callRow(row) {
     duration_seconds: row.started_at_ns && row.ended_at_ns
       ? Math.max(0, Math.round((row.ended_at_ns - row.started_at_ns) / 1e9))
       : null,
+  };
+}
+
+function localDayBounds(now = new Date()) {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: BUSINESS_TIMEZONE,
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  });
+  const partsAt = timestamp => Object.fromEntries(formatter.formatToParts(new Date(timestamp)).map(part => [part.type, part.value]));
+  const current = partsAt(now.getTime());
+  const nextDay = new Date(Date.UTC(Number(current.year), Number(current.month) - 1, Number(current.day) + 1));
+  const toUtc = (year, month, day) => {
+    const target = Date.UTC(year, month - 1, day);
+    let guess = target;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const local = partsAt(guess);
+      const represented = Date.UTC(Number(local.year), Number(local.month) - 1, Number(local.day), Number(local.hour), Number(local.minute), Number(local.second));
+      const adjusted = guess + target - represented;
+      if (adjusted === guess) break;
+      guess = adjusted;
+    }
+    return new Date(guess).toISOString();
+  };
+  return {
+    start: toUtc(Number(current.year), Number(current.month), Number(current.day)),
+    end: toUtc(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate()),
   };
 }
 
@@ -469,7 +502,8 @@ const FOLLOW_UP_TAGS = ['bot_hangup', 'intent_misunderstood', 'handoff_needed', 
 
 function requireCall(req, res) {
   const row = db.prepare(`SELECT c.*, r.status, r.outcome, r.caller_happiness, r.feedback, r.call_tags, r.critical, r.critical_flagged_at, r.critical_note,
-      r.reviewer_email, r.reviewer_name, r.claimed_at, r.claim_expires_at, r.last_saved_at,
+  r.reviewer_email, r.reviewer_name, r.assigned_to_email, r.assigned_to_name, r.assigned_by_email, r.assigned_by_name, r.assigned_at,
+  r.claimed_at, r.claim_expires_at, r.last_saved_at,
       r.reviewed_at, r.updated_at, ${IS_INTERNAL_TEST_SQL} AS is_internal_test,
       (SELECT e.label FROM bot_qc_excluded_phone_numbers e WHERE e.phone_number = c.caller_phone) AS internal_test_label
     FROM bot_calls c JOIN bot_reviews r ON r.call_id = c.id WHERE c.id = ?`).get(req.params.id);
@@ -514,6 +548,19 @@ function isQcAdmin(req) {
 }
 
 router.use(requireRole(...QC_ROLES));
+
+router.get('/agents', (req, res) => {
+  const agents = Object.entries(listUsers()).flatMap(([email, record]) => {
+    const roles = [record.role, ...(record.additionalRoles || [])];
+    if (!roles.some(role => ['ai_bot_qc', 'ai_bot_qc_admin', 'super_admin'].includes(role))) return [];
+    return [{ email: email.toLowerCase(), name: record.name || email }];
+  }).sort((left, right) => left.name.localeCompare(right.name));
+  res.json({ agents });
+});
+
+router.get('/review-criteria', (req, res) => {
+  res.download(path.join(__dirname, '..', 'docs', 'AIRI-QA-REVIEW-CRITERIA.md'), 'AIRI-QA-Review-Criteria.md');
+});
 
 router.get('/training-user-guide', requireRole(...QC_ADMIN_ROLES), (req, res) => {
   const guidePath = path.join(__dirname, '..', 'docs', 'AIRI-QA-TRAINING-USER-GUIDE.docx');
@@ -746,13 +793,47 @@ router.get('/queue', async (req, res) => {
     : `ORDER BY CASE r.status WHEN 'unreviewed' THEN 0 WHEN 'in_review' THEN 1 ELSE 2 END,
       r.critical DESC, c.started_at_ns DESC`;
   const rows = db.prepare(`SELECT c.*, r.status, r.outcome, r.caller_happiness, r.feedback, r.call_tags, r.critical, r.critical_note,
-      r.reviewer_email, r.reviewer_name, r.claimed_at, r.claim_expires_at, r.last_saved_at,
+      r.reviewer_email, r.reviewer_name, r.assigned_to_email, r.assigned_to_name, r.assigned_by_email, r.assigned_by_name, r.assigned_at,
+      r.claimed_at, r.claim_expires_at, r.last_saved_at,
       r.reviewed_at, r.updated_at, ${IS_INTERNAL_TEST_SQL} AS is_internal_test,
       (SELECT e.label FROM bot_qc_excluded_phone_numbers e WHERE e.phone_number = c.caller_phone) AS internal_test_label
     FROM bot_calls c JOIN bot_reviews r ON r.call_id = c.id
     ${whereSql}
     ${orderSql} LIMIT ? OFFSET ?`).all(...params, limit, offset);
   res.json({ calls: rows.map(callRow), total, limit, offset, internal_test_total: internalTestTotal, internal_test_in_results: internalTestInResults });
+});
+
+router.post('/calls/assign', (req, res) => {
+  const actor = actorFor(req);
+  const callIds = [...new Set(Array.isArray(req.body?.call_ids) ? req.body.call_ids.filter(id => typeof id === 'string' && id.length <= 180) : [])];
+  const assignedEmail = String(req.body?.assigned_to_email || '').trim().toLowerCase();
+  if (!callIds.length || callIds.length > 100) return res.status(400).json({ error: 'Select between 1 and 100 calls to assign.' });
+  if (!assignedEmail) return res.status(400).json({ error: 'Choose a QA Agent.' });
+  if (!isQcAdmin(req) && assignedEmail !== actor.email.toLowerCase()) return res.status(403).json({ error: 'QA Agents may assign calls to themselves; only a QA admin can assign calls to someone else.' });
+
+  const target = Object.entries(listUsers()).find(([email]) => email.toLowerCase() === assignedEmail);
+  const targetRoles = target ? [target[1].role, ...(target[1].additionalRoles || [])] : [];
+  if (!target || !targetRoles.some(role => ['ai_bot_qc', 'ai_bot_qc_admin', 'super_admin'].includes(role))) {
+    return res.status(400).json({ error: 'Choose an active AIRI QA Agent.' });
+  }
+  const now = new Date().toISOString();
+  const assign = db.transaction(() => {
+    const rows = callIds.map(callId => db.prepare(`SELECT r.call_id, r.status, r.reviewer_email, r.reviewer_name, r.claim_expires_at
+      FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id WHERE r.call_id = ? AND ${NOT_INTERNAL_TEST_SQL}`).get(callId));
+    if (rows.some(row => !row)) return { error: 'One or more selected calls are no longer available.' };
+    if (rows.some(row => row.status === 'reviewed')) return { error: 'Reviewed calls cannot be assigned.' };
+    if (rows.some(row => claimIsActive(row) && row.reviewer_email !== assignedEmail)) return { error: 'A selected call is actively being reviewed. Refresh the queue and try again.' };
+    const update = db.prepare(`UPDATE bot_reviews SET assigned_to_email = ?, assigned_to_name = ?, assigned_by_email = ?, assigned_by_name = ?, assigned_at = ?, updated_at = ?
+      WHERE call_id = ?`);
+    for (const row of rows) {
+      update.run(assignedEmail, target[1].name || assignedEmail, actor.email, actor.name, now, now, row.call_id);
+      addEvent(row.call_id, actor, 'assigned', { assigned_to_email: assignedEmail, assigned_to_name: target[1].name || assignedEmail });
+    }
+    return { assigned: rows.length };
+  });
+  const result = assign();
+  if (result.error) return res.status(409).json({ error: result.error });
+  res.json({ ok: true, ...result });
 });
 
 router.get('/forwarding-checks', async (req, res) => {
@@ -910,7 +991,14 @@ router.put('/calls/:id/draft', (req, res) => {
   const callerHappiness = normalizedHappiness(req.body?.caller_happiness, call.caller_happiness);
   const critical = req.body?.critical ? 1 : 0;
   const criticalNote = String(req.body?.critical_note || '').slice(0, 2000);
-  const outcome = critical ? 'needs_follow_up' : null;
+  const requestedOutcome = req.body?.outcome;
+  const outcome = critical || requestedOutcome === 'needs_follow_up' ? 'needs_follow_up' : null;
+  if (requestedOutcome && !['ok', 'needs_follow_up'].includes(requestedOutcome)) {
+    return res.status(400).json({ error: 'Choose a valid review outcome.' });
+  }
+  if (outcome === 'needs_follow_up' && !critical && !callTags.some(tag => FOLLOW_UP_TAGS.includes(tag)) && !feedback.trim()) {
+    return res.status(400).json({ error: 'Add a relevant caller signal or reviewer note before marking this call for follow-up.' });
+  }
   const now = new Date().toISOString();
   db.prepare(`UPDATE bot_reviews SET status = 'in_review', feedback = ?, call_tags = ?, caller_happiness = ?, critical = ?, critical_flagged_at = CASE
       WHEN ? = 1 AND critical = 0 THEN ? WHEN ? = 0 THEN NULL ELSE critical_flagged_at END,
@@ -964,8 +1052,15 @@ router.post('/calls/:id/complete', (req, res) => {
   const callerHappiness = normalizedHappiness(req.body?.caller_happiness, call.caller_happiness);
   const critical = req.body?.critical === undefined ? (call.critical ? 1 : 0) : (req.body.critical ? 1 : 0);
   const criticalNote = String(req.body?.critical_note ?? call.critical_note ?? '').slice(0, 2000);
-  const outcome = critical ? 'needs_follow_up' : null;
+  const requestedOutcome = req.body?.outcome;
+  const outcome = critical || requestedOutcome === 'needs_follow_up' ? 'needs_follow_up' : null;
   const feedback = String(req.body?.feedback ?? call.feedback ?? '').slice(0, 10000);
+  if (requestedOutcome && !['ok', 'needs_follow_up'].includes(requestedOutcome)) {
+    return res.status(400).json({ error: 'Choose a valid review outcome.' });
+  }
+  if (outcome === 'needs_follow_up' && !critical && !callTags.some(tag => FOLLOW_UP_TAGS.includes(tag)) && !feedback.trim()) {
+    return res.status(400).json({ error: 'Add a relevant caller signal or reviewer note before marking this call for follow-up.' });
+  }
   if (critical && !criticalNote.trim()) {
     return res.status(400).json({ error: 'Add critical issue detail before completing this review' });
   }
@@ -998,6 +1093,23 @@ router.post('/calls/:id/reopen', requireRole(...QC_ADMIN_ROLES), (req, res) => {
   res.json({ ok: true });
 });
 
+router.post('/calls/:id/resolve-critical', requireRole(...QC_ADMIN_ROLES), (req, res) => {
+  const call = requireCall(req, res);
+  if (!call) return;
+  if (!call.critical) return res.status(409).json({ error: 'This call no longer has an active critical flag.' });
+  const resolutionNote = String(req.body?.resolution_note || '').trim().slice(0, 1000);
+  if (!resolutionNote) return res.status(400).json({ error: 'Add a note describing what was addressed.' });
+  const actor = actorFor(req);
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    db.prepare(`UPDATE bot_reviews SET status = 'reviewed', outcome = 'ok', critical = 0,
+        reviewed_at = COALESCE(reviewed_at, ?), claim_expires_at = NULL, updated_at = ? WHERE call_id = ?`)
+      .run(now, now, call.id);
+    addEvent(call.id, actor, 'critical_resolved', { resolution_note: resolutionNote });
+  })();
+  res.json({ ok: true, resolved_at: now });
+});
+
 async function countableCallFilter() {
   let inactive = [];
   try { inactive = await hubspotInactiveCustomers(); } catch (error) {
@@ -1015,9 +1127,7 @@ router.get('/queue-summary', async (req, res) => {
       SUM(r.status = 'unreviewed') AS unreviewed,
       SUM(r.status = 'in_review') AS in_review,
       SUM(r.status = 'reviewed') AS reviewed,
-      SUM(r.status = 'reviewed' AND (r.outcome = 'needs_follow_up' OR r.critical = 1 OR EXISTS (
-        SELECT 1 FROM json_each(r.call_tags) WHERE value IN ('bot_hangup','intent_misunderstood','handoff_needed','incorrect_information')
-      ))) AS needs_follow_up,
+      SUM(r.status = 'reviewed' AND (r.outcome = 'needs_follow_up' OR r.critical = 1)) AS needs_follow_up,
       SUM(r.critical = 1) AS critical
     FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
     WHERE ${base.sql}`).get(...base.params);
@@ -1051,9 +1161,7 @@ router.get('/dashboard', requireRole(...QC_ADMIN_ROLES), async (req, res) => {
       SUM(r.status = 'unreviewed') AS unreviewed,
       SUM(r.status = 'in_review') AS in_review,
       SUM(r.status = 'reviewed') AS reviewed,
-      SUM(r.status = 'reviewed' AND (r.outcome = 'needs_follow_up' OR r.critical = 1 OR EXISTS (
-        SELECT 1 FROM json_each(r.call_tags) WHERE value IN ('bot_hangup','intent_misunderstood','handoff_needed','incorrect_information')
-      ))) AS needs_follow_up,
+      SUM(r.status = 'reviewed' AND (r.outcome = 'needs_follow_up' OR r.critical = 1)) AS needs_follow_up,
       SUM(r.critical = 1) AS critical
     FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
     WHERE ${base.sql}`).get(...base.params);
@@ -1119,6 +1227,19 @@ router.get('/dashboard', requireRole(...QC_ADMIN_ROLES), async (req, res) => {
     JOIN bot_calls c ON c.id = r.call_id
     WHERE r.reviewer_email IS NOT NULL AND ${base.sql}
     ORDER BY r.reviewer_name COLLATE NOCASE`).all(...base.params);
+  const today = localDayBounds();
+  const activity = db.prepare(`SELECT
+      SUM(r.status = 'reviewed' AND r.reviewed_at >= ? AND r.reviewed_at < ?) AS calls_reviewed_today,
+      MAX(CASE WHEN r.status = 'reviewed' THEN r.reviewed_at END) AS last_call_checked_at
+    FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id WHERE ${base.sql}`)
+    .get(today.start, today.end, ...base.params);
+  const criticalFlags = db.prepare(`SELECT c.*, r.status, r.outcome, r.caller_happiness, r.feedback, r.call_tags, r.critical, r.critical_note,
+      r.reviewer_email, r.reviewer_name, r.assigned_to_email, r.assigned_to_name, r.assigned_by_email, r.assigned_by_name, r.assigned_at,
+      r.claimed_at, r.claim_expires_at, r.last_saved_at, r.reviewed_at, r.updated_at,
+      ${IS_INTERNAL_TEST_SQL} AS is_internal_test
+    FROM bot_calls c JOIN bot_reviews r ON r.call_id = c.id
+    WHERE r.critical = 1 AND ${base.sql} ORDER BY COALESCE(r.critical_flagged_at, r.updated_at) DESC LIMIT 200`)
+    .all(...base.params).map(callRow);
   res.json({
     counts: Object.fromEntries(Object.entries(total).map(([key, value]) => [key, value || 0])),
     accounts,
@@ -1129,6 +1250,8 @@ router.get('/dashboard', requireRole(...QC_ADMIN_ROLES), async (req, res) => {
     feedback_notes_count: feedbackNotesCount,
     bot_health: botHealth,
     reviewer_options: reviewerOptions,
+    activity: { calls_reviewed_today: activity.calls_reviewed_today || 0, last_call_checked_at: activity.last_call_checked_at || null },
+    critical_flags: criticalFlags,
     period,
     reviewer_email: reviewerEmail || 'all',
   });

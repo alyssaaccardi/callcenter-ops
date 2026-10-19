@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS bot_reviews (
   critical_note TEXT NOT NULL DEFAULT '',
   reviewer_email TEXT,
   reviewer_name TEXT,
+  assigned_to_email TEXT,
+  assigned_to_name TEXT,
+  assigned_by_email TEXT,
+  assigned_by_name TEXT,
+  assigned_at TEXT,
   claimed_at TEXT,
   claim_expires_at TEXT,
   last_saved_at TEXT,
@@ -151,6 +156,22 @@ try { db.exec('ALTER TABLE bot_calls ADD COLUMN metadata_last_modified TEXT'); }
 try { db.exec('ALTER TABLE bot_reviews ADD COLUMN critical_flagged_at TEXT'); } catch (error) {
   if (!String(error.message).includes('duplicate column name')) throw error;
 }
+try { db.exec('ALTER TABLE bot_reviews ADD COLUMN assigned_to_email TEXT'); } catch (error) {
+  if (!String(error.message).includes('duplicate column name')) throw error;
+}
+try { db.exec('ALTER TABLE bot_reviews ADD COLUMN assigned_to_name TEXT'); } catch (error) {
+  if (!String(error.message).includes('duplicate column name')) throw error;
+}
+try { db.exec('ALTER TABLE bot_reviews ADD COLUMN assigned_by_email TEXT'); } catch (error) {
+  if (!String(error.message).includes('duplicate column name')) throw error;
+}
+try { db.exec('ALTER TABLE bot_reviews ADD COLUMN assigned_by_name TEXT'); } catch (error) {
+  if (!String(error.message).includes('duplicate column name')) throw error;
+}
+try { db.exec('ALTER TABLE bot_reviews ADD COLUMN assigned_at TEXT'); } catch (error) {
+  if (!String(error.message).includes('duplicate column name')) throw error;
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_bot_reviews_assigned ON bot_reviews(assigned_to_email, status, updated_at DESC)');
 try { db.exec("ALTER TABLE bot_reviews ADD COLUMN call_tags TEXT NOT NULL DEFAULT '[]'"); } catch (error) {
   if (!String(error.message).includes('duplicate column name')) throw error;
 }
