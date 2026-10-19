@@ -258,6 +258,68 @@ async function resolveCustomerNames(bucket) {
   }
 }
 
+// ─── Slack notifications ─────────────────────────────────────────────────────
+// Needs SLACK_AIRI_QC_URL (incoming webhook). Optional SLACK_HITSQUAD_GROUP_ID /
+// SLACK_QA_AGENTS_GROUP_ID (Slack user group IDs, e.g. S0123ABC) make the mentions actually ping.
+db.exec('CREATE TABLE IF NOT EXISTS bot_slack_notices (kind TEXT NOT NULL, ref TEXT NOT NULL, sent_at TEXT NOT NULL DEFAULT (datetime(\'now\')), PRIMARY KEY (kind, ref))');
+const APP_URL = (process.env.APP_BASE_URL || 'https://ops.answeringlegal.com').replace(/\/+$/, '');
+
+function slackMention(envName, fallback) {
+  const id = process.env[envName];
+  return id ? `<!subteam^${id}>` : `@${fallback}`;
+}
+
+function postSlack(text) {
+  const url = process.env.SLACK_AIRI_QC_URL;
+  if (!url) return;
+  axios.post(url, { text, mrkdwn: true }, { timeout: 8000 })
+    .catch(error => console.error('[ai-bot-qc] Slack post failed:', error.message));
+}
+
+// Claims (kind, ref) so each event is announced once; returns false if already sent.
+function claimNotice(kind, ref) {
+  return db.prepare('INSERT OR IGNORE INTO bot_slack_notices (kind, ref) VALUES (?, ?)').run(kind, ref).changes > 0;
+}
+
+function accountNameFor(customer) {
+  return hubspotRecordForCustomer(customer, hubspotAiriCache.records)?.displayName
+    || db.prepare('SELECT name FROM bot_customer_names WHERE customer = ?').get(customer)?.name
+    || String(customer).replace(/_+/g, ' ').trim();
+}
+
+function formatEt(value) {
+  return value ? new Date(value).toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' }) + ' ET' : 'unknown';
+}
+
+function notifyCallFlag(callId, reviewerOverride) {
+  const call = db.prepare(`SELECT c.id, c.customer, r.critical, r.critical_note, r.outcome, r.feedback, r.reviewer_name
+    FROM bot_calls c JOIN bot_reviews r ON r.call_id = c.id WHERE c.id = ?`).get(callId);
+  if (!call) return;
+  const link = `${APP_URL}/?call=${call.id}`;
+  const account = accountNameFor(call.customer);
+  const reviewer = reviewerOverride || call.reviewer_name || 'A QA Agent';
+  const notes = String(call.feedback || '').trim() || 'None';
+  if (call.critical && String(call.critical_note || '').trim()) {
+    if (!claimNotice('critical', call.id)) return;
+    postSlack(`${slackMention('SLACK_HITSQUAD_GROUP_ID', 'hitsquad')} ${reviewer} has flagged a call from ${account} as "Critical Flags" please look into ASAP. Here is the link to the call ${link}. Reviewer Notes: ${notes}. Critical Issue Details: ${call.critical_note.trim()}`);
+  } else if (!call.critical && call.outcome === 'needs_follow_up') {
+    if (!claimNotice('follow_up', call.id)) return;
+    postSlack(`${slackMention('SLACK_HITSQUAD_GROUP_ID', 'hitsquad')} ${reviewer} has flagged a call from ${account} as "Needs Follow Up" please look into ASAP. Here is the link to the call ${link}. Reviewer Notes: ${notes}.`);
+  }
+}
+
+async function notifyDueForwardingChecks() {
+  if (!process.env.SLACK_AIRI_QC_URL) return;
+  const { checks } = await forwardingQueue();
+  // The first run only records what is already due so deploying doesn't flood the channel.
+  const firstRun = claimNotice('forwarding_seed', 'initialized');
+  for (const check of checks) {
+    if (!claimNotice('forwarding_due', `${check.customer}|${check.last_call_id}`) || firstRun) continue;
+    const account = check.hubspot_account_name || accountNameFor(check.customer);
+    postSlack(`${slackMention('SLACK_QA_AGENTS_GROUP_ID', 'QAAgents')} ${account} needs to have their forwarding checked. Please test their forwarding number ASAP! Forwarding Number: ${check.forwarding_number || 'not on file'}. Date of last call: ${formatEt(check.last_call_at)}. Once forwarding check is completed please update their forwarding status to: PASS or FAIL`);
+  }
+}
+
 async function hubspotInactiveCustomers() {
   const records = await hubspotAiriRecords();
   const customers = db.prepare('SELECT DISTINCT customer FROM bot_calls').all();
@@ -919,8 +981,9 @@ router.post('/forwarding-checks/:customer/complete', async (req, res) => {
   if (!['reached_airi', 'not_reaching_airi'].includes(result)) {
     return res.status(400).json({ error: 'Choose whether the test reached AIRI before completing it.' });
   }
+  let hubspotRecord;
   try {
-    const hubspotRecord = await hubspotAiriMatch(customer);
+    hubspotRecord = await hubspotAiriMatch(customer);
     if (!hubspotRecord) {
       return res.status(409).json({ error: 'This account is not matched to an AIRI HubSpot deal and is not eligible for forwarding checks.' });
     }
@@ -963,6 +1026,10 @@ router.post('/forwarding-checks/:customer/complete', async (req, res) => {
       return true;
     })();
     if (!insertedResult) return res.status(409).json({ error: 'This forwarding test was already checked off' });
+    const account = hubspotRecord.displayName || accountNameFor(customer);
+    const passed = result === 'reached_airi';
+    postSlack(`${slackMention('SLACK_HITSQUAD_GROUP_ID', 'hitsquad')} ${account}'s forwarding number: ${hubspotRecord.forwardingNumber || 'not on file'} has ${passed ? 'PASSED' : 'FAILED'} their forwarding check test. QA Agent that tested: ${actor.name}`);
+    if (!passed) notifyCallFlag(callId, actor.name);
     res.json({ ok: true, checked_by: actor.name, checked_at: now });
   } catch (error) {
     console.error('[ai-bot-qc] forwarding test completion failed:', error.message);
@@ -1077,6 +1144,7 @@ router.put('/calls/:id/draft', (req, res) => {
       outcome_changed: outcome !== call.outcome,
     });
   }
+  notifyCallFlag(call.id);
   res.json({ ok: true, saved_at: now });
 });
 
@@ -1104,6 +1172,7 @@ router.post('/calls/:id/release', (req, res) => {
     addEvent(call.id, actor, 'released', { draft_saved: true });
   });
   release();
+  notifyCallFlag(call.id);
   res.json({ ok: true, released: true, saved_at: now });
 });
 
@@ -1142,6 +1211,7 @@ router.post('/calls/:id/complete', (req, res) => {
     addEvent(call.id, actor, 'reviewed', { outcome, critical: Boolean(critical), caller_happiness: callerHappiness, call_tags: callTags });
   });
   complete();
+  notifyCallFlag(call.id);
   res.json({ ok: true, reviewed_at: now });
 });
 
@@ -1472,5 +1542,9 @@ router.get('/artifact', async (req, res) => {
     storageFailure(res, error, 'Could not open this artifact', 's3:GetObject');
   }
 });
+
+setInterval(() => {
+  notifyDueForwardingChecks().catch(error => console.error('[ai-bot-qc] forwarding notice failed:', error.message));
+}, 10 * 60_000).unref();
 
 module.exports = router;

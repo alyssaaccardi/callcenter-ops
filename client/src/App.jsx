@@ -50,7 +50,9 @@ function isRobOnly(user) {
 function Dashboard() {
   const { user } = useAuth();
   if (isRobOnly(user)) return <RobStoneApp />;
+  const hasCallLink = new URLSearchParams(window.location.search).has('call');
   const defaultModule =
+    hasCallLink && [user?.role, ...(user?.additionalRoles || [])].some(role => ['super_admin', 'ai_bot_qc', 'ai_bot_qc_admin'].includes(role)) ? 'ai-bot-qc' :
     user?.role === 'support'                ? 'support-center'   :
     user?.role === 'tech'                   ? 'tech-center'      :
     user?.role === 'zendesk_auditor'        ? 'zendesk-auditor'  :

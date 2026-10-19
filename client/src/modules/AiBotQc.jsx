@@ -260,6 +260,18 @@ export default function AiBotQc() {
 
   useEffect(() => { selectedRef.current = selected; }, [selected]);
 
+  // Slack links open a call read-only (no claim) via ?call=<id>.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const linkedCall = params.get('call');
+    if (!linkedCall) return;
+    params.delete('call');
+    const query = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+    loadSelected(linkedCall, { readOnly: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     let active = true;
     const loadBulletin = () => api.get('/api/ai-bot-qc/bulletin', { params: { limit: 50, offset: bulletinOffset } })
