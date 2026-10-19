@@ -159,7 +159,10 @@ function ProtectedRoute({ children }) {
       </div>
     );
   }
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    const dest = window.location.pathname + window.location.search;
+    return <Navigate to={dest === '/' ? '/login' : `/login?returnTo=${encodeURIComponent(dest)}`} replace />;
+  }
   return children;
 }
 

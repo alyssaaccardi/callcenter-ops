@@ -13,7 +13,8 @@ api.interceptors.response.use(
   res => res,
   err => {
     if (err.response?.status === 401 && !authState.isGuest && window.location.pathname !== '/login') {
-      window.location.href = '/login';
+      const dest = window.location.pathname + window.location.search;
+      window.location.href = dest === '/' ? '/login' : `/login?returnTo=${encodeURIComponent(dest)}`;
     }
     return Promise.reject(err);
   }
