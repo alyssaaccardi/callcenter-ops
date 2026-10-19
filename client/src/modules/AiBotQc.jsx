@@ -245,6 +245,11 @@ export default function AiBotQc() {
   const [selected, setSelected] = useState(null);
   const [openingCall, setOpeningCall] = useState(false);
   const [queueStatus, setQueueStatus] = useState('all');
+  const [assignedFilter, setAssignedFilter] = useState(null);
+  // Agents default to their own assigned calls; admins default to everything.
+  const assignedView = assignedFilter ?? (showAdminControls ? 'all' : 'mine');
+  const assignedViewRef = useRef(assignedView);
+  assignedViewRef.current = assignedView;
   const [searchText, setSearchText] = useState('');
   const [queueSort, setQueueSort] = useState(null);
   const [page, setPage] = useState(0);
@@ -446,6 +451,7 @@ export default function AiBotQc() {
     const params = { limit: 100, offset: nextPage * 100, internal_tests: nextInternal };
     if (nextStatus === 'critical') params.critical = '1';
     else if (nextStatus !== 'all') params.status = nextStatus;
+    if (assignedViewRef.current === 'mine') params.assigned = 'me';
     if (nextQuery.trim()) params.q = nextQuery.trim();
     if (nextSort) { params.sort_by = nextSort.key; params.sort_dir = nextSort.direction; }
     try {
@@ -928,6 +934,9 @@ export default function AiBotQc() {
                 <div><h2>Review queue</h2><span>{totalCalls.toLocaleString()} calls{internalTestInResults > 0 ? ` (${internalTestInResults.toLocaleString()} internal test)` : ''}</span></div>
                 <div className="botqc-queue-controls">
                   <label className="botqc-search"><Search size={15} /><input value={searchText} onChange={event => updateQueueSearch(event.target.value)} placeholder="Account, caller ID, date, QA Agent" /></label>
+                  <SelectField label="Assigned" value={assignedView} onChange={event => { assignedViewRef.current = event.target.value; setAssignedFilter(event.target.value); setPage(0); loadQueue(0, queueStatus, searchText); }}>
+                    <option value="mine">My assigned calls</option><option value="all">All calls</option>
+                  </SelectField>
                   <SelectField label="Status" value={queueStatus} onChange={event => updateQueueStatus(event.target.value)}>
                     <option value="all">All calls</option><option value="unreviewed">Unreviewed</option><option value="in_review">In progress</option><option value="reviewed">Reviewed</option><option value="critical">Critical</option>
                   </SelectField>
