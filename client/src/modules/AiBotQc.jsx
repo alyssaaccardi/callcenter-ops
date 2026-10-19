@@ -28,12 +28,14 @@ const CALL_SIGNAL_FLAGS = [
   { value: 'incorrect_information', label: 'Bot gave incorrect information', shortLabel: 'Incorrect information' },
 ];
 
+let customerNames = {};
+
 function accountLabel(value = '') {
   if (value && typeof value === 'object') {
     if (value.hubspot_account_name) return value.hubspot_account_name;
     value = value.customer || '';
   }
-  return String(value).replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
+  return customerNames[value] || String(value).replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function formatCallerId(value = '') {
@@ -194,6 +196,14 @@ export default function AiBotQc() {
   const canDownloadRecordings = showAdminControls;
   const [activeView, setActiveView] = useState('queue');
   const [bucket, setBucket] = useState('');
+  const [, setNamesVersion] = useState(0);
+
+  useEffect(() => {
+    api.get('/api/ai-bot-qc/account-names').then(result => {
+      customerNames = result.data.names || {};
+      setNamesVersion(version => version + 1);
+    }).catch(() => {});
+  }, []);
   const [calls, setCalls] = useState([]);
   const [agents, setAgents] = useState([]);
   const [selectedCallIds, setSelectedCallIds] = useState([]);

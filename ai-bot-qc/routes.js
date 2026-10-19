@@ -208,6 +208,56 @@ async function hubspotAiriMatch(customer) {
   return hubspotRecordForCustomer(customer, records);
 }
 
+db.exec('CREATE TABLE IF NOT EXISTS bot_customer_names (customer TEXT PRIMARY KEY, name TEXT NOT NULL, source TEXT NOT NULL, resolved_at TEXT NOT NULL DEFAULT (datetime(\'now\')))');
+const UUID_CUSTOMER = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function greetingToName(greeting) {
+  return String(greeting || '')
+    .replace(/^(good (morning|afternoon|evening)|hello|hi)[\s,.!…]*/i, '')
+    .replace(/^(thank you for calling|thanks for calling|you have reached|welcome to)\s+(the\s+)?/i, '')
+    .replace(/[\s,.!…]*(how (may|can) (i|we) (help|assist)).*$/i, '')
+    .replace(/^[\s.…]+|[\s.…]+$/g, '')
+    .trim();
+}
+
+function plainKey(value) {
+  return String(value || '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+async function firstGreeting(bucket, customer) {
+  const calls = db.prepare('SELECT object_key FROM bot_calls WHERE customer = ? ORDER BY call_date DESC, discovered_at DESC LIMIT 6').all(customer);
+  for (const { object_key: key } of calls) {
+    try {
+      const transcript = JSON.parse(await readObjectText(bucket, key));
+      const greeting = Array.isArray(transcript) ? transcript.find(message => message?.role === 'assistant' && message.content)?.content : '';
+      if (greeting) return String(greeting);
+    } catch { /* try the next call */ }
+  }
+  return '';
+}
+
+async function resolveCustomerNames(bucket) {
+  const known = new Set(db.prepare('SELECT customer FROM bot_customer_names').all().map(row => row.customer));
+  const pending = db.prepare('SELECT DISTINCT customer FROM bot_calls').all().map(row => row.customer).filter(customer => UUID_CUSTOMER.test(customer) && !known.has(customer));
+  if (!pending.length) return;
+  let records = new Map();
+  try { records = await hubspotAiriRecords(); } catch (error) { console.error('[ai-bot-qc] HubSpot name lookup unavailable:', error.message); }
+  const insert = db.prepare('INSERT OR REPLACE INTO bot_customer_names (customer, name, source) VALUES (?, ?, ?)');
+  for (const customer of pending) {
+    const greeting = await firstGreeting(bucket, customer);
+    if (!greeting) continue;
+    const greetingKey = ` ${plainKey(greeting)} `;
+    let best = null;
+    for (const record of records.values()) {
+      const nameKey = plainKey(record.displayName);
+      if (nameKey.length >= 4 && greetingKey.includes(` ${nameKey} `) && (!best || nameKey.length > plainKey(best.displayName).length)) best = record;
+    }
+    const parsed = greetingToName(greeting);
+    if (best?.displayName) insert.run(customer, best.displayName, 'hubspot');
+    else if (parsed) insert.run(customer, parsed, 'greeting');
+  }
+}
+
 async function hubspotInactiveCustomers() {
   const records = await hubspotAiriRecords();
   const customers = db.prepare('SELECT DISTINCT customer FROM bot_calls').all();
@@ -556,6 +606,20 @@ router.get('/agents', (req, res) => {
     return [{ email: email.toLowerCase(), name: record.name || email }];
   }).sort((left, right) => left.name.localeCompare(right.name));
   res.json({ agents });
+});
+
+router.get('/account-names', async (req, res) => {
+  try {
+    if (getClient()) {
+      const bucket = await resolveBucket(req);
+      if (bucket) await resolveCustomerNames(bucket);
+    }
+  } catch (error) {
+    console.error('[ai-bot-qc] account name resolution failed:', error.message);
+  }
+  const names = {};
+  for (const row of db.prepare('SELECT customer, name FROM bot_customer_names').all()) names[row.customer] = row.name;
+  res.json({ names });
 });
 
 router.get('/review-criteria', (req, res) => {
