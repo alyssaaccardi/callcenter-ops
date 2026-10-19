@@ -29,7 +29,11 @@ const CALL_SIGNAL_FLAGS = [
 ];
 
 function accountLabel(value = '') {
-  return value.replaceAll('_', ' ');
+  if (value && typeof value === 'object') {
+    if (value.hubspot_account_name) return value.hubspot_account_name;
+    value = value.customer || '';
+  }
+  return String(value).replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function formatCallerId(value = '') {
@@ -40,7 +44,7 @@ function formatCallerId(value = '') {
 }
 
 function HubSpotAccount({ check }) {
-  const label = accountLabel(check.customer);
+  const label = accountLabel(check);
   if (!check.hubspot_deal_id) return label;
   return <a className="botqc-hubspot-link" href={`https://app.hubspot.com/contacts/*/deal/${encodeURIComponent(check.hubspot_deal_id)}`} target="_blank" rel="noopener noreferrer" aria-label={`Open ${label} HubSpot deal`}>
     {label}<ExternalLink size={11} aria-hidden="true" />
@@ -118,11 +122,13 @@ function artifactUrl(call, bucket, key, download = false) {
 function eventLabel(event) {
   const labels = {
     claimed: 'claimed this call',
+    assigned: 'assigned this call',
     draft_saved: 'saved review changes',
     reviewed: 'completed the review',
     bulk_reviewed: 'marked reviewed in bulk',
     forwarding_test_completed: 'completed a forwarding test',
     reopened: 'reopened the review',
+    critical_resolved: 'resolved the critical flag',
     claim_expired: 'claim expired',
   };
   return labels[event.event_type] || event.event_type.replaceAll('_', ' ');
@@ -189,6 +195,11 @@ export default function AiBotQc() {
   const [activeView, setActiveView] = useState('queue');
   const [bucket, setBucket] = useState('');
   const [calls, setCalls] = useState([]);
+  const [agents, setAgents] = useState([]);
+  const [selectedCallIds, setSelectedCallIds] = useState([]);
+  const [assignmentTarget, setAssignmentTarget] = useState('');
+  const [assigningCalls, setAssigningCalls] = useState(false);
+  const [resolvingCriticalId, setResolvingCriticalId] = useState('');
   const [totalCalls, setTotalCalls] = useState(0);
   const [internalTestTotal, setInternalTestTotal] = useState(0);
   const [internalTestInResults, setInternalTestInResults] = useState(0);
@@ -359,7 +370,7 @@ export default function AiBotQc() {
     const result = forwardingResults[noteKey];
     if (completingForwarding || !result) return;
     const resultLabel = result === 'reached_airi' ? 'Reached AIRI' : 'Did not reach AIRI';
-    if (!window.confirm(`Save “${resultLabel}” for ${accountLabel(check.customer)}?`)) return;
+    if (!window.confirm(`Save “${resultLabel}” for ${accountLabel(check)}?`)) return;
     setCompletingForwarding(check.customer);
     setError('');
     try {
@@ -477,7 +488,11 @@ export default function AiBotQc() {
             ? api.get('/api/ai-bot-qc/dashboard', { params: { period: 'all', reviewer_email: 'all' } })
             : api.get('/api/ai-bot-qc/queue-summary'),
         ]);
+          const agentsResult = await api.get('/api/ai-bot-qc/agents');
         if (!active) return;
+          const availableAgents = agentsResult.data.agents || [];
+          setAgents(availableAgents);
+          setAssignmentTarget(current => current || availableAgents.find(agent => agent.email === user?.email)?.email || '');
         setBucket(statusResult.data.bucket || '');
         setDashboard(isAdmin ? dashboardResult.data : { counts: dashboardResult.data.counts || {} });
         // A failed sync must not block the queue from loading.
@@ -513,7 +528,7 @@ export default function AiBotQc() {
     }
     initialize();
     return () => { active = false; clearTimeout(searchTimerRef.current); };
-  }, [isAdmin]);
+  }, [isAdmin, user?.email]);
 
   useEffect(() => {
     if (activeView !== 'admin-settings' || !isAdmin) return;
@@ -700,6 +715,37 @@ export default function AiBotQc() {
     }
   }
 
+  async function assignSelectedCalls() {
+    if (!selectedCallIds.length || !assignmentTarget || assigningCalls) return;
+    setAssigningCalls(true);
+    setError('');
+    try {
+      await api.post('/api/ai-bot-qc/calls/assign', { call_ids: selectedCallIds, assigned_to_email: assignmentTarget });
+      setSelectedCallIds([]);
+      await Promise.all([loadQueue(), loadOverview()]);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not assign the selected calls');
+    } finally {
+      setAssigningCalls(false);
+    }
+  }
+
+  async function resolveCritical(call) {
+    if (!showAdminControls || resolvingCriticalId) return;
+    const resolutionNote = window.prompt('What did the admin or product team address?');
+    if (!resolutionNote?.trim()) return;
+    setResolvingCriticalId(call.id);
+    setError('');
+    try {
+      await api.post(`/api/ai-bot-qc/calls/${call.id}/resolve-critical`, { resolution_note: resolutionNote.trim() });
+      await refresh(false);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not resolve the critical flag');
+    } finally {
+      setResolvingCriticalId('');
+    }
+  }
+
   async function reopenReview(callId) {
     try {
       await api.post(`/api/ai-bot-qc/calls/${callId}/reopen`);
@@ -875,26 +921,36 @@ export default function AiBotQc() {
                     <SortableHeader label="Caller ID" column="caller_id" sort={queueSort} onSort={updateQueueSort} />
                     <SortableHeader label="Account" column="account" sort={queueSort} onSort={updateQueueSort} />
                     <SortableHeader label="Status" column="status" sort={queueSort} onSort={updateQueueSort} />
-                    <SortableHeader label="QA Agent" column="qa_agent" sort={queueSort} onSort={updateQueueSort} />
+                    <th>Assigned QA Agent</th>
                     <SortableHeader label="Duration" column="duration" sort={queueSort} onSort={updateQueueSort} />
+                    <th><input type="checkbox" aria-label="Select all calls on this page" checked={calls.some(call => call.status !== 'reviewed') && calls.filter(call => call.status !== 'reviewed').every(call => selectedCallIds.includes(call.id))} onClick={event => event.stopPropagation()} onChange={event => setSelectedCallIds(current => event.target.checked ? [...new Set([...current, ...calls.filter(call => call.status !== 'reviewed').map(call => call.id)])] : current.filter(id => !calls.some(call => call.id === id)))} /></th>
                   </tr></thead>
                   <tbody>
                     {calls.map(call => (
                         <tr key={call.id} className={`${selectedId === call.id ? 'is-selected ' : ''}${call.critical ? 'is-critical' : ''}`} onClick={() => loadSelected(call.id, { readOnly: reviewerPreview })}>
                         <td><strong>{callDateTime(call)}</strong><small>{call.room_name || call.room_id}</small></td>
                         <td className="botqc-caller-id">{call.caller_phone ? formatCallerId(call.caller_phone) : <span className="botqc-dash">Not detected</span>}</td>
-                        <td className="botqc-account-cell">{accountLabel(call.customer)}{(call.is_internal_test || call.call_tags?.length > 0 || call.caller_happiness) && <div className="botqc-row-tags">{call.is_internal_test && <span className="botqc-internal-test-badge" title={call.internal_test_label || undefined}>Internal test call</span>}{call.caller_happiness && <span title={HAPPINESS_RATINGS.find(rating => rating.value === call.caller_happiness)?.label}>{HAPPINESS_RATINGS.find(rating => rating.value === call.caller_happiness)?.face} Caller sentiment</span>}{call.call_tags?.map(tag => <span key={tag}>{CALL_SIGNAL_FLAGS.find(flag => flag.value === tag)?.shortLabel || tag}</span>)}</div>}</td>
+                        <td className="botqc-account-cell">{accountLabel(call)}{(call.is_internal_test || call.call_tags?.length > 0 || call.caller_happiness) && <div className="botqc-row-tags">{call.is_internal_test && <span className="botqc-internal-test-badge" title={call.internal_test_label || undefined}>Internal test call</span>}{call.caller_happiness && <span title={HAPPINESS_RATINGS.find(rating => rating.value === call.caller_happiness)?.label}>{HAPPINESS_RATINGS.find(rating => rating.value === call.caller_happiness)?.face} Caller sentiment</span>}{call.call_tags?.map(tag => <span key={tag}>{CALL_SIGNAL_FLAGS.find(flag => flag.value === tag)?.shortLabel || tag}</span>)}</div>}</td>
                         <td><span className={`botqc-status botqc-status--${statusClass(call)}`}>{relativeStatus(call)}</span></td>
-                        <td>{call.reviewer_name || <span className="botqc-dash">—</span>}{call.status === 'in_review' && call.claim_expires_at && <small>Claim expires {new Date(call.claim_expires_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</small>}</td>
+                        <td>{call.assigned_to_name || call.reviewer_name || <span className="botqc-dash">—</span>}{call.assigned_to_name && <small>Assigned{call.reviewer_name ? ` · Reviewing: ${call.reviewer_name}` : ''}</small>}{call.status === 'in_review' && call.claim_expires_at && <small>Claim expires {new Date(call.claim_expires_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</small>}</td>
                         <td className="botqc-duration">{durationLabel(call.duration_seconds)}</td>
+                        <td><input type="checkbox" aria-label={`Select ${accountLabel(call)} call`} disabled={reviewerPreview || call.status === 'reviewed'} checked={selectedCallIds.includes(call.id)} onClick={event => event.stopPropagation()} onChange={event => setSelectedCallIds(current => event.target.checked ? [...current, call.id] : current.filter(id => id !== call.id))} /></td>
                       </tr>
                     ))}
-                    {!loading && calls.length === 0 && <tr><td colSpan="6" className="botqc-table-empty">No calls match this queue filter.</td></tr>}
+                    {!loading && calls.length === 0 && <tr><td colSpan="7" className="botqc-table-empty">No calls match this queue filter.</td></tr>}
                   </tbody>
                 </table>
               </div>
               <div className="botqc-queue-foot">
-                <span>New recordings arrive after sync. Reviews and drafts are saved on this server.</span>
+                <div className="botqc-queue-assign">
+                  <span>{selectedCallIds.length} selected</span>
+                  <SelectField label="Assign to QA Agent" value={assignmentTarget} onChange={event => setAssignmentTarget(event.target.value)}>
+                    <option value="">Choose agent</option>
+                    {agents.filter(agent => showAdminControls || agent.email === user?.email).map(agent => <option key={agent.email} value={agent.email}>{agent.name}</option>)}
+                  </SelectField>
+                  <button className="botqc-assign-button" disabled={!selectedCallIds.length || !assignmentTarget || assigningCalls || reviewerPreview} onClick={assignSelectedCalls}>{assigningCalls ? 'Assigning…' : 'Assign selected'}</button>
+                  <a className="botqc-criteria-link" href="/api/ai-bot-qc/review-criteria"><Download size={13} /> Review criteria</a>
+                </div>
                 <div className="botqc-pagination"><button disabled={page === 0} onClick={() => updateQueuePage(Math.max(0, page - 1))}>Previous</button><span>{page + 1} / {pageCount}</span><button disabled={page + 1 >= pageCount} onClick={() => updateQueuePage(Math.min(pageCount - 1, page + 1))}>Next</button></div>
               </div>
             </section>
@@ -917,6 +973,7 @@ export default function AiBotQc() {
                   savedAt={savedAt}
                   onChange={changeDraft}
                   onComplete={completeReview}
+                  onMarkFollowUp={() => changeDraft('outcome', 'needs_follow_up')}
                   onReopen={reopenReview}
                   onClose={closeSelectedCall}
                 />
@@ -933,12 +990,16 @@ export default function AiBotQc() {
         isAdmin={showAdminControls}
         forwardingChecks={forwardingChecks}
         forwardingCompleted={forwardingCompleted}
+        activity={dashboard?.activity}
+        criticalFlags={dashboard?.critical_flags || []}
         forwardingResults={forwardingResults}
         forwardingNotes={forwardingNotes}
         completingForwarding={completingForwarding}
         onForwardingResultChange={(check, value) => setForwardingResults(current => ({ ...current, [`${check.customer}|${check.last_call_id}`]: value }))}
         onForwardingNoteChange={(check, value) => setForwardingNotes(current => ({ ...current, [`${check.customer}|${check.last_call_id}`]: value }))}
         onCompleteForwarding={completeForwardingCheck}
+        onResolveCritical={resolveCritical}
+        resolvingCriticalId={resolvingCriticalId}
         onFilterChange={loadOverview}
         onReviewerClick={email => { setQueueStatus('all'); setSearchText(email); setPage(0); setActiveView('queue'); loadQueue(0, 'all', email); }}
       />}
@@ -1000,7 +1061,7 @@ export default function AiBotQc() {
   );
 }
 
-function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPosts, viewerEmail, previewMode, saving, savedAt, onChange, onComplete, onReopen, onClose }) {
+function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPosts, viewerEmail, previewMode, saving, savedAt, onChange, onComplete, onMarkFollowUp, onReopen, onClose }) {
   const call = data.call;
   const files = call.recording_keys || [];
   const editable = !previewMode && call.status !== 'reviewed' && (call.status !== 'in_review' || call.reviewer_email === viewerEmail || isAdmin);
@@ -1015,7 +1076,7 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
     <div className="botqc-review-content">
       <div className="botqc-review-title">
         <div>
-          <div className="botqc-review-account">{accountLabel(call.customer)}</div>
+          <div className="botqc-review-account">{accountLabel(call)}</div>
           <h2>{callDateTime(call)}</h2>
           <div className="botqc-review-meta">{durationLabel(call.duration_seconds)}{call.room_name ? ` · ${call.room_name}` : ''}</div>
         </div>
@@ -1046,7 +1107,7 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
       <section className="botqc-call-metadata">
         <div className="botqc-section-heading">CALL METADATA</div>
         <dl>
-          <Metadata label="Account" value={accountLabel(call.customer)} />
+          <Metadata label="Account" value={accountLabel(call)} />
           <Metadata label="Started" value={callDateTime(call)} />
           <Metadata label="Duration" value={durationLabel(call.duration_seconds)} />
           {call.room_name && <Metadata label="Room name" value={call.room_name} />}
@@ -1107,6 +1168,7 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
 
         <div className="botqc-review-actions">
           <span className={`botqc-save-state${saving ? ' is-saving' : ''}`}><span className="botqc-save-dot" />{saving ? 'Saving…' : formatSaved(savedAt || call.last_saved_at)}</span>
+          {call.status !== 'reviewed' && <button className="botqc-follow-up-button" disabled={!editable || saving || (!call.critical && !call.call_tags?.some(tag => ['bot_hangup', 'intent_misunderstood', 'handoff_needed', 'incorrect_information'].includes(tag)) && !String(call.feedback || '').trim()) || call.outcome === 'needs_follow_up'} onClick={onMarkFollowUp}>{call.outcome === 'needs_follow_up' ? 'Needs Follow Up selected' : 'Mark Needs Follow Up'}</button>}
           {call.status !== 'reviewed' ? <button className="botqc-complete-button" disabled={saving || !readyToComplete} onClick={onComplete}>Complete review</button> : (
             <span className="botqc-reviewed-by">Reviewed by {call.reviewer_name || 'Unknown'}{call.reviewed_at ? ` · ${new Date(call.reviewed_at).toLocaleString()}` : ''}</span>
           )}
@@ -1131,10 +1193,23 @@ function Metadata({ label, value }) {
 }
 
 function DecodedAudioPlayer({ src, name }) {
-  const [nativeFailed, setNativeFailed] = useState(false);
+  const [nativeFailed, setNativeFailed] = useState(() => {
+    const probe = document.createElement('audio');
+    return !probe.canPlayType('audio/ogg; codecs=opus');
+  });
   const [fallbackUrl, setFallbackUrl] = useState('');
   const [decoding, setDecoding] = useState(false);
   const [decodeError, setDecodeError] = useState('');
+  const nativeRef = useRef(null);
+
+  // Some browsers (Safari) never fire `error` for unsupported Ogg/Opus; fall back if metadata never loads.
+  useEffect(() => {
+    if (nativeFailed) return undefined;
+    const timer = setTimeout(() => {
+      if (!nativeRef.current || nativeRef.current.readyState === 0) setNativeFailed(true);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [nativeFailed, src]);
 
   useEffect(() => {
     if (!nativeFailed) return undefined;
@@ -1173,7 +1248,7 @@ function DecodedAudioPlayer({ src, name }) {
 
   return (
     <div className="botqc-audio-player">
-      {!nativeFailed && <audio controls preload="metadata" src={src} onError={() => setNativeFailed(true)}>Audio playback is not supported by this browser.</audio>}
+      {!nativeFailed && <audio ref={nativeRef} controls preload="metadata" src={src} onError={() => setNativeFailed(true)}>Audio playback is not supported by this browser.</audio>}
       {nativeFailed && (decoding ? <div className="botqc-decoding"><AudioLines size={15} /> Preparing compatible playback…</div> : fallbackUrl ? (
         <audio controls preload="auto" src={fallbackUrl} aria-label={`Play ${name}`} />
       ) : decodeError ? <div className="botqc-data-warning">{decodeError} <a href={src}>Download original</a></div> : null)}
@@ -1181,7 +1256,7 @@ function DecodedAudioPlayer({ src, name }) {
   );
 }
 
-function TeamOverview({ dashboard, period, reviewerEmail, isAdmin, forwardingChecks, forwardingCompleted, forwardingResults, forwardingNotes, completingForwarding, onForwardingResultChange, onForwardingNoteChange, onCompleteForwarding, onFilterChange, onReviewerClick }) {
+function TeamOverview({ dashboard, period, reviewerEmail, isAdmin, forwardingChecks, forwardingCompleted, forwardingResults, forwardingNotes, completingForwarding, activity, criticalFlags, resolvingCriticalId, onForwardingResultChange, onForwardingNoteChange, onCompleteForwarding, onResolveCritical, onFilterChange, onReviewerClick }) {
   const counts = dashboard?.counts || {};
   const reviewers = dashboard?.reviewers || [];
   const accounts = dashboard?.accounts || [];
@@ -1225,7 +1300,27 @@ function TeamOverview({ dashboard, period, reviewerEmail, isAdmin, forwardingChe
         <Metric label="Reviewed" value={counts.reviewed || 0} icon={Check} />
         <Metric label="Need follow-up" value={counts.needs_follow_up || 0} icon={AlertTriangle} />
         <Metric label="Critical flags" value={counts.critical || 0} icon={ShieldAlert} critical />
+        <Metric label="Calls reviewed today" value={activity?.calls_reviewed_today || 0} icon={CheckCheck} />
+        <Metric label="Last call checked" value={activity?.last_call_checked_at ? new Date(activity.last_call_checked_at).toLocaleString() : 'No reviews yet'} icon={Clock3} />
       </div>
+      {isAdmin && <section className="botqc-data-panel">
+        <div className="botqc-panel-title"><div><ShieldAlert size={16} /><h3>Critical Flags</h3></div><span>{criticalFlags.length} open</span></div>
+        <div className="botqc-table-scroll">
+          <table className="botqc-data-table botqc-critical-table">
+            <thead><tr><th>Account / call</th><th>Critical detail</th><th>Flagged by</th><th>Flagged at</th><th>Resolution</th></tr></thead>
+            <tbody>
+              {criticalFlags.map(call => <tr key={call.id}>
+                <td>{accountLabel(call)}<small>{callDateTime(call)}</small></td>
+                <td className="botqc-critical-detail">{call.critical_note || 'No critical detail recorded'}</td>
+                <td>{call.reviewer_name || 'System / forwarding check'}</td>
+                <td>{call.critical_flagged_at ? new Date(call.critical_flagged_at).toLocaleString() : 'Time unavailable'}</td>
+                <td><button className="botqc-resolve-button" disabled={Boolean(resolvingCriticalId)} onClick={() => onResolveCritical(call)}>{resolvingCriticalId === call.id ? 'Saving…' : <><CheckCheck size={13} /> Mark addressed</>}</button></td>
+              </tr>)}
+              {!criticalFlags.length && <tr><td colSpan="5" className="botqc-table-empty">No unresolved critical flags.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>}
       <section className="botqc-health-strip" aria-label="Bot health from reviewed calls">
         <div><strong>Bot health</strong><small>Signals from reviewed calls; not uptime telemetry</small></div>
         <span><b>{botHealth.reviewed || 0}</b> reviewed sample</span>
@@ -1258,8 +1353,8 @@ function TeamOverview({ dashboard, period, reviewerEmail, isAdmin, forwardingChe
                       <td>{check.main_business_phone || <span className="botqc-dash">Not provided</span>}</td>
                       <td>{check.phone_provider || <span className="botqc-dash">Not provided</span>}</td>
                       <td>{check.business_hours_elapsed}+ business hours</td>
-                      <td><select className="botqc-forwarding-result" value={forwardingResults[`${check.customer}|${check.last_call_id}`] || ''} onChange={event => onForwardingResultChange(check, event.target.value)} aria-label={`Test result for ${accountLabel(check.customer)}`}><option value="">Choose result</option><option value="reached_airi">Reached AIRI</option><option value="not_reaching_airi">Did not reach AIRI</option></select></td>
-                      <td><textarea className="botqc-forwarding-note" maxLength="1000" rows="2" value={forwardingNotes[`${check.customer}|${check.last_call_id}`] || ''} onChange={event => onForwardingNoteChange(check, event.target.value)} placeholder="Optional note" aria-label={`Optional forwarding-test note for ${accountLabel(check.customer)}`} /></td>
+                      <td><select className="botqc-forwarding-result" value={forwardingResults[`${check.customer}|${check.last_call_id}`] || ''} onChange={event => onForwardingResultChange(check, event.target.value)} aria-label={`Test result for ${accountLabel(check)}`}><option value="">Choose result</option><option value="reached_airi">Reached AIRI</option><option value="not_reaching_airi">Did not reach AIRI</option></select></td>
+                      <td><textarea className="botqc-forwarding-note" maxLength="1000" rows="2" value={forwardingNotes[`${check.customer}|${check.last_call_id}`] || ''} onChange={event => onForwardingNoteChange(check, event.target.value)} placeholder="Optional note" aria-label={`Optional forwarding-test note for ${accountLabel(check)}`} /></td>
                       <td><button className="botqc-forwarding-complete" disabled={Boolean(completingForwarding) || !forwardingResults[`${check.customer}|${check.last_call_id}`]} onClick={() => onCompleteForwarding(check)}>{completingForwarding === check.customer ? 'Saving…' : <><CheckCheck size={14} /> Save result</>}</button></td>
                     </tr>
                   ))}
@@ -1509,8 +1604,8 @@ function ForwardingChecks({ checks, completed, calendar, loading, completing, re
                   <td>{check.phone_provider || <span className="botqc-dash">Not in HubSpot</span>}</td>
                   <td>{new Date(check.last_call_at).toLocaleString()}</td>
                   <td>{check.business_hours_elapsed}+ business hours</td>
-                  <td><select className="botqc-forwarding-result" value={results[`${check.customer}|${check.last_call_id}`] || ''} disabled={readOnly} onChange={event => onResultChange(check, event.target.value)} aria-label={`Test result for ${accountLabel(check.customer)}`}><option value="">Choose result</option><option value="reached_airi">Reached AIRI</option><option value="not_reaching_airi">Did not reach AIRI</option></select></td>
-                  <td><textarea className="botqc-forwarding-note" maxLength="1000" rows="2" value={notes[`${check.customer}|${check.last_call_id}`] || ''} disabled={readOnly} onChange={event => onNoteChange(check, event.target.value)} placeholder="What did you test? Any issue?" aria-label={`Optional forwarding-test note for ${accountLabel(check.customer)}`} /></td>
+                  <td><select className="botqc-forwarding-result" value={results[`${check.customer}|${check.last_call_id}`] || ''} disabled={readOnly} onChange={event => onResultChange(check, event.target.value)} aria-label={`Test result for ${accountLabel(check)}`}><option value="">Choose result</option><option value="reached_airi">Reached AIRI</option><option value="not_reaching_airi">Did not reach AIRI</option></select></td>
+                  <td><textarea className="botqc-forwarding-note" maxLength="1000" rows="2" value={notes[`${check.customer}|${check.last_call_id}`] || ''} disabled={readOnly} onChange={event => onNoteChange(check, event.target.value)} placeholder="What did you test? Any issue?" aria-label={`Optional forwarding-test note for ${accountLabel(check)}`} /></td>
                   <td><button className="botqc-forwarding-complete" disabled={readOnly || Boolean(completing) || !results[`${check.customer}|${check.last_call_id}`]} onClick={() => onComplete(check)}>{completing === check.customer ? 'Saving…' : <><CheckCheck size={14} /> Save result</>}</button></td>
                 </tr>
               ))}
