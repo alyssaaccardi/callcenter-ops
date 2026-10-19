@@ -112,6 +112,19 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
+// Block cross-site state-changing requests. Browsers always send Origin on
+// cross-origin POST/PUT/PATCH/DELETE; server-to-server callers send none.
+app.use('/api', (req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  const origin = req.get('origin');
+  if (origin) {
+    let host = '';
+    try { host = new URL(origin).host; } catch { /* invalid origin */ }
+    if (host !== req.get('host')) return res.status(403).json({ error: 'Cross-origin request blocked' });
+  }
+  next();
+});
+
 // ─── Tool-run notifications ──────────────────────────────────────────────────
 // Posts to Slack whenever someone kicks off one of the board's jobs, so tool
 // usage is visible without anyone having to watch the activity log.
