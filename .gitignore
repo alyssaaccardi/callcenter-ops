@@ -30,3 +30,6 @@ ai-bot-qc.db
 ai-bot-qc.db-wal
 ai-bot-qc.db-shm
 backups/
+sessions.db
+sessions.db-wal
+sessions.db-shm

@@ -68,7 +68,7 @@ function resetTutorialDismissals(id) {
 app.set('trust proxy', 1);
 
 app.use(cors({
-  origin: process.env.CLIENT_ORIGIN || true,
+  origin: process.env.CLIENT_ORIGIN || (process.env.NODE_ENV === 'production' ? false : true),
   credentials: true,
 }));
 
@@ -97,6 +97,7 @@ if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
 }
 
 app.use(session({
+  store: new (require('./session-store'))(path.join(__dirname, 'sessions.db')),
   secret: process.env.SESSION_SECRET || 'dev-secret-change-in-prod',
   resave: false,
   saveUninitialized: false,
