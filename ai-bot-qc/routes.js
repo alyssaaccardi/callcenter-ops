@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 const {
   S3Client,
   ListBucketsCommand,
@@ -660,6 +661,24 @@ function isQcAdmin(req) {
 }
 
 router.use(requireRole(...QC_ROLES));
+
+// Reject cross-site state-changing requests (CSRF defense in depth beyond sameSite=lax).
+router.use((req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  const origin = req.get('origin');
+  if (origin) {
+    let host = '';
+    try { host = new URL(origin).host; } catch { /* invalid origin */ }
+    if (host !== req.get('host')) return res.status(403).json({ error: 'Cross-origin request blocked' });
+  }
+  next();
+});
+
+const limiter = (windowMs, max) => rateLimit({ windowMs, max, standardHeaders: true, legacyHeaders: false });
+router.use(limiter(60 * 1000, 600));
+router.post('/sync', limiter(60 * 1000, 6));
+router.post('/bulletin/polish', limiter(60 * 1000, 10));
+router.post('/calls/assign', limiter(60 * 1000, 30));
 
 router.get('/agents', (req, res) => {
   const agents = Object.entries(listUsers()).flatMap(([email, record]) => {

@@ -106,7 +106,10 @@ function checkApiKey(req) {
   const expected = process.env.DEV_API_KEY;
   if (!expected || req.method !== 'GET') return false;
   const provided = req.headers['x-api-key'];
-  return provided && provided === expected;
+  if (typeof provided !== 'string') return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && require('crypto').timingSafeEqual(a, b);
 }
 
 function requireAuth(req, res, next) {
