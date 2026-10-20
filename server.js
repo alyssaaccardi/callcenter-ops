@@ -1362,6 +1362,7 @@ app.get('/api/monday/support-tasks', async (req, res) => {
     const mapped = countable.filter(task => !isDone(task));
 
     const overdue  = mapped.filter(task => {
+      if (!(task.groupTitle || '').toLowerCase().includes('in progress')) return false;
       const statusLow = (task.status || '').toLowerCase();
       if (statusLow === 'overdue') return true;
       if (!task.dueDate) return false;
