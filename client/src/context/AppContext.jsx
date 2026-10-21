@@ -6,7 +6,10 @@ import { useAuth } from './AuthContext';
 const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  // AIRI Interns only see recording links; skip dashboard polling (the server would 403 it).
+  const userRoles = [user?.role, ...(user?.additionalRoles || [])].filter(Boolean);
+  const pollingEnabled = !loading && !(userRoles.length > 0 && userRoles.every(role => role === 'ai_bot_qc_intern'));
   const [slackConfig, setSlackConfig] = useState({ didsUnavailable: '', didsAvailable: '', savvyActive: '', savvyInactive: '' });
   const [status, setStatus] = useState(null);
   const [didCounts, setDidCounts] = useState(null);
@@ -27,8 +30,9 @@ export function AppProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    if (!pollingEnabled) return;
     api.get('/api/activity-log').then(res => setActivityLog(res.data || [])).catch(() => {});
-  }, []);
+  }, [pollingEnabled]);
 
   const addLog = useCallback((msg, type = 'info') => {
     const entry = {
@@ -47,40 +51,44 @@ export function AppProvider({ children }) {
 
   // Load Slack config from authenticated endpoint
   useEffect(() => {
+    if (!pollingEnabled) return;
     api.get('/api/slack-config').then(res => {
       setSlackConfig(res.data || {});
     }).catch(() => {});
-  }, []);
+  }, [pollingEnabled]);
 
   // Poll /api/status every 15s
   useEffect(() => {
     const fetchStatus = () => {
       axios.get('/api/status').then(res => setStatus(res.data)).catch(() => {});
     };
+    if (!pollingEnabled) return undefined;
     fetchStatus();
     const interval = setInterval(fetchStatus, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [pollingEnabled]);
 
   // Poll /api/bandwidth/dids every 30s
   useEffect(() => {
     const fetchDids = () => {
       axios.get('/api/bandwidth/dids').then(res => setDidCounts(res.data)).catch(() => {});
     };
+    if (!pollingEnabled) return undefined;
     fetchDids();
     const interval = setInterval(fetchDids, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [pollingEnabled]);
 
   // Poll /api/hubspot/dids every 60s
   useEffect(() => {
     const fetchHsDids = () => {
       axios.get('/api/hubspot/dids').then(res => setHubspotDids(res.data)).catch(() => {});
     };
+    if (!pollingEnabled) return undefined;
     fetchHsDids();
     const interval = setInterval(fetchHsDids, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [pollingEnabled]);
 
   return (
     <AppContext.Provider value={{
