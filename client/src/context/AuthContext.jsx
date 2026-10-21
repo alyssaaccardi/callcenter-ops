@@ -13,6 +13,8 @@ export function AuthProvider({ children }) {
       .then(res => {
         if (res.data.authenticated) {
           authState.isGuest = !!res.data.user?.isGuest;
+          const roles = [res.data.user?.role, ...(res.data.user?.additionalRoles || [])].filter(Boolean);
+          authState.recordingOnly = roles.length > 0 && roles.every(role => role === 'ai_bot_qc_intern');
           setUser(res.data.user);
         }
         else setUser(null);

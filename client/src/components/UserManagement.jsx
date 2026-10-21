@@ -18,6 +18,7 @@ const ROLES = [
   { value: 'qa_leadership',          label: 'QA Leadership' },
   { value: 'ai_bot_qc',              label: 'AIRI QA Agent' },
   { value: 'ai_bot_qc_admin',        label: 'AIRI QA Admin' },
+  { value: 'ai_bot_qc_intern',       label: 'AIRI Intern (recording links only)' },
 ];
 
 const ROLE_STYLE = {
@@ -37,6 +38,7 @@ const ROLE_STYLE = {
   qa_leadership:          { background: 'rgba(99,102,241,0.15)',  color: '#a5b4fc' },
   ai_bot_qc:              { background: 'rgba(14,116,144,0.18)', color: '#67e8f9' },
   ai_bot_qc_admin:        { background: 'rgba(8,145,178,0.22)',  color: '#a5f3fc' },
+  ai_bot_qc_intern:       { background: 'rgba(100,116,139,0.2)', color: '#cbd5e1' },
 };
 
 const ROLE_LABEL = {
@@ -57,6 +59,7 @@ const ROLE_LABEL = {
   qa_leadership:          'QA Leadership',
   ai_bot_qc:              'AIRI QA Agent',
   ai_bot_qc_admin:        'AIRI QA Admin',
+  ai_bot_qc_intern:       'AIRI Intern',
 };
 
 function TutorialRow({ t, onToggle, onReset }) {

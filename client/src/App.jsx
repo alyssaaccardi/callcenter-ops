@@ -51,7 +51,7 @@ function Dashboard() {
   const { user } = useAuth();
   if (isRobOnly(user)) return <RobStoneApp />;
   const recordingId = new URLSearchParams(window.location.search).get('recording');
-  const canListen = [user?.role, ...(user?.additionalRoles || [])].some(role => ['super_admin', 'ai_bot_qc', 'ai_bot_qc_admin'].includes(role));
+  const canListen = [user?.role, ...(user?.additionalRoles || [])].some(role => ['super_admin', 'ai_bot_qc', 'ai_bot_qc_admin', 'ai_bot_qc_intern'].includes(role));
   if (recordingId && canListen) return <RecordingView callId={recordingId} />;
   const hasCallLink = new URLSearchParams(window.location.search).has('call');
   const defaultModule =

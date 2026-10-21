@@ -62,7 +62,8 @@ Sensitive data in scope: caller phone numbers, call audio and transcripts (may c
 - **Login:** Google OAuth only. Callback is `/auth/google/callback`.
 - **Who gets in:** only emails listed in `users.json` receive a role. Any other `@answeringlegal.com` account gets a limited `guest` session that is rejected by `requireAuth` and `requireRole`. Other domains are refused.
 - **Session:** server-side session, cookie is `httpOnly`, `secure` in production, `sameSite=lax`, 8-hour expiry.
-- **Roles for this module:** `ai_bot_qc` (QA Agent), `ai_bot_qc_admin` (QA admin), `super_admin`. Users can also have `additionalRoles`.
+- **Roles for this module:** `ai_bot_qc` (QA Agent), `ai_bot_qc_admin` (QA admin), `super_admin`, and `ai_bot_qc_intern` (AIRI Intern, recording links only). Users can also have `additionalRoles`.
+- **AIRI Intern:** can sign in and open `/?recording=<id>` (audio + transcript only). The server rejects every other QC route for this role, blocks recording downloads, and `requireAuth`/`isAuthedOrKey` reject intern-only users so they cannot call the rest of the dashboard APIs. Any additional role lifts the restriction.
 - **Enforcement:** `router.use(requireRole(...QC_ROLES))` protects every route in the module, and admin-only routes add `requireRole(...QC_ADMIN_ROLES)`.
 - **Return-to after login:** `?returnTo=` is accepted only if it starts with a single `/` (open-redirect protection).
 - **Review claims:** opening a call claims it for 2 minutes. Edits and completion require owning the active claim (admins can override).

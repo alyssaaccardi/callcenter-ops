@@ -112,6 +112,14 @@ function checkApiKey(req) {
   return a.length === b.length && require('crypto').timingSafeEqual(a, b);
 }
 
+// AIRI Intern: can only open shared recording links, never the dashboard APIs.
+// Holding any other role lifts the restriction.
+const RECORDING_ONLY_ROLE = 'ai_bot_qc_intern';
+function isRecordingOnly(user) {
+  const roles = [user?.role, ...(user?.additionalRoles || [])].filter(Boolean);
+  return roles.length > 0 && roles.every(role => role === RECORDING_ONLY_ROLE);
+}
+
 function requireAuth(req, res, next) {
   if (isDev && !process.env.GOOGLE_CLIENT_ID) {
     req.user = req.user || DEV_USER;
@@ -123,7 +131,7 @@ function requireAuth(req, res, next) {
   }
   // Guests are authenticated but should not pass generic app auth — they only
   // get in via requireAnsweringLegalDomain on explicitly opted-in routes.
-  if (req.isAuthenticated() && !req.user?.isGuest) return next();
+  if (req.isAuthenticated() && !req.user?.isGuest && !isRecordingOnly(req.user)) return next();
   res.status(401).json({ error: 'Unauthorized' });
 }
 
@@ -138,7 +146,7 @@ function isAuthedOrKey(req) {
     req.user = req.user || API_KEY_USER;
     return true;
   }
-  return req.isAuthenticated() && !req.user?.isGuest;
+  return req.isAuthenticated() && !req.user?.isGuest && !isRecordingOnly(req.user);
 }
 
 // Domain-only gate for pages we open up to any Answering Legal employee.
@@ -153,6 +161,7 @@ function requireAnsweringLegalDomain(req, res, next) {
     const rt = encodeURIComponent(req.originalUrl || req.url || '/');
     return res.redirect(`/auth/google?returnTo=${rt}`);
   }
+  if (isRecordingOnly(req.user)) return res.status(403).send('Access restricted.');
   const email = (req.user?.email || '').toLowerCase();
   if (!email.endsWith('@answeringlegal.com')) {
     return res.status(403).send('Access restricted to Answering Legal employees.');
@@ -189,4 +198,4 @@ function removeUser(email) {
   saveUsers(users);
 }
 
-module.exports = { passport, requireAuth, requireRole, isAuthedOrKey, requireAnsweringLegalDomain, listUsers, addUser, removeUser };
+module.exports = { isRecordingOnly, passport, requireAuth, requireRole, isAuthedOrKey, requireAnsweringLegalDomain, listUsers, addUser, removeUser };

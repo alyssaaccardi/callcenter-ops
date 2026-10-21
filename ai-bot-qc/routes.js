@@ -8,7 +8,7 @@ const {
   ListObjectsV2Command,
   GetObjectCommand,
 } = require('@aws-sdk/client-s3');
-const { requireRole, listUsers } = require('../auth');
+const { requireRole, listUsers, isRecordingOnly } = require('../auth');
 const { db, upsertCall, addEvent } = require('./db');
 const { createBusinessHours } = require('./business-time');
 
@@ -660,7 +660,15 @@ function isQcAdmin(req) {
   return userRoles.some(role => QC_ADMIN_ROLES.includes(role));
 }
 
-router.use(requireRole(...QC_ROLES));
+// AIRI Interns reach only the recording view and its audio stream (no downloads, no review data).
+const qcGate = requireRole(...QC_ROLES);
+const internGate = requireRole('ai_bot_qc_intern');
+router.use((req, res, next) => {
+  if (!isRecordingOnly(req.user)) return qcGate(req, res, next);
+  const allowed = req.method === 'GET' && (/^\/calls\/[^/]+\/recording$/.test(req.path) || req.path === '/artifact');
+  if (!allowed) return res.status(403).json({ error: 'Forbidden' });
+  internGate(req, res, next);
+});
 
 // Reject cross-site state-changing requests (CSRF defense in depth beyond sameSite=lax).
 router.use((req, res, next) => {

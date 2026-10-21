@@ -325,7 +325,7 @@ app.get('/api/users', requireRole('super_admin'), (req, res) => {
   res.json({ users: Object.entries(users).map(([email, u]) => ({ email, ...u })) });
 });
 
-const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor', 'billing', 'scriptor', 'staffing', 'newsletter_contributor', 'rob_ai_board', 'qa_admin', 'qa_tester', 'qa_leadership', 'ai_bot_qc', 'ai_bot_qc_admin'];
+const VALID_ROLES = ['super_admin', 'call_center_ops', 'tv_display', 'support', 'tech', 'zendesk_auditor', 'billing', 'scriptor', 'staffing', 'newsletter_contributor', 'rob_ai_board', 'qa_admin', 'qa_tester', 'qa_leadership', 'ai_bot_qc', 'ai_bot_qc_admin', 'ai_bot_qc_intern'];
 
 app.post('/api/users', requireRole('super_admin'), (req, res) => {
   const { email, name, role, additionalRoles = [] } = req.body;

@@ -49,6 +49,7 @@ const ROLE_LABELS = {
   qa_leadership:          'QA Leadership',
   ai_bot_qc:              'AIRI QA Agent',
   ai_bot_qc_admin:        'AIRI QA Admin',
+  ai_bot_qc_intern:       'AIRI Intern',
 };
 
 const NAV_SECTION_LABEL = {
