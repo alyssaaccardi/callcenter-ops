@@ -9,7 +9,7 @@ const https = require('https');
 const session = require('express-session');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { passport, requireAuth, requireRole, isAuthedOrKey, requireAnsweringLegalDomain, listUsers, addUser, removeUser } = require('./auth');
+const { isRecordingOnly, passport, requireAuth, requireRole, isAuthedOrKey, requireAnsweringLegalDomain, listUsers, addUser, removeUser } = require('./auth');
 const multer = require('multer');
 const XLSX   = require('xlsx');
 const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
@@ -111,6 +111,15 @@ app.use(session({
 
 app.use(passport.initialize());
 app.use(passport.session());
+
+// AIRI Interns only get /api/me and the QC recording routes. Answer everything else with 403
+// (not 401) so the client does not bounce them through /login in a loop.
+app.use('/api', (req, res, next) => {
+  if (req.isAuthenticated?.() && isRecordingOnly(req.user) && req.path !== '/me' && !req.path.startsWith('/ai-bot-qc/')) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  next();
+});
 
 // Block cross-site state-changing requests. Browsers always send Origin on
 // cross-origin POST/PUT/PATCH/DELETE; server-to-server callers send none.
