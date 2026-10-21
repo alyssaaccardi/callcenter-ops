@@ -209,6 +209,9 @@ export default function AiBotQc() {
   const [selectedCallIds, setSelectedCallIds] = useState([]);
   const [assignmentTarget, setAssignmentTarget] = useState('');
   const [assigningCalls, setAssigningCalls] = useState(false);
+  const [exportFrom, setExportFrom] = useState('');
+  const [exportTo, setExportTo] = useState('');
+  const [exportingReviews, setExportingReviews] = useState(false);
   const [resolvingCriticalId, setResolvingCriticalId] = useState('');
   const [totalCalls, setTotalCalls] = useState(0);
   const [internalTestTotal, setInternalTestTotal] = useState(0);
@@ -367,6 +370,30 @@ export default function AiBotQc() {
       await refresh(false);
     } catch (err) {
       setError(err.response?.data?.error || 'Could not remove excluded caller number');
+    }
+  }
+
+  async function exportReviews() {
+    if (exportingReviews) return;
+    setExportingReviews(true);
+    setError('');
+    try {
+      const params = {};
+      if (exportFrom) params.from = exportFrom;
+      if (exportTo) params.to = exportTo;
+      const response = await api.get('/api/ai-bot-qc/export', { params, responseType: 'blob' });
+      const objectUrl = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = `airi-qa-reviews-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch {
+      setError('Could not export reviewed calls.');
+    } finally {
+      setExportingReviews(false);
     }
   }
 
@@ -981,6 +1008,13 @@ export default function AiBotQc() {
                   </SelectField>
                   <button className="botqc-assign-button" disabled={!selectedCallIds.length || !assignmentTarget || assigningCalls || reviewerPreview} onClick={assignSelectedCalls}>{assigningCalls ? 'Assigning…' : 'Assign selected'}</button>
                   <a className="botqc-criteria-link" href="/api/ai-bot-qc/review-criteria"><Download size={13} /> Review criteria</a>
+                  {showAdminControls && (
+                    <span className="botqc-export">
+                      <input type="date" value={exportFrom} max={exportTo || undefined} onChange={event => setExportFrom(event.target.value)} aria-label="Export reviewed from date" />
+                      <input type="date" value={exportTo} min={exportFrom || undefined} onChange={event => setExportTo(event.target.value)} aria-label="Export reviewed to date" />
+                      <button className="botqc-assign-button" disabled={exportingReviews} onClick={exportReviews} title="Download reviewed calls with human feedback as CSV (leave dates blank for all)"><Download size={13} /> {exportingReviews ? 'Exporting…' : 'Export reviews (CSV)'}</button>
+                    </span>
+                  )}
                 </div>
                 <div className="botqc-pagination"><button disabled={page === 0} onClick={() => updateQueuePage(Math.max(0, page - 1))}>Previous</button><span>{page + 1} / {pageCount}</span><button disabled={page + 1 >= pageCount} onClick={() => updateQueuePage(Math.min(pageCount - 1, page + 1))}>Next</button></div>
               </div>

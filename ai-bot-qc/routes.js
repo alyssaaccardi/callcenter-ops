@@ -949,6 +949,70 @@ router.get('/queue', async (req, res) => {
   res.json({ calls: rows.map(callRow), total, limit, offset, internal_test_total: internalTestTotal, internal_test_in_results: internalTestInResults });
 });
 
+const HAPPINESS_LABELS = { 1: 'Very unhappy', 2: 'Unhappy', 3: 'Neutral', 4: 'Happy', 5: 'Very happy' };
+
+// Prefix cells that spreadsheets would treat as formulas, then quote per RFC 4180.
+function csvCell(value) {
+  let text = value == null ? '' : String(value);
+  if (/^[=+\-@\t\r]/.test(text) && !/^\+?\d[\d\s().-]*$/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+router.get('/export', requireRole(...QC_ADMIN_ROLES), (req, res) => {
+  const where = [`r.status = 'reviewed'`, NOT_INTERNAL_TEST_SQL];
+  const params = [];
+  const dateOk = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+  if (dateOk(req.query.from)) { where.push('substr(r.reviewed_at, 1, 10) >= ?'); params.push(req.query.from); }
+  if (dateOk(req.query.to)) { where.push('substr(r.reviewed_at, 1, 10) <= ?'); params.push(req.query.to); }
+  if (req.query.critical === '1') where.push('r.critical = 1');
+  if (req.query.customer) { where.push('c.customer = ?'); params.push(safeSegment(req.query.customer)); }
+  if (req.query.reviewer_email) { where.push('r.reviewer_email = ?'); params.push(String(req.query.reviewer_email).slice(0, 180)); }
+  const rows = db.prepare(`SELECT c.id, c.customer, c.caller_phone, c.destination_phone, c.call_date, c.started_at_ns, c.ended_at_ns,
+      r.outcome, r.caller_happiness, r.feedback, r.call_tags, r.critical, r.critical_note, r.reviewer_name, r.reviewer_email, r.reviewed_at
+    FROM bot_calls c JOIN bot_reviews r ON r.call_id = c.id
+    WHERE ${where.join(' AND ')}
+    ORDER BY r.reviewed_at DESC LIMIT 20000`).all(...params);
+
+  const tagLabels = {
+    bot_hangup: 'Caller hung up, possibly due to the bot', sales_spam: 'Sales, spam, or marketing call', very_satisfied: 'Caller sounded very satisfied',
+    no_interaction: 'No meaningful interaction on the call', greeting_only: 'Caller only said a greeting', intent_misunderstood: 'Bot misunderstood the caller’s intent',
+    handoff_needed: 'Transfer or escalation was needed', incorrect_information: 'Bot gave incorrect information',
+  };
+  const header = ['Call ID', 'Account', 'Call date', 'Call start (ET)', 'Duration (sec)', 'Caller phone', 'Destination phone', 'Outcome', 'Caller happiness',
+    'Call tags', 'Human feedback', 'Critical', 'Critical issue details', 'Reviewer', 'Reviewer email', 'Reviewed at (ET)', 'Review link'];
+  const base = (process.env.APP_BASE_URL || 'https://ops.answeringlegal.com').replace(/\/+$/, '');
+  const lines = [header.map(csvCell).join(',')];
+  for (const row of rows) {
+    let tags = [];
+    try { tags = JSON.parse(row.call_tags || '[]'); } catch { /* keep empty */ }
+    const startedMs = row.started_at_ns ? Math.round(row.started_at_ns / 1e6) : null;
+    lines.push([
+      row.id,
+      accountNameFor(row.customer),
+      row.call_date,
+      startedMs ? formatEt(startedMs) : '',
+      row.started_at_ns && row.ended_at_ns ? Math.max(0, Math.round((row.ended_at_ns - row.started_at_ns) / 1e9)) : '',
+      row.caller_phone || '',
+      row.destination_phone || '',
+      row.outcome === 'needs_follow_up' ? 'Needs follow up' : row.outcome === 'ok' ? 'OK' : '',
+      HAPPINESS_LABELS[row.caller_happiness] || '',
+      tags.map(tag => tagLabels[tag] || tag).join('; '),
+      row.feedback,
+      row.critical ? 'Yes' : 'No',
+      row.critical_note,
+      row.reviewer_name || '',
+      row.reviewer_email || '',
+      row.reviewed_at ? formatEt(row.reviewed_at) : '',
+      `${base}/?call=${encodeURIComponent(row.id)}`,
+    ].map(csvCell).join(','));
+  }
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="airi-qa-reviews-${stamp}.csv"`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.send(`\ufeff${lines.join('\r\n')}\r\n`);
+});
+
 router.post('/calls/assign', (req, res) => {
   const actor = actorFor(req);
   const callIds = [...new Set(Array.isArray(req.body?.call_ids) ? req.body.call_ids.filter(id => typeof id === 'string' && id.length <= 180) : [])];

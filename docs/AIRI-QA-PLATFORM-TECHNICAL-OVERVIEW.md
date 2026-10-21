@@ -106,6 +106,7 @@ Base path: `/api/ai-bot-qc`. All require a logged-in session with `ai_bot_qc`, `
 ### Admin and team
 | Method | Path | Access | Purpose |
 |---|---|---|---|
+| GET | `/export` | Admin | CSV of reviewed calls with human feedback, tags, happiness, critical details and reviewer. Filters: `from`, `to` (YYYY-MM-DD, by review date), `critical=1`, `customer`, `reviewer_email`. Internal test calls excluded; cells are formula-injection safe. |
 | GET | `/dashboard` | Admin | Team overview metrics (`period`, `reviewer_email`). |
 | GET | `/history` | Admin | Activity history. |
 | GET/POST/DELETE | `/excluded-phone-numbers` | Admin | Manage internal test numbers. |
