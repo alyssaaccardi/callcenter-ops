@@ -394,3 +394,7 @@ button.botqc-count:hover { border-color: var(--border-strong); transform: transl
   .botqc-health-strip > div { min-width: 100%; }
   .botqc-review-panel.is-open { inset: 7px; }
 }
+.botqc-recording-page { max-width: 760px; margin: 0 auto; padding: 28px 18px; display: flex; flex-direction: column; gap: 10px; }
+.botqc-recording-logo { height: 28px; width: auto; align-self: flex-start; }
+.botqc-recording-transcript { margin-top: 12px; max-height: 420px; overflow-y: auto; font-size: 13px; line-height: 1.5; }
+.botqc-recording-transcript p { margin: 6px 0; }

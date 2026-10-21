@@ -1257,6 +1257,45 @@ function Metadata({ label, value }) {
   return <div><dt>{label}</dt><dd>{value}</dd></div>;
 }
 
+export function RecordingView({ callId }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    api.get(`/api/ai-bot-qc/calls/${encodeURIComponent(callId)}/recording`)
+      .then(result => { if (active) setData(result.data); })
+      .catch(err => { if (active) setError(err.response?.data?.error || 'Could not load this recording.'); });
+    return () => { active = false; };
+  }, [callId]);
+
+  if (error) return <div className="botqc-recording-page"><div className="botqc-data-warning">{error}</div></div>;
+  if (!data) return <div className="botqc-recording-page">Loading recording…</div>;
+  return (
+    <div className="botqc-recording-page">
+      <img src={airiLogo} alt="AIRI" className="botqc-recording-logo" />
+      <div className="botqc-review-account">{data.account_name}</div>
+      <h2>{callDateTime(data)}</h2>
+      <div className="botqc-review-meta">{durationLabel(data.duration_seconds)}</div>
+      {data.recordings.length === 0 && <div className="botqc-data-warning">No linked audio recording was found for this call.</div>}
+      {data.recordings.map(({ key, transcript }) => (
+        <div className="botqc-audio-row" key={key}>
+          <div className="botqc-audio-name"><AudioLines size={15} /><span>{key.split('/').pop()}</span></div>
+          <DecodedAudioPlayer src={artifactUrl({ call_date: data.call_date, customer: data.customer }, data.bucket, key)} name={key.split('/').pop()} />
+          {transcript.length > 0 && (
+            <div className="botqc-recording-transcript">
+              <div className="botqc-section-heading">TRANSCRIPT</div>
+              {transcript.map((message, index) => (
+                <p key={index}><strong>{message.role === 'assistant' ? 'AIRI' : message.role === 'user' ? 'Caller' : message.role}:</strong> {message.content}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DecodedAudioPlayer({ src, name }) {
   const [nativeFailed, setNativeFailed] = useState(() => {
     const probe = document.createElement('audio');

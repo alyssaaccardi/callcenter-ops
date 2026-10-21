@@ -79,6 +79,7 @@ Base path: `/api/ai-bot-qc`. All require a logged-in session with `ai_bot_qc`, `
 | GET | `/queue` | QA | Paged call list. Filters: `status`, `critical`, `assigned=me`, `customer`, `reviewer_email`, `q`, `internal_tests`, `sort_by`, `sort_dir`, `limit` (max 500), `offset`. |
 | GET | `/queue-summary` | QA | Counts for the agent view. |
 | GET | `/calls/:id` | QA | One call with review state and history. |
+| GET | `/calls/:id/recording` | QA | Recording-only view: account, date, duration, audio file keys and transcript. No review notes, tags or reviewer details. Used by the `/?recording=<id>` page that the CSV export links to (login required). |
 | POST | `/calls/:id/claim` | QA | Claim a call for review (2-minute lease). |
 | PUT | `/calls/:id/draft` | QA (claim holder) | Autosave tags, notes, happiness, outcome, critical flag/details. |
 | POST | `/calls/:id/release` | QA (claim holder) | Release the claim, saving the draft. |

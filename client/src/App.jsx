@@ -38,7 +38,7 @@ import RobStonePage, { RobStoneApp } from './pages/RobStonePage';
 import RobAiBoardPage from './pages/RobAiBoardPage';
 import BelizeGridWatch from './modules/BelizeGridWatch';
 import QaTesting from './modules/QaTesting';
-import AiBotQc from './modules/AiBotQc';
+import AiBotQc, { RecordingView } from './modules/AiBotQc';
 
 // Single source of truth for which "experience" a user gets at the root URL.
 // scriptor-only users get the chrome-less Rob-osetta Stone app (no sidebar);
@@ -50,6 +50,9 @@ function isRobOnly(user) {
 function Dashboard() {
   const { user } = useAuth();
   if (isRobOnly(user)) return <RobStoneApp />;
+  const recordingId = new URLSearchParams(window.location.search).get('recording');
+  const canListen = [user?.role, ...(user?.additionalRoles || [])].some(role => ['super_admin', 'ai_bot_qc', 'ai_bot_qc_admin'].includes(role));
+  if (recordingId && canListen) return <RecordingView callId={recordingId} />;
   const hasCallLink = new URLSearchParams(window.location.search).has('call');
   const defaultModule =
     hasCallLink && [user?.role, ...(user?.additionalRoles || [])].some(role => ['super_admin', 'ai_bot_qc', 'ai_bot_qc_admin'].includes(role)) ? 'ai-bot-qc' :

@@ -979,7 +979,7 @@ router.get('/export', requireRole(...QC_ADMIN_ROLES), (req, res) => {
     handoff_needed: 'Transfer or escalation was needed', incorrect_information: 'Bot gave incorrect information',
   };
   const header = ['Call ID', 'Account', 'Call date', 'Call start (ET)', 'Duration (sec)', 'Caller phone', 'Destination phone', 'Outcome', 'Caller happiness',
-    'Call tags', 'Human feedback', 'Critical', 'Critical issue details', 'Reviewer', 'Reviewer email', 'Reviewed at (ET)', 'Review link'];
+    'Call tags', 'Human feedback', 'Critical', 'Critical issue details', 'Reviewer', 'Reviewer email', 'Reviewed at (ET)', 'Recording link (login required)'];
   const base = (process.env.APP_BASE_URL || 'https://ops.answeringlegal.com').replace(/\/+$/, '');
   const lines = [header.map(csvCell).join(',')];
   for (const row of rows) {
@@ -1003,7 +1003,7 @@ router.get('/export', requireRole(...QC_ADMIN_ROLES), (req, res) => {
       row.reviewer_name || '',
       row.reviewer_email || '',
       row.reviewed_at ? formatEt(row.reviewed_at) : '',
-      `${base}/?call=${encodeURIComponent(row.id)}`,
+      `${base}/?recording=${encodeURIComponent(row.id)}`,
     ].map(csvCell).join(','));
   }
   const stamp = new Date().toISOString().slice(0, 10);
@@ -1172,6 +1172,37 @@ router.get('/calls/:id', (req, res) => {
   const call = requireCall(req, res);
   if (!call) return;
   res.json({ call: callRow(call), history: eventRows(call.id) });
+});
+
+// Recording-only view: audio and transcript, with no review notes, tags or reviewer details.
+router.get('/calls/:id/recording', async (req, res) => {
+  const call = db.prepare('SELECT * FROM bot_calls WHERE id = ?').get(req.params.id);
+  if (!call) return res.status(404).json({ error: 'Recording not found.' });
+  const keys = JSON.parse(call.recording_keys || '[]');
+  const recordings = [];
+  for (const key of keys) {
+    let transcript = [];
+    try {
+      const messages = JSON.parse(await readObjectText(call.bucket, `${key.replace(/\.[^./]+$/, '')}/transcript.json`));
+      if (Array.isArray(messages)) {
+        transcript = messages
+          .filter(message => message && message.content)
+          .map(message => ({ role: String(message.role || ''), content: String(message.content).slice(0, 5000) }))
+          .slice(0, 500);
+      }
+    } catch { /* transcript is optional */ }
+    recordings.push({ key, transcript });
+  }
+  res.json({
+    id: call.id,
+    bucket: call.bucket,
+    customer: call.customer,
+    account_name: accountNameFor(call.customer),
+    call_date: call.call_date,
+    started_at_ns: call.started_at_ns,
+    duration_seconds: call.started_at_ns && call.ended_at_ns ? Math.max(0, Math.round((call.ended_at_ns - call.started_at_ns) / 1e9)) : null,
+    recordings,
+  });
 });
 
 router.post('/calls/:id/claim', (req, res) => {
