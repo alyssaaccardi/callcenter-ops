@@ -50,7 +50,11 @@ function isRobOnly(user) {
 function Dashboard() {
   const { user } = useAuth();
   if (isRobOnly(user)) return <RobStoneApp />;
-  const recordingId = new URLSearchParams(window.location.search).get('recording');
+  const linkParams = new URLSearchParams(window.location.search);
+  const userRoleList = [user?.role, ...(user?.additionalRoles || [])].filter(Boolean);
+  const internOnly = userRoleList.length > 0 && userRoleList.every(role => role === 'ai_bot_qc_intern');
+  // Older export/Slack links use ?call=; interns have no dashboard, so send those to the recording view too.
+  const recordingId = linkParams.get('recording') || (internOnly ? linkParams.get('call') : null);
   const canListen = [user?.role, ...(user?.additionalRoles || [])].some(role => ['super_admin', 'ai_bot_qc', 'ai_bot_qc_admin', 'ai_bot_qc_intern'].includes(role));
   if (recordingId && canListen) return <RecordingView callId={recordingId} />;
   const hasCallLink = new URLSearchParams(window.location.search).has('call');
