@@ -1055,6 +1055,9 @@ router.post('/calls/assign', (req, res) => {
   const assignedEmail = String(req.body?.assigned_to_email || '').trim().toLowerCase();
   if (!callIds.length || callIds.length > 100) return res.status(400).json({ error: 'Select between 1 and 100 calls to assign.' });
   if (!assignedEmail) return res.status(400).json({ error: 'Choose a QA Agent.' });
+  if (!isQcAdmin(req) && assignedEmail !== actor.email.toLowerCase()) {
+    return res.status(403).json({ error: 'QA Agents can only assign calls to themselves. Ask a manager to assign to someone else.' });
+  }
 
   const target = Object.entries(listUsers()).find(([email]) => email.toLowerCase() === assignedEmail);
   const targetRoles = target ? [target[1].role, ...(target[1].additionalRoles || [])] : [];
