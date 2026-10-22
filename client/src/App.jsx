@@ -144,6 +144,21 @@ function DashboardInner({ user, defaultModule }) {
 }
 
 function NoDashboardAccess({ user }) {
+  const roles = [user?.role, ...(user?.additionalRoles || [])].filter(Boolean);
+  const internOnly = roles.length > 0 && roles.every(role => role === 'ai_bot_qc_intern');
+  if (internOnly) {
+    return (
+      <main className="access-denied-page">
+        <section className="access-denied-panel" aria-labelledby="access-denied-title">
+          <div className="access-denied-mark" aria-hidden="true">🎧</div>
+          <h1 id="access-denied-title">Open a recording link</h1>
+          <p>Your account{user?.email ? <> (<strong>{user.email}</strong>)</> : null} can listen to shared AIRI call recordings, but it has no dashboard.</p>
+          <p>Use the recording link you were sent, or ask the person who shared it to send it again.</p>
+          <button type="button" onClick={() => { window.location.href = '/auth/logout'; }}>Sign out</button>
+        </section>
+      </main>
+    );
+  }
   return (
     <main className="access-denied-page">
       <section className="access-denied-panel" aria-labelledby="access-denied-title">
