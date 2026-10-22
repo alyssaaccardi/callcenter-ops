@@ -122,6 +122,20 @@ function artifactUrl(call, bucket, key, download = false) {
   return `/api/ai-bot-qc/artifact?${params.toString()}`;
 }
 
+// Autosaves write a history row every few seconds; show consecutive ones from the same person as one line.
+function collapseSaves(events) {
+  const out = [];
+  for (const event of events) {
+    const last = out[out.length - 1];
+    if (event.event_type === 'draft_saved' && last?.event_type === 'draft_saved' && last.actor_email === event.actor_email) {
+      last.count += 1;
+    } else {
+      out.push({ ...event, count: 1 });
+    }
+  }
+  return out;
+}
+
 function eventLabel(event) {
   const labels = {
     claimed: 'claimed this call',
@@ -788,7 +802,7 @@ export default function AiBotQc() {
 
   async function resolveCritical(call) {
     if (!showAdminControls || resolvingCriticalId) return;
-    const resolutionNote = window.prompt('What did the admin or product team address?');
+    const resolutionNote = window.prompt('What did you do to address this critical flag?');
     if (!resolutionNote?.trim()) return;
     setResolvingCriticalId(call.id);
     setError('');
@@ -1247,7 +1261,7 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
         </div>
         {isAdmin && !previewMode && Boolean(call.critical) && (
           <div className="botqc-data-warning">
-            This call has an open critical flag. Once an admin or the dev team has addressed it, move it back to Reviewed.
+            <span><strong>Open critical flag.</strong> Once you have addressed it, move this call back to Reviewed.</span>
             <button className="botqc-resolve-button" disabled={resolving} onClick={onResolveCritical}><CheckCheck size={13} /> {resolving ? 'Saving…' : 'Mark addressed → Reviewed'}</button>
           </div>
         )}
@@ -1257,8 +1271,13 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
 
       <div className="botqc-call-history">
         <div className="botqc-section-heading"><History size={14} /> CALL HISTORY</div>
-        {events.length ? events.slice(0, 8).map((event, index) => (
-          <div className="botqc-event" key={`${event.created_at}-${index}`}><span>{event.actor_name}</span><span>{eventLabel(event)}</span><time>{new Date(event.created_at).toLocaleString()}</time></div>
+        {events.length ? collapseSaves(events).slice(0, 12).map((event, index) => (
+          <div className="botqc-event" key={`${event.created_at}-${index}`}>
+            <span>{event.actor_name}</span>
+            <span>{eventLabel(event)}{event.count > 1 ? ` (${event.count} autosaves)` : ''}</span>
+            <time>{new Date(event.created_at).toLocaleString()}</time>
+            {event.details?.resolution_note && <p className="botqc-event-note">“{event.details.resolution_note}”</p>}
+          </div>
         )) : <div className="botqc-empty-small">No review activity yet.</div>}
       </div>
     </div>

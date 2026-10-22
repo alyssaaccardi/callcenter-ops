@@ -398,3 +398,8 @@ button.botqc-count:hover { border-color: var(--border-strong); transform: transl
 .botqc-recording-logo { height: 28px; width: auto; align-self: flex-start; }
 .botqc-recording-transcript { margin-top: 12px; max-height: 420px; overflow-y: auto; font-size: 13px; line-height: 1.5; }
 .botqc-recording-transcript p { margin: 6px 0; }
+
+.botqc-resolve-button { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 0 11px; border: 1px solid var(--royal-700); border-radius: 4px; background: var(--royal-700); color: #fff; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.botqc-resolve-button:disabled { opacity: .55; cursor: not-allowed; }
+.botqc-data-warning:has(.botqc-resolve-button) { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.botqc-event-note { grid-column: 1 / -1; margin: 2px 0 0; padding-left: 8px; border-left: 2px solid var(--border-strong); color: var(--text-muted); font-size: 9px; }

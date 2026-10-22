@@ -27,7 +27,7 @@ Before marking follow-up, add at least one relevant caller signal or a short not
 
 ## Critical Flags
 
-Use **Flag critical issue** only for a serious, time-sensitive, or high-impact failure that needs prompt admin or product-team attention. Examples include:
+Use **Flag critical issue** only for a serious, time-sensitive, or high-impact failure that needs prompt QA Admin attention. Examples include:
 
 - AIRI repeatedly provides materially wrong information that could cause harm or a significant customer impact.
 - A clearly urgent caller need is mishandled and no effective escalation occurs.
@@ -38,7 +38,7 @@ A critical flag always requires a specific note stating what happened, why it is
 
 ## After A Critical Issue Is Addressed
 
-An admin reviews the open **Critical Flags** list. Only after confirming that the appropriate admin or product team has addressed the concern should an admin select **Mark addressed**. This clears the active critical flag, records the resolver and time in call history, and returns the call to **Reviewed**. It does not delete the original critical note or audit history.
+A QA Admin reviews the open **Critical Flags** list and addresses each concern. Only after the concern has been addressed should the QA Admin select **Mark addressed**. This clears the active critical flag, records the resolver and time in call history, and returns the call to **Reviewed**. It does not delete the original critical note or audit history.
 
 ## Writing Useful Notes
 
