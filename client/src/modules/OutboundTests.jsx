@@ -132,11 +132,14 @@ function AssignForm({ types, agents, onDone }) {
   };
 
   const query = search.trim().toLowerCase();
-  const shown = (accounts || []).filter(a => !query || a.name.toLowerCase().includes(query) || a.did.includes(query));
+  const shown = (accounts || []).filter(a => !query || a.name.toLowerCase().includes(query) || (a.did || '').includes(query));
   const chosenEntries = Object.entries(chosen);
   const chosenList = Object.values(chosen);
 
   const submit = async () => {
+    const missing = chosenList.find(({ account, did }) => !(did ?? account.did ?? '').trim());
+    if (missing) { setError(`Enter a DID for ${missing.account.name}`); return; }
+    setError('');
     setSaving(true);
     try {
       await api.post('/api/ai-bot-qc/outbound-tests/assignments', {
@@ -174,17 +177,24 @@ function AssignForm({ types, agents, onDone }) {
         <div className="obt-account-list">
           {shown.map(a => (
             <label key={a.customer} className="obt-check obt-account-row">
-              <input type="checkbox" checked={!!chosen[a.customer]} disabled={!a.did} onChange={() => toggleAccount(a)} />
+              <input type="checkbox" checked={!!chosen[a.customer]} onChange={() => toggleAccount(a)} />
               <span>{a.name}</span>
-              <span className="obt-meta">{a.did ? `${a.did}${a.did_source === 'hubspot' ? ' (HubSpot)' : ''}` : 'No DID on file'}</span>
+              {chosen[a.customer]
+                ? <input className="obt-did-input" placeholder="DID to call" value={chosen[a.customer].did ?? a.did ?? ''} onClick={e => e.stopPropagation()} onChange={e => setDid(a.customer, e.target.value)} aria-label={`DID for ${a.name}`} />
+                : <span className="obt-meta">{a.did ? `${a.did}${a.did_source === 'hubspot' ? ' (HubSpot)' : ''}` : 'No DID on file'}</span>}
             </label>
           ))}
         </div>
       </fieldset>
 
-      <fieldset><legend>Add an account or DID manually</legend>
+      <fieldset><legend>Add an account manually (any name, any DID)</legend>
         <div className="obt-toolbar">
-          <input placeholder="Account name" value={manualName} onChange={e => setManualName(e.target.value)} />
+          <input list="obt-account-names" placeholder="Account name (type or pick)" value={manualName} onChange={e => {
+            setManualName(e.target.value);
+            const match = (accounts || []).find(a => a.name === e.target.value);
+            if (match?.did) setManualDid(match.did);
+          }} />
+          <datalist id="obt-account-names">{(accounts || []).map(a => <option key={a.customer} value={a.name} />)}</datalist>
           <input placeholder="DID to call, e.g. 631-555-0100" value={manualDid} onChange={e => setManualDid(e.target.value)} />
           <button type="button" className="obt-btn" disabled={!manualName.trim() || !manualDid.trim()} onClick={addManual}>Add</button>
         </div>
