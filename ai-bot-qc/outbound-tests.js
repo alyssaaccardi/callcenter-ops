@@ -3,6 +3,7 @@ const { listUsers } = require('../auth');
 const { db } = require('./db');
 const seeds = require('./outbound-seeds');
 
+module.exports = function createOutboundTests({ listAccounts }) {
 const router = express.Router();
 const ADMIN_ROLES = ['super_admin', 'ai_bot_qc_admin'];
 const QUESTION_TYPES = ['yesno', 'text'];
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS bot_outbound_test_types (
   questions TEXT NOT NULL DEFAULT '[]',
   improvement_prompt TEXT NOT NULL DEFAULT '',
   default_targets TEXT NOT NULL DEFAULT '[]',
+  default_scenarios TEXT NOT NULL DEFAULT '{}',
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -56,14 +58,24 @@ CREATE TABLE IF NOT EXISTS bot_outbound_events (
 );
 `);
 
+if (!db.prepare('PRAGMA table_info(bot_outbound_test_types)').all().some(c => c.name === 'default_scenarios')) {
+  db.exec("ALTER TABLE bot_outbound_test_types ADD COLUMN default_scenarios TEXT NOT NULL DEFAULT '{}'");
+}
+// Account lists are live (HubSpot + recordings), so templates never carry accounts.
+db.exec("UPDATE bot_outbound_test_types SET default_targets = '[]'");
 if (!db.prepare('SELECT COUNT(*) AS n FROM bot_outbound_test_types').get().n) {
   const insert = db.prepare(`INSERT INTO bot_outbound_test_types
-    (title, objective, steps, call_notes, variants, questions, improvement_prompt, default_targets)
+    (title, objective, steps, call_notes, variants, questions, improvement_prompt, default_scenarios)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
   for (const t of seeds) {
     insert.run(t.title, t.objective, JSON.stringify(t.steps), t.call_notes, JSON.stringify(t.variants),
-      JSON.stringify(t.questions), t.improvement_prompt, JSON.stringify(t.default_targets));
+      JSON.stringify(t.questions), t.improvement_prompt, JSON.stringify(t.default_scenarios || {}));
   }
+}
+
+for (const t of seeds) {
+  db.prepare("UPDATE bot_outbound_test_types SET default_scenarios = ? WHERE title = ? AND default_scenarios = '{}'")
+    .run(JSON.stringify(t.default_scenarios || {}), t.title);
 }
 
 const parse = (value, fallback) => { try { return JSON.parse(value); } catch { return fallback; } };
@@ -88,7 +100,7 @@ function typeOut(row) {
   return {
     id: row.id, title: row.title, objective: row.objective, steps: parse(row.steps, []), call_notes: row.call_notes,
     variants: parse(row.variants, ['Call']), questions: parse(row.questions, []), improvement_prompt: row.improvement_prompt,
-    default_targets: parse(row.default_targets, []), active: !!row.active,
+    default_scenarios: parse(row.default_scenarios, {}), active: !!row.active,
   };
 }
 function testOut(row, type) {
@@ -110,13 +122,12 @@ function cleanType(body) {
   const questions = (Array.isArray(body.questions) ? body.questions : []).slice(0, 50)
     .map(q => ({ text: str(q?.text, 500), type: QUESTION_TYPES.includes(q?.type) ? q.type : 'yesno' }))
     .filter(q => q.text);
-  const targets = (Array.isArray(body.default_targets) ? body.default_targets : []).slice(0, 50)
-    .map(cleanTarget).filter(t => t.account && t.phone);
+  const scenarios = cleanTarget({ scenarios: body.default_scenarios }).scenarios;
   return {
     value: {
       title, objective: str(body.objective, 3000), steps: list(body.steps, 500), call_notes: str(body.call_notes, 3000),
       variants: variants.length ? variants : ['Call'], questions, improvement_prompt: str(body.improvement_prompt, 500),
-      default_targets: targets,
+      default_scenarios: scenarios,
     },
   };
 }
@@ -128,6 +139,15 @@ function cleanTarget(t = {}) {
   return { account: str(t.account, 200), phone: str(t.phone, 40), contact: str(t.contact, 120), scenarios };
 }
 
+router.get('/accounts', requireAdmin, async (req, res) => {
+  try {
+    res.json({ accounts: await listAccounts() });
+  } catch (error) {
+    console.error('[ai-bot-qc] outbound test account lookup failed:', error.message);
+    res.status(503).json({ error: 'Could not load AIRI accounts from HubSpot. Try again shortly.' });
+  }
+});
+
 router.get('/types', (req, res) => {
   const rows = db.prepare('SELECT * FROM bot_outbound_test_types WHERE active = 1 ORDER BY id').all();
   res.json({ types: rows.map(typeOut) });
@@ -137,13 +157,13 @@ function saveType(req, res, id) {
   const { value, error } = cleanType(req.body || {});
   if (error) return res.status(400).json({ error });
   const params = [value.title, value.objective, JSON.stringify(value.steps), value.call_notes, JSON.stringify(value.variants),
-    JSON.stringify(value.questions), value.improvement_prompt, JSON.stringify(value.default_targets)];
+    JSON.stringify(value.questions), value.improvement_prompt, JSON.stringify(value.default_scenarios)];
   if (id) {
     db.prepare(`UPDATE bot_outbound_test_types SET title=?, objective=?, steps=?, call_notes=?, variants=?, questions=?,
-      improvement_prompt=?, default_targets=?, updated_at=datetime('now') WHERE id=?`).run(...params, id);
+      improvement_prompt=?, default_scenarios=?, updated_at=datetime('now') WHERE id=?`).run(...params, id);
   } else {
     id = db.prepare(`INSERT INTO bot_outbound_test_types (title, objective, steps, call_notes, variants, questions,
-      improvement_prompt, default_targets) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(...params).lastInsertRowid;
+      improvement_prompt, default_scenarios) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(...params).lastInsertRowid;
   }
   res.json({ type: typeOut(typeById(id)) });
 }
@@ -287,4 +307,5 @@ router.delete('/assignments/:id', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-module.exports = router;
+return router;
+};

@@ -1,16 +1,8 @@
 const Q = (text, type = 'yesno') => ({ text, type });
 const ONE_THING = 'Write one specific example from this call of something that could have been improved, provide as much detail as possible.';
 
-const ACS = { account: 'test Affordable Comfort Solutions LLC', phone: '631-310-0928', contact: '', scenarios: {} };
-const EZZELL = { account: 'test Ezzell Plumbing', phone: '631-250-1838', contact: '', scenarios: {} };
-const AC_SCENARIOS = {
-  'New Client': 'Your AC just broke and you need someone to come fix it',
-  'Existing Client': 'A tech came out last week to fix your AC but it is still broken',
-};
-const LAW_SCENARIOS = {
-  'New Client': 'You need an attorney',
-  'Existing Client': 'Following up on your past court date',
-};
+const NEW_SCENARIO = 'You are a new caller looking to hire this business for the service it offers';
+const EXISTING_SCENARIO = 'You are an existing client following up on earlier work or a past matter';
 
 module.exports = [
   {
@@ -32,7 +24,7 @@ module.exports = [
       Q('Would a real caller have stayed on the phone with the bot and proceeded with the intake?'),
     ],
     improvement_prompt: ONE_THING,
-    default_targets: [ACS],
+    default_scenarios: { Call: NEW_SCENARIO },
   },
   {
     title: 'Say Nothing At All',
@@ -52,7 +44,7 @@ module.exports = [
       Q('What was the length of the call?', 'text'),
     ],
     improvement_prompt: ONE_THING,
-    default_targets: [ACS],
+    default_scenarios: { Call: NEW_SCENARIO },
   },
   {
     title: 'Unanswered Question',
@@ -74,7 +66,7 @@ module.exports = [
       Q('Would a real caller have stayed on the phone with the bot and proceeded with the intake?'),
     ],
     improvement_prompt: ONE_THING,
-    default_targets: [ACS],
+    default_scenarios: { Call: NEW_SCENARIO },
   },
   {
     title: 'Recording Notice',
@@ -92,7 +84,7 @@ module.exports = [
       Q('How does this greeting compare to the previous greetings without a recording notice?', 'text'),
     ],
     improvement_prompt: ONE_THING,
-    default_targets: [EZZELL],
+    default_scenarios: { Call: NEW_SCENARIO },
   },
   {
     title: 'Speak With Someone (No Reason Given)',
@@ -113,11 +105,6 @@ module.exports = [
       Q('Would a real caller have stayed on the phone with the bot and proceeded with the intake questions?'),
     ],
     improvement_prompt: ONE_THING,
-    default_targets: [
-      { account: 'test Law Office of Regina Ratner', phone: '631-228-1499', contact: 'Regina', scenarios: { 'New Client': 'You need a divorce attorney', 'Existing Client': 'Following up on your court date' } },
-      { account: 'test George\'s Heat Cool', phone: '631-310-0928', contact: 'George', scenarios: AC_SCENARIOS },
-      { account: 'test Law Office of Steve Perrigo', phone: '631-937-0199', contact: 'Steve', scenarios: LAW_SCENARIOS },
-      { account: 'test Ezzell Plumbing', phone: '631-250-1838', contact: 'the owner', scenarios: AC_SCENARIOS },
-    ],
+    default_scenarios: { 'New Client': NEW_SCENARIO, 'Existing Client': EXISTING_SCENARIO },
   },
 ];

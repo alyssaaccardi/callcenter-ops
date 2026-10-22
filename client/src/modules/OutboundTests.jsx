@@ -4,7 +4,7 @@ import api from '../api';
 import './OutboundTests.css';
 
 const fill = (text, test) => String(text || '')
-  .replace(/\{contact\}/g, test.contact || 'the contact')
+  .replace(/\{contact\}/g, test.contact || 'the owner')
   .replace(/\{account\}/g, test.account)
   .replace(/\{phone\}/g, test.phone);
 
@@ -15,22 +15,6 @@ const EVENT_LABEL = {
 const telHref = phone => `tel:+1${String(phone).replace(/\D/g, '').slice(-10)}`;
 const when = value => (value ? new Date(`${value.replace(' ', 'T')}Z`).toLocaleString() : '');
 const apiError = (err, fallback) => err.response?.data?.error || fallback;
-
-function targetsToText(targets = []) {
-  return targets.map(t => [t.account, t.phone, t.contact || '',
-    Object.entries(t.scenarios || {}).map(([k, v]) => `${k}: ${v}`).join(' ; ')].join(' | ')).join('\n');
-}
-function textToTargets(text) {
-  return text.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
-    const [account = '', phone = '', contact = '', scen = ''] = line.split('|').map(p => p.trim());
-    const scenarios = {};
-    scen.split(';').forEach(part => {
-      const i = part.indexOf(':');
-      if (i > 0) scenarios[part.slice(0, i).trim()] = part.slice(i + 1).trim();
-    });
-    return { account, phone, contact, scenarios };
-  });
-}
 
 export default function OutboundTests({ isAdmin, readOnly, agents }) {
   const [tests, setTests] = useState([]);
@@ -101,7 +85,12 @@ export default function OutboundTests({ isAdmin, readOnly, agents }) {
 
 function AssignForm({ types, agents, onDone }) {
   const [typeId, setTypeId] = useState('');
-  const [targetsText, setTargetsText] = useState('');
+  const [accounts, setAccounts] = useState(null);
+  const [accountError, setAccountError] = useState('');
+  const [search, setSearch] = useState('');
+  const [chosen, setChosen] = useState({});
+  const [randomCount, setRandomCount] = useState(3);
+  const [scenarios, setScenarios] = useState({});
   const [picked, setPicked] = useState([]);
   const [random, setRandom] = useState(false);
   const [due, setDue] = useState('');
@@ -109,17 +98,38 @@ function AssignForm({ types, agents, onDone }) {
   const [error, setError] = useState('');
   const type = types.find(t => String(t.id) === String(typeId));
 
+  useEffect(() => {
+    api.get('/api/ai-bot-qc/outbound-tests/accounts')
+      .then(res => setAccounts(res.data.accounts))
+      .catch(err => { setAccounts([]); setAccountError(apiError(err, 'Could not load accounts')); });
+  }, []);
+
   const chooseType = id => {
     setTypeId(id);
-    setTargetsText(targetsToText(types.find(t => String(t.id) === String(id))?.default_targets));
+    setScenarios(types.find(t => String(t.id) === String(id))?.default_scenarios || {});
   };
-  const toggle = email => setPicked(cur => (cur.includes(email) ? cur.filter(e => e !== email) : [...cur, email]));
+  const toggleAgent = email => setPicked(cur => (cur.includes(email) ? cur.filter(e => e !== email) : [...cur, email]));
+  const toggleAccount = account => setChosen(cur => {
+    const next = { ...cur };
+    if (next[account.customer]) delete next[account.customer]; else next[account.customer] = { account, contact: '' };
+    return next;
+  });
+  const pickRandom = () => {
+    const pool = (accounts || []).filter(a => a.did);
+    const shuffled = [...pool].sort(() => Math.random() - 0.5).slice(0, Math.max(1, Number(randomCount) || 1));
+    setChosen(Object.fromEntries(shuffled.map(a => [a.customer, { account: a, contact: '' }])));
+  };
+
+  const query = search.trim().toLowerCase();
+  const shown = (accounts || []).filter(a => !query || a.name.toLowerCase().includes(query) || a.did.includes(query));
+  const chosenList = Object.values(chosen);
 
   const submit = async () => {
     setSaving(true);
     try {
       await api.post('/api/ai-bot-qc/outbound-tests/assignments', {
-        type_id: Number(typeId), agent_emails: picked, random, due_date: due || undefined, targets: textToTargets(targetsText),
+        type_id: Number(typeId), agent_emails: picked, random, due_date: due || undefined,
+        targets: chosenList.map(({ account, contact }) => ({ account: account.name, phone: account.did, contact, scenarios })),
       });
       onDone();
     } catch (err) { setError(apiError(err, 'Could not assign')); } finally { setSaving(false); }
@@ -132,30 +142,64 @@ function AssignForm({ types, agents, onDone }) {
         <option value="">Choose a test…</option>
         {types.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
       </select></label>
-      {type && (
-        <label>Accounts to call (one per line: account | phone | contact | {type.variants.map(v => `${v}: scenario`).join(' ; ')})
-          <textarea rows={Math.max(3, targetsText.split('\n').length + 1)} value={targetsText} onChange={e => setTargetsText(e.target.value)} />
+
+      {type && type.variants.map(v => (
+        <label key={v}>{type.variants.length > 1 ? `${v} scenario` : 'Scenario for the caller'}
+          <input value={scenarios[v] || ''} onChange={e => setScenarios(cur => ({ ...cur, [v]: e.target.value }))} />
         </label>
+      ))}
+
+      <fieldset className="obt-accounts"><legend>Accounts to test (live from HubSpot and recordings){chosenList.length ? ` · ${chosenList.length} selected` : ''}</legend>
+        <div className="obt-toolbar">
+          <input placeholder="Search by name or DID" value={search} onChange={e => setSearch(e.target.value)} />
+          <span className="obt-meta">Pick</span>
+          <input type="number" min="1" max="50" className="obt-num" value={randomCount} onChange={e => setRandomCount(e.target.value)} />
+          <button type="button" className="obt-btn" disabled={!accounts?.length} onClick={pickRandom}><Shuffle size={13} /> random accounts</button>
+          {chosenList.length > 0 && <button type="button" className="obt-btn" onClick={() => setChosen({})}>Clear</button>}
+        </div>
+        {accounts === null && <p className="obt-meta">Loading accounts…</p>}
+        {accountError && <p className="obt-error">{accountError}</p>}
+        <div className="obt-account-list">
+          {shown.map(a => (
+            <label key={a.customer} className="obt-check obt-account-row">
+              <input type="checkbox" checked={!!chosen[a.customer]} disabled={!a.did} onChange={() => toggleAccount(a)} />
+              <span>{a.name}</span>
+              <span className="obt-meta">{a.did ? `${a.did}${a.did_source === 'hubspot' ? ' (HubSpot)' : ''}` : 'No DID on file'}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      {chosenList.length > 0 && type && /\{contact\}/.test(type.steps.join(' ')) && (
+        <fieldset><legend>Who should the agent ask for? (optional, defaults to "the owner")</legend>
+          {chosenList.map(({ account, contact }) => (
+            <label key={account.customer}>{account.name}
+              <input value={contact} onChange={e => setChosen(cur => ({ ...cur, [account.customer]: { account, contact: e.target.value } }))} />
+            </label>
+          ))}
+        </fieldset>
       )}
+
       <fieldset><legend>Assign to</legend>
         {agents.map(a => (
-          <label key={a.email} className="obt-check"><input type="checkbox" checked={picked.includes(a.email)} onChange={() => toggle(a.email)} /> {a.name}</label>
+          <label key={a.email} className="obt-check"><input type="checkbox" checked={picked.includes(a.email)} onChange={() => toggleAgent(a.email)} /> {a.name}</label>
         ))}
       </fieldset>
       <label className="obt-check"><input type="checkbox" checked={random} onChange={e => setRandom(e.target.checked)} />
         <Shuffle size={13} /> Randomly give each account to one of the selected agents</label>
       <label>Due date (optional)<input type="date" value={due} onChange={e => setDue(e.target.value)} /></label>
       {error && <p className="obt-error">{error}</p>}
-      <button className="obt-btn is-primary" disabled={saving || !typeId || !picked.length} onClick={submit}>{saving ? 'Assigning…' : 'Assign'}</button>
+      <button className="obt-btn is-primary" disabled={saving || !typeId || !picked.length || !chosenList.length} onClick={submit}>{saving ? 'Assigning…' : `Assign ${chosenList.length || ''} account${chosenList.length === 1 ? '' : 's'}`}</button>
     </div>
   );
 }
 
-const blankType = { title: '', objective: '', stepsText: '', call_notes: '', variantsText: 'Call', questionsText: '', improvement_prompt: 'Write one specific example from this call of something that could have been improved, provide as much detail as possible.', targetsText: '' };
+const blankType = { title: '', objective: '', stepsText: '', call_notes: '', variantsText: 'Call', questionsText: '', improvement_prompt: 'Write one specific example from this call of something that could have been improved, provide as much detail as possible.', scenariosText: '' };
 const typeToForm = t => ({
   title: t.title, objective: t.objective, stepsText: t.steps.join('\n'), call_notes: t.call_notes, variantsText: t.variants.join(', '),
   questionsText: t.questions.map(q => (q.type === 'text' ? `[text] ${q.text}` : q.text)).join('\n'),
-  improvement_prompt: t.improvement_prompt, targetsText: targetsToText(t.default_targets),
+  improvement_prompt: t.improvement_prompt,
+  scenariosText: Object.entries(t.default_scenarios || {}).map(([k, v]) => `${k}: ${v}`).join('\n'),
 });
 
 function TypeManager({ types, onChange }) {
@@ -170,7 +214,8 @@ function TypeManager({ types, onChange }) {
       title: form.title, objective: form.objective, steps: lines(form.stepsText), call_notes: form.call_notes,
       variants: form.variantsText.split(',').map(v => v.trim()).filter(Boolean),
       questions: lines(form.questionsText).map(l => (/^\[text\]/i.test(l) ? { text: l.replace(/^\[text\]\s*/i, ''), type: 'text' } : { text: l, type: 'yesno' })),
-      improvement_prompt: form.improvement_prompt, default_targets: textToTargets(form.targetsText),
+      improvement_prompt: form.improvement_prompt,
+      default_scenarios: Object.fromEntries(lines(form.scenariosText).map(l => { const i = l.indexOf(':'); return i > 0 ? [l.slice(0, i).trim(), l.slice(i + 1).trim()] : null; }).filter(Boolean)),
     };
     try {
       if (editingId === 'new') await api.post('/api/ai-bot-qc/outbound-tests/types', payload);
@@ -195,7 +240,7 @@ function TypeManager({ types, onChange }) {
         <label>Calls per account (comma separated, e.g. New Client, Existing Client)<input value={form.variantsText} onChange={set('variantsText')} /></label>
         <label>Feedback questions (one per line; start a line with [text] for a free-text answer, otherwise Yes/No plus details)<textarea rows={5} value={form.questionsText} onChange={set('questionsText')} /></label>
         <label>"One thing that could have been better" prompt<textarea rows={2} value={form.improvement_prompt} onChange={set('improvement_prompt')} /></label>
-        <label>Suggested accounts (one per line: account | phone | contact | Variant: scenario ; Variant: scenario)<textarea rows={4} value={form.targetsText} onChange={set('targetsText')} /></label>
+        <label>Default caller scenarios (one per line, e.g. "New Client: Your AC just broke"); admins can change them when assigning<textarea rows={3} value={form.scenariosText} onChange={set('scenariosText')} /></label>
         {error && <p className="obt-error">{error}</p>}
         <div className="obt-toolbar">
           <button className="obt-btn is-primary" disabled={!form.title.trim()} onClick={save}>Save</button>
