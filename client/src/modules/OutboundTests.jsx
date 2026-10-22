@@ -93,6 +93,8 @@ function AssignForm({ types, agents, onDone }) {
   const [scenarios, setScenarios] = useState({});
   const [picked, setPicked] = useState([]);
   const [random, setRandom] = useState(false);
+  const [manualName, setManualName] = useState('');
+  const [manualDid, setManualDid] = useState('');
   const [due, setDue] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -114,6 +116,15 @@ function AssignForm({ types, agents, onDone }) {
     if (next[account.customer]) delete next[account.customer]; else next[account.customer] = { account, contact: '' };
     return next;
   });
+  const setDid = (key, did) => setChosen(cur => ({ ...cur, [key]: { ...cur[key], did } }));
+  const addManual = () => {
+    const name = manualName.trim();
+    const did = manualDid.trim();
+    if (!name || !did) return;
+    setChosen(cur => ({ ...cur, [`manual:${Date.now()}`]: { account: { name, customer: '', did }, contact: '', did, manual: true } }));
+    setManualName('');
+    setManualDid('');
+  };
   const pickRandom = () => {
     const pool = (accounts || []).filter(a => a.did);
     const shuffled = [...pool].sort(() => Math.random() - 0.5).slice(0, Math.max(1, Number(randomCount) || 1));
@@ -122,6 +133,7 @@ function AssignForm({ types, agents, onDone }) {
 
   const query = search.trim().toLowerCase();
   const shown = (accounts || []).filter(a => !query || a.name.toLowerCase().includes(query) || a.did.includes(query));
+  const chosenEntries = Object.entries(chosen);
   const chosenList = Object.values(chosen);
 
   const submit = async () => {
@@ -129,7 +141,7 @@ function AssignForm({ types, agents, onDone }) {
     try {
       await api.post('/api/ai-bot-qc/outbound-tests/assignments', {
         type_id: Number(typeId), agent_emails: picked, random, due_date: due || undefined,
-        targets: chosenList.map(({ account, contact }) => ({ account: account.name, phone: account.did, contact, scenarios })),
+        targets: chosenList.map(({ account, contact, did }) => ({ account: account.name, phone: (did ?? account.did ?? '').trim(), contact, scenarios })),
       });
       onDone();
     } catch (err) { setError(apiError(err, 'Could not assign')); } finally { setSaving(false); }
@@ -170,11 +182,27 @@ function AssignForm({ types, agents, onDone }) {
         </div>
       </fieldset>
 
+      <fieldset><legend>Add an account or DID manually</legend>
+        <div className="obt-toolbar">
+          <input placeholder="Account name" value={manualName} onChange={e => setManualName(e.target.value)} />
+          <input placeholder="DID to call, e.g. 631-555-0100" value={manualDid} onChange={e => setManualDid(e.target.value)} />
+          <button type="button" className="obt-btn" disabled={!manualName.trim() || !manualDid.trim()} onClick={addManual}>Add</button>
+        </div>
+        {chosenEntries.length > 0 && <p className="obt-meta">Selected accounts: edit a DID to override the one on file.</p>}
+        {chosenEntries.map(([key, entry]) => (
+          <div key={key} className="obt-toolbar">
+            <span>{entry.account.name}{entry.manual ? ' (manual)' : ''}</span>
+            <input value={entry.did ?? entry.account.did ?? ''} onChange={e => setDid(key, e.target.value)} aria-label={`DID for ${entry.account.name}`} />
+            <button type="button" className="obt-btn" onClick={() => setChosen(cur => { const next = { ...cur }; delete next[key]; return next; })}>Remove</button>
+          </div>
+        ))}
+      </fieldset>
+
       {chosenList.length > 0 && type && /\{contact\}/.test(type.steps.join(' ')) && (
         <fieldset><legend>Who should the agent ask for? (optional, defaults to "the owner")</legend>
-          {chosenList.map(({ account, contact }) => (
-            <label key={account.customer}>{account.name}
-              <input value={contact} onChange={e => setChosen(cur => ({ ...cur, [account.customer]: { account, contact: e.target.value } }))} />
+          {chosenEntries.map(([key, { account, contact }]) => (
+            <label key={key}>{account.name}
+              <input value={contact} onChange={e => setChosen(cur => ({ ...cur, [key]: { ...cur[key], contact: e.target.value } }))} />
             </label>
           ))}
         </fieldset>
