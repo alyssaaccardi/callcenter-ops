@@ -259,12 +259,13 @@ router.post('/assignments/:id/call', async (req, res) => {
     const response = await axios.post(`https://apig.kixie.com/app/event?apikey=${encodeURIComponent(key)}`, {
       businessid: businessId, email: actor.email, target, displayname: 'AIRI QA test', eventname: 'call', apikey: key,
     }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000, validateStatus: () => true });
-    if (response.status >= 200 && response.status < 300) {
+    if (response.status >= 200 && response.status < 300 && response.data?.success !== false) {
       addEvent(row.id, actor, 'kixie_dial_requested', { variant });
       return res.json({ ok: true });
     }
-    console.error('[ai-bot-qc] Kixie dial rejected:', response.status);
-    res.status(502).json({ error: `Kixie did not place the call (HTTP ${response.status}). Dial the number in Kixie instead.`, fallback: true });
+    console.error('[ai-bot-qc] Kixie dial rejected:', response.status, response.data?.msg || '');
+    const reason = response.data?.msg ? ` Kixie said: ${response.data.msg}` : '';
+    res.status(502).json({ error: `Kixie did not place the call.${reason} Dial the number in Kixie instead.`, fallback: true });
   } catch (error) {
     console.error('[ai-bot-qc] Kixie dial failed:', error.message);
     res.status(502).json({ error: 'Could not reach Kixie. Dial the number in Kixie instead.', fallback: true });
