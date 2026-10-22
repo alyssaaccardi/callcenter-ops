@@ -1066,10 +1066,10 @@ router.post('/calls/assign', (req, res) => {
   }
   const now = new Date().toISOString();
   const assign = db.transaction(() => {
-    const rows = callIds.map(callId => db.prepare(`SELECT r.call_id, r.status, r.reviewer_email, r.reviewer_name, r.claim_expires_at
+    const rows = callIds.map(callId => db.prepare(`SELECT r.call_id, r.status, r.critical, r.reviewer_email, r.reviewer_name, r.claim_expires_at
       FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id WHERE r.call_id = ? AND ${NOT_INTERNAL_TEST_SQL}`).get(callId));
     if (rows.some(row => !row)) return { error: 'One or more selected calls are no longer available.' };
-    if (rows.some(row => row.status === 'reviewed')) return { error: 'Reviewed calls cannot be assigned.' };
+    if (rows.some(row => row.status === 'reviewed' && !row.critical)) return { error: 'Reviewed calls cannot be assigned.' };
     if (rows.some(row => claimIsActive(row) && row.reviewer_email !== assignedEmail)) return { error: 'A selected call is actively being reviewed. Refresh the queue and try again.' };
     const update = db.prepare(`UPDATE bot_reviews SET assigned_to_email = ?, assigned_to_name = ?, assigned_by_email = ?, assigned_by_name = ?, assigned_at = ?, updated_at = ?
       WHERE call_id = ?`);

@@ -123,6 +123,11 @@ function artifactUrl(call, bucket, key, download = false) {
 }
 
 // Autosaves write a history row every few seconds; show consecutive ones from the same person as one line.
+// Open critical flags are stored as status 'reviewed' but still need assigning.
+function isSelectable(call) {
+  return call.status !== 'reviewed' || Boolean(call.critical);
+}
+
 function collapseSaves(events) {
   const out = [];
   for (const event of events) {
@@ -997,7 +1002,7 @@ export default function AiBotQc() {
                     <SortableHeader label="Status" column="status" sort={queueSort} onSort={updateQueueSort} />
                     <th>Assigned QA Agent</th>
                     <SortableHeader label="Duration" column="duration" sort={queueSort} onSort={updateQueueSort} />
-                    <th><input type="checkbox" aria-label="Select all calls on this page" checked={calls.some(call => call.status !== 'reviewed') && calls.filter(call => call.status !== 'reviewed').every(call => selectedCallIds.includes(call.id))} onClick={event => event.stopPropagation()} onChange={event => setSelectedCallIds(current => event.target.checked ? [...new Set([...current, ...calls.filter(call => call.status !== 'reviewed').map(call => call.id)])] : current.filter(id => !calls.some(call => call.id === id)))} /></th>
+                    <th><input type="checkbox" aria-label="Select all calls on this page" checked={calls.some(call => isSelectable(call)) && calls.filter(call => isSelectable(call)).every(call => selectedCallIds.includes(call.id))} onClick={event => event.stopPropagation()} onChange={event => setSelectedCallIds(current => event.target.checked ? [...new Set([...current, ...calls.filter(call => isSelectable(call)).map(call => call.id)])] : current.filter(id => !calls.some(call => call.id === id)))} /></th>
                   </tr></thead>
                   <tbody>
                     {calls.map(call => (
@@ -1008,7 +1013,7 @@ export default function AiBotQc() {
                         <td><span className={`botqc-status botqc-status--${statusClass(call)}`}>{relativeStatus(call)}</span></td>
                         <td>{call.assigned_to_name || call.reviewer_name || <span className="botqc-dash">—</span>}{call.assigned_to_name && <small>Assigned{call.reviewer_name ? ` · Reviewing: ${call.reviewer_name}` : ''}</small>}{call.status === 'in_review' && call.claim_expires_at && <small>Claim expires {new Date(call.claim_expires_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</small>}</td>
                         <td className="botqc-duration">{durationLabel(call.duration_seconds)}</td>
-                        <td><input type="checkbox" aria-label={`Select ${accountLabel(call)} call`} disabled={reviewerPreview || call.status === 'reviewed'} checked={selectedCallIds.includes(call.id)} onClick={event => event.stopPropagation()} onChange={event => setSelectedCallIds(current => event.target.checked ? [...current, call.id] : current.filter(id => id !== call.id))} /></td>
+                        <td><input type="checkbox" aria-label={`Select ${accountLabel(call)} call`} disabled={reviewerPreview || !isSelectable(call)} checked={selectedCallIds.includes(call.id)} onClick={event => event.stopPropagation()} onChange={event => setSelectedCallIds(current => event.target.checked ? [...current, call.id] : current.filter(id => id !== call.id))} /></td>
                       </tr>
                     ))}
                     {!loading && calls.length === 0 && <tr><td colSpan="7" className="botqc-table-empty">No calls match this queue filter.</td></tr>}
