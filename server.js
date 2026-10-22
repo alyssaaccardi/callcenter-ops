@@ -7842,6 +7842,8 @@ import('./gridwatch.mjs')
 const { router: qaRouter } = require('./qa/routes');
 app.use('/api/qa', qaRouter);
 app.use('/api/ai-bot-qc', require('./ai-bot-qc/routes'));
+// Kixie pushes call data here; it authenticates with KIXIE_WEBHOOK_SECRET, not a session.
+app.use('/api/kixie', require('./ai-bot-qc/kixie-webhook'));
 
 app.use('/api/grid', requireRole('super_admin', 'staffing'), (req, res, next) => {
   if (!_gridwatchRouter) return res.status(503).json({ error: 'Grid Watch initializing' });

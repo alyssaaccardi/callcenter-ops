@@ -10,7 +10,7 @@ const fill = (text, test) => String(text || '')
 
 const STATUS_LABEL = { assigned: 'To do', submitted: 'Awaiting review', reviewed: 'Reviewed' };
 const EVENT_LABEL = {
-  assigned: 'Assigned', call_clicked: 'Clicked call', submitted: 'Submitted', reviewed: 'Reviewed', reopened: 'Reopened to agent',
+  assigned: 'Assigned', call_clicked: 'Clicked call', submitted: 'Submitted', reviewed: 'Reviewed', reopened: 'Reopened to agent', kixie_call: 'Kixie call attached',
 };
 const telHref = phone => `tel:+1${String(phone).replace(/\D/g, '').slice(-10)}`;
 const when = value => (value ? new Date(`${value.replace(' ', 'T')}Z`).toLocaleString() : '');
@@ -336,6 +336,17 @@ function TestDetail({ id, isAdmin, onBack }) {
           })}
         </div>
       ))}
+
+      <div className="obt-card">
+        <h3>Kixie calls</h3>
+        {!test.calls.length && <p className="obt-meta">No Kixie call has been matched yet. Calls from {test.agent_email} to {test.phone} attach here automatically after they end.</p>}
+        {test.calls.map(c => (
+          <div key={c.call_id} className="obt-kixie">
+            <p><strong>{c.variant || 'Call'}</strong> · {when(c.called_at.replace('T', ' ').replace(/\.\d+Z$/, ''))} · {Math.floor(c.duration_seconds / 60)}m {c.duration_seconds % 60}s · {c.status || 'unknown'}{c.disposition && c.disposition !== 'not disposed' ? ` · ${c.disposition}` : ''}</p>
+            {c.recording_url ? <audio controls preload="none" src={c.recording_url} /> : <p className="obt-meta">No recording was provided for this call.</p>}
+          </div>
+        ))}
+      </div>
 
       <div className="obt-card">
         <h3>One thing that could have been better</h3>

@@ -47,3 +47,4 @@
 .obt-account-list { display: grid; max-height: 280px; overflow: auto; margin-top: 8px; border: 1px solid var(--border); border-radius: 5px; }
 .obt-account-row { display: grid !important; grid-template-columns: auto 1fr auto; padding: 6px 10px; border-bottom: 1px solid var(--border); }
 .obt-num { width: 64px; }
+.obt-kixie audio { width: 100%; margin-top: 4px; }
