@@ -687,6 +687,7 @@ router.use(limiter(60 * 1000, 600));
 router.post('/sync', limiter(60 * 1000, 6));
 router.post('/bulletin/polish', limiter(60 * 1000, 10));
 router.post('/calls/assign', limiter(60 * 1000, 30));
+router.use('/outbound-tests', require('./outbound-tests'));
 
 router.get('/agents', (req, res) => {
   const agents = Object.entries(listUsers()).flatMap(([email, record]) => {

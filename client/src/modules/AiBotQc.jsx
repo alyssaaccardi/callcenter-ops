@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle, AudioLines, BarChart3, Check, ChevronDown, Clock3, Download, ExternalLink, Trash2,
-  CheckCheck, Headphones, History, ListChecks, Megaphone, PhoneForwarded, RefreshCw, Search, Settings2, ShieldAlert, UserRound, X,
+  CheckCheck, Headphones, History, ListChecks, Megaphone, Phone, PhoneForwarded, RefreshCw, Search, Settings2, ShieldAlert, UserRound, X,
 } from 'lucide-react';
 import { OggOpusDecoderWebWorker } from 'ogg-opus-decoder';
 import airiLogo from '../assets/airi.avif';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
+import OutboundTests from './OutboundTests';
 import './AiBotQc.css';
 
 const HAPPINESS_RATINGS = [
@@ -929,6 +930,7 @@ export default function AiBotQc() {
       <nav className="botqc-tabs" aria-label="QC views">
         <button className={activeView === 'queue' ? 'is-active' : ''} onClick={() => { setActiveView('queue'); loadQueue(page, queueStatus, searchText); }}><ListChecks size={15} /> Review queue</button>
         <button className={activeView === 'forwarding' ? 'is-active' : ''} onClick={() => { setActiveView('forwarding'); loadForwardingChecks(); }}><PhoneForwarded size={15} /> Forwarding checks{forwardingChecks.length > 0 ? ` · ${forwardingChecks.length}` : ''}</button>
+        <button className={activeView === 'outbound' ? 'is-active' : ''} onClick={() => setActiveView('outbound')}><Phone size={15} /> Outbound tests</button>
         {showAdminControls && <button className={activeView === 'overview' ? 'is-active' : ''} onClick={() => setActiveView('overview')}><BarChart3 size={15} /> Team overview</button>}
         {showAdminControls && <button className={activeView === 'admin-settings' ? 'is-active' : ''} onClick={() => setActiveView('admin-settings')}><Settings2 size={15} /> Admin settings</button>}
       </nav>
@@ -1104,6 +1106,8 @@ export default function AiBotQc() {
         history={history}
         onOpenHistoryCall={async id => { setActiveView('queue'); await loadSelected(id, { readOnly: true }); }}
       />}
+
+      {activeView === 'outbound' && <OutboundTests isAdmin={isAdmin} readOnly={reviewerPreview} agents={agents} />}
 
       {activeView === 'forwarding' && <ForwardingChecks
         checks={forwardingChecks}

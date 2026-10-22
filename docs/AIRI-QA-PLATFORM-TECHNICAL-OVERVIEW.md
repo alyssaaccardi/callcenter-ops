@@ -81,6 +81,7 @@ Base path: `/api/ai-bot-qc`. All require a logged-in session with `ai_bot_qc`, `
 | GET | `/queue-summary` | QA | Counts for the agent view. |
 | GET | `/calls/:id` | QA | One call with review state and history. |
 | GET | `/calls/:id/recording` | QA | Recording-only view: account, date, duration, audio file keys and transcript. No review notes, tags or reviewer details. Used by the `/?recording=<id>` page that the CSV export links to (login required). |
+| GET/POST/PUT/DELETE | `/outbound-tests/types`, `/outbound-tests/assignments[/:id[/answers\|submit\|review\|reopen\|call-click]]` | QA (agents see only their own; templates, assigning, review and delete are admin) | Scripted outbound QC tests: templates (seeded from the test docs), assignment to agents (optionally random), agent feedback form, admin review, audit events. Tables `bot_outbound_test_types`, `bot_outbound_tests`, `bot_outbound_events`. Kixie call/recording attachment is planned (Phase 2). |
 | POST | `/calls/:id/claim` | QA | Claim a call for review (2-minute lease). |
 | PUT | `/calls/:id/draft` | QA (claim holder) | Autosave tags, notes, happiness, outcome, critical flag/details. |
 | POST | `/calls/:id/release` | QA (claim holder) | Release the claim, saving the draft. |
