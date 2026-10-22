@@ -1042,6 +1042,8 @@ export default function AiBotQc() {
                   onComplete={completeReview}
                   onMarkFollowUp={() => changeDraft('outcome', 'needs_follow_up')}
                   onReopen={reopenReview}
+                  resolving={Boolean(resolvingCriticalId)}
+                  onResolveCritical={async () => { await resolveCritical(selected.call); closeSelectedCall(); }}
                   onClose={closeSelectedCall}
                 />
               )}
@@ -1130,7 +1132,7 @@ export default function AiBotQc() {
   );
 }
 
-function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPosts, viewerEmail, previewMode, saving, savedAt, onChange, onComplete, onMarkFollowUp, onReopen, onClose }) {
+function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPosts, viewerEmail, previewMode, saving, savedAt, onChange, onComplete, onMarkFollowUp, onReopen, resolving, onResolveCritical, onClose }) {
   const call = data.call;
   const files = call.recording_keys || [];
   const editable = !previewMode && call.status !== 'reviewed' && (call.status !== 'in_review' || call.reviewer_email === viewerEmail || isAdmin);
@@ -1243,6 +1245,12 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
           )}
           {isAdmin && call.status === 'reviewed' && <button className="botqc-reopen-button" onClick={() => onReopen(call.id)}>Reopen review</button>}
         </div>
+        {isAdmin && !previewMode && Boolean(call.critical) && (
+          <div className="botqc-data-warning">
+            This call has an open critical flag. Once an admin or the dev team has addressed it, move it back to Reviewed.
+            <button className="botqc-resolve-button" disabled={resolving} onClick={onResolveCritical}><CheckCheck size={13} /> {resolving ? 'Saving…' : 'Mark addressed → Reviewed'}</button>
+          </div>
+        )}
         {call.status === 'in_review' && call.reviewer_email !== viewerEmail && !isAdmin && <div className="botqc-data-warning">This call is claimed by {call.reviewer_name}. You can view it, but cannot edit until the claim expires.</div>}
         {call.reviewer_name && call.status !== 'reviewed' && <div className="botqc-last-reviewer"><UserRound size={14} /> Last handled by {call.reviewer_name}{call.last_saved_at ? ` · ${new Date(call.last_saved_at).toLocaleString()}` : ''}</div>}
       </div>
