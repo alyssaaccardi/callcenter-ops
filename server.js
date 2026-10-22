@@ -81,7 +81,7 @@ app.use(helmet({
       styleSrc:   ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc:    ["'self'", 'https://fonts.gstatic.com'],
       imgSrc:     ["'self'", 'data:', 'https://lh3.googleusercontent.com'],
-      mediaSrc:   ["'self'", 'blob:'],
+      mediaSrc:   ["'self'", 'blob:', 'https://calls.kixie.com'],
       connectSrc: ["'self'"],
       frameSrc:   ["'self'", 'https://al-app-portal.vercel.app'],
     },
