@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Phone, Plus, Shuffle, Trash2 } from 'lucide-react';
 import api from '../api';
+import { useAuth } from '../context/AuthContext';
 import './OutboundTests.css';
 
 const fill = (text, test) => String(text || '')
@@ -10,9 +11,8 @@ const fill = (text, test) => String(text || '')
 
 const STATUS_LABEL = { assigned: 'To do', submitted: 'Awaiting review', reviewed: 'Reviewed' };
 const EVENT_LABEL = {
-  assigned: 'Assigned', call_clicked: 'Clicked call', submitted: 'Submitted', reviewed: 'Reviewed', reopened: 'Reopened to agent', kixie_call: 'Kixie call attached',
+  assigned: 'Assigned', call_clicked: 'Clicked call', submitted: 'Submitted', reviewed: 'Reviewed', reopened: 'Reopened to agent', kixie_call: 'Kixie call attached', kixie_dial_requested: 'Kixie dial requested',
 };
-const telHref = phone => `tel:+1${String(phone).replace(/\D/g, '').slice(-10)}`;
 const when = value => (value ? new Date(`${value.replace(' ', 'T')}Z`).toLocaleString() : '');
 const apiError = (err, fallback) => err.response?.data?.error || fallback;
 
@@ -272,6 +272,10 @@ function TestDetail({ id, isAdmin, onBack }) {
   const [adminNote, setAdminNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [dialing, setDialing] = useState('');
+  const [callMessage, setCallMessage] = useState('');
+  const { user } = useAuth();
+  const viewerEmail = String(user?.email || '').toLowerCase();
 
   const load = useCallback(async () => {
     const res = await api.get(`/api/ai-bot-qc/outbound-tests/assignments/${id}`);
@@ -296,6 +300,16 @@ function TestDetail({ id, isAdmin, onBack }) {
   };
   const base = `/api/ai-bot-qc/outbound-tests/assignments/${id}`;
   const body = { answers, improvement };
+  const dial = async variant => {
+    setDialing(variant);
+    try {
+      await api.post(`${base}/call`, { variant });
+      setCallMessage(`Kixie is calling you now. Answer in Kixie and it will dial ${test.phone}.`);
+      await load();
+    } catch (err) {
+      setCallMessage(`${apiError(err, 'Could not start the call.')} Number: ${test.phone}`);
+    } finally { setDialing(''); }
+  };
 
   return (
     <div className="obt">
@@ -314,9 +328,11 @@ function TestDetail({ id, isAdmin, onBack }) {
         <div key={variant} className="obt-card">
           <div className="obt-call-head">
             <h3>{type.variants.length > 1 ? `${variant} call` : 'Call'}</h3>
-            <a className="obt-btn is-primary" href={telHref(test.phone)}
-              onClick={() => api.post(`${base}/call-click`, { variant }).catch(() => {})}><Phone size={14} /> Call {test.phone}</a>
+            <button type="button" className="obt-btn is-primary" disabled={dialing === variant || test.agent_email !== viewerEmail}
+              title={test.agent_email !== viewerEmail ? 'Only the assigned agent can place this call' : undefined}
+              onClick={() => dial(variant)}><Phone size={14} /> {dialing === variant ? 'Calling…' : `Call ${test.phone} with Kixie`}</button>
           </div>
+          {callMessage && dialing === '' && <p className="obt-meta">{callMessage}</p>}
           {test.scenarios[variant] && <p className="obt-scenario">Scenario: {test.scenarios[variant]}</p>}
           {type.questions.map((q, i) => {
             const a = answers[variant]?.[i] || { choice: '', text: '' };

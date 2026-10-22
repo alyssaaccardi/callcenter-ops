@@ -1,4 +1,5 @@
 const express = require('express');
+const axios = require('axios');
 const { listUsers } = require('../auth');
 const { db } = require('./db');
 const seeds = require('./outbound-seeds');
@@ -241,11 +242,33 @@ router.post('/assignments', requireAdmin, (req, res) => {
   res.json({ created: created.length });
 });
 
-router.post('/assignments/:id/call-click', (req, res) => {
+// Rings the agent's own Kixie dialer through Kixie's Make a Call API (only for the test's assigned agent).
+router.post('/assignments/:id/call', async (req, res) => {
   const row = visibleTest(req, req.params.id);
   if (!row) return res.status(404).json({ error: 'Test not found' });
-  addEvent(row.id, actorFor(req), 'call_clicked', { variant: str(req.body?.variant, 80), phone: row.phone });
-  res.json({ ok: true });
+  const actor = actorFor(req);
+  const variant = str(req.body?.variant, 80);
+  addEvent(row.id, actor, 'call_clicked', { variant, phone: row.phone });
+  if (row.agent_email !== actor.email) return res.status(403).json({ error: 'Only the assigned agent can place this call' });
+  const key = process.env.KIXIE_API_KEY;
+  const businessId = process.env.KIXIE_BUSINESS_ID;
+  if (!key || !businessId) return res.status(503).json({ error: 'Kixie is not configured', fallback: true });
+  const digits = String(row.phone).replace(/\D/g, '');
+  const target = digits.length === 10 ? `1${digits}` : digits;
+  try {
+    const response = await axios.post(`https://apig.kixie.com/app/event?apikey=${encodeURIComponent(key)}`, {
+      businessid: businessId, email: actor.email, target, displayname: 'AIRI QA test', eventname: 'call', apikey: key,
+    }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000, validateStatus: () => true });
+    if (response.status >= 200 && response.status < 300) {
+      addEvent(row.id, actor, 'kixie_dial_requested', { variant });
+      return res.json({ ok: true });
+    }
+    console.error('[ai-bot-qc] Kixie dial rejected:', response.status);
+    res.status(502).json({ error: `Kixie did not place the call (HTTP ${response.status}). Dial the number in Kixie instead.`, fallback: true });
+  } catch (error) {
+    console.error('[ai-bot-qc] Kixie dial failed:', error.message);
+    res.status(502).json({ error: 'Could not reach Kixie. Dial the number in Kixie instead.', fallback: true });
+  }
 });
 
 function cleanAnswers(value, type) {
