@@ -8,6 +8,7 @@
 // super_admin passes everywhere, matching the rest of the board.
 
 const express = require('express');
+const axios = require('axios');
 const { requireRole } = require('../auth');
 const { db, CORE_QUESTIONS, IMPROVEMENT_PROMPT } = require('./db');
 const { generateBriefs, MODEL } = require('./generate');
@@ -318,6 +319,30 @@ router.get('/my-queue', requireRole(...ANY_QA), (req, res) => {
     done:  rows.filter(r => r.submission_id).length,
     total: rows.length,
   });
+});
+
+// Rings the tester's own Kixie dialer (Kixie Make a Call API), then Kixie dials the account's number.
+router.post('/assignments/:id/dial', requireRole(...ANY_QA), async (req, res) => {
+  const t = currentTester(req);
+  if (!t) return res.status(403).json({ error: 'You are not on the tester roster' });
+  const a = db.prepare('SELECT a.tester_id, b.phone_number FROM assignments a JOIN briefs b ON b.id = a.brief_id WHERE a.id = ?').get(req.params.id);
+  if (!a) return res.status(404).json({ error: 'Assignment not found' });
+  if (a.tester_id !== t.id) return res.status(403).json({ error: 'That assignment belongs to another tester' });
+  const key = process.env.KIXIE_API_KEY;
+  const businessId = process.env.KIXIE_BUSINESS_ID;
+  const digits = String(a.phone_number || '').replace(/\D/g, '');
+  if (!key || !businessId || digits.length < 10) return res.status(503).json({ error: 'Kixie is not available for this test. Dial the number in Kixie instead.' });
+  try {
+    const response = await axios.post(`https://apig.kixie.com/app/event?apikey=${encodeURIComponent(key)}`, {
+      businessid: businessId, email: String(req.user.email).toLowerCase(), target: digits.length === 10 ? `1${digits}` : digits,
+      displayname: 'AI QA test', eventname: 'call', apikey: key,
+    }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000, validateStatus: () => true });
+    if (response.status >= 200 && response.status < 300 && response.data?.success !== false) return res.json({ ok: true });
+    const reason = response.data?.msg ? ` Kixie said: ${response.data.msg}` : '';
+    res.status(502).json({ error: `Kixie did not place the call.${reason} Dial the number in Kixie instead.` });
+  } catch {
+    res.status(502).json({ error: 'Could not reach Kixie. Dial the number in Kixie instead.' });
+  }
 });
 
 router.post('/assignments/:id/submit', requireRole(...ANY_QA), (req, res) => {

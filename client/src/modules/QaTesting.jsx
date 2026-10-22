@@ -84,6 +84,8 @@ function TesterQueue() {
   const [saving, setSaving]   = useState(false);
   const [err, setErr]         = useState('');
   const [done, setDone]       = useState(false);
+  const [dialing, setDialing] = useState(false);
+  const [dialMsg, setDialMsg] = useState('');
 
   const load = useCallback(() => {
     api.get('/api/qa/my-queue').then(r => {
@@ -111,6 +113,16 @@ function TesterQueue() {
   const t = data.queue[idx];
   const submitted = !!t.submission_id;
   const unanswered = t.questions.filter(q => !String(answers[q] || '').trim()).length;
+
+  const dial = async () => {
+    setDialing(true); setDialMsg('');
+    try {
+      await api.post(`/api/qa/assignments/${t.assignment_id}/dial`);
+      setDialMsg('Kixie is calling you now. Answer it and it will dial the account.');
+    } catch (e) {
+      setDialMsg(e.response?.data?.error || 'Could not start the call.');
+    } finally { setDialing(false); }
+  };
 
   const submit = async () => {
     setErr(''); setSaving(true);
@@ -145,7 +157,7 @@ function TesterQueue() {
         {data.queue.map((q, i) => (
           <button key={q.assignment_id}
                   className={`qa-pip ${i === idx ? 'is-active' : ''} ${q.submission_id ? 'is-done' : ''}`}
-                  onClick={() => { setIdx(i); setAnswers({}); setImprovement(''); setErr(''); }}
+                  onClick={() => { setIdx(i); setAnswers({}); setImprovement(''); setErr(''); setDialMsg(''); }}
                   title={`Test ${q.seq} — ${q.title}`}>
             {q.submission_id ? '✓' : i + 1}
           </button>
@@ -167,7 +179,12 @@ function TesterQueue() {
         <div className="qa-callcard">
           <div><span className="qa-k">Account</span><span className="qa-v">{t.account_name || '—'}</span></div>
           <div><span className="qa-k">Phone number</span>
-            <a className="qa-phone" href={`tel:${t.phone_number}`}>{t.phone_number || '—'}</a></div>
+            <span className="qa-phone">{t.phone_number || '—'}</span>
+            {t.phone_number && !submitted && (
+              <Button size="sm" disabled={dialing} onClick={dial}>{dialing ? 'Calling…' : 'Call with Kixie'}</Button>
+            )}
+            {dialMsg && <span className="qa-v">{dialMsg}</span>}
+          </div>
           {t.call_type && <div><span className="qa-k">Call type</span><span className="qa-v">{t.call_type}</span></div>}
         </div>
 
