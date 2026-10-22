@@ -805,6 +805,24 @@ export default function AiBotQc() {
     }
   }
 
+  async function resolveSelectedCritical() {
+    const ids = calls.filter(call => call.critical && selectedCallIds.includes(call.id)).map(call => call.id);
+    if (!ids.length || resolvingCriticalId) return;
+    const resolutionNote = window.prompt(`What did you do to address these ${ids.length} critical flag(s)? The note is saved on each call.`);
+    if (!resolutionNote?.trim()) return;
+    setResolvingCriticalId('bulk');
+    setError('');
+    try {
+      await api.post('/api/ai-bot-qc/calls/resolve-critical-bulk', { call_ids: ids, resolution_note: resolutionNote.trim() });
+      setSelectedCallIds([]);
+      await refresh(false);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not resolve the selected critical flags');
+    } finally {
+      setResolvingCriticalId('');
+    }
+  }
+
   async function resolveCritical(call) {
     if (!showAdminControls || resolvingCriticalId) return;
     const resolutionNote = window.prompt('What did you do to address this critical flag?');
@@ -1028,6 +1046,9 @@ export default function AiBotQc() {
                     {agents.filter(agent => showAdminControls || agent.email === String(user?.email || '').toLowerCase()).map(agent => <option key={agent.email} value={agent.email}>{agent.name}</option>)}
                   </SelectField>
                   <button className="botqc-assign-button" disabled={!selectedCallIds.length || !assignmentTarget || assigningCalls || reviewerPreview} onClick={assignSelectedCalls}>{assigningCalls ? 'Assigning…' : 'Assign selected'}</button>
+                  {showAdminControls && calls.some(call => call.critical && selectedCallIds.includes(call.id)) && (
+                    <button className="botqc-resolve-button" disabled={Boolean(resolvingCriticalId)} onClick={resolveSelectedCritical}>{resolvingCriticalId === 'bulk' ? 'Saving…' : `Mark ${calls.filter(call => call.critical && selectedCallIds.includes(call.id)).length} addressed → Reviewed`}</button>
+                  )}
                   <a className="botqc-criteria-link" href="/api/ai-bot-qc/review-criteria"><Download size={13} /> Review criteria</a>
                   {showAdminControls && (
                     <span className="botqc-export">

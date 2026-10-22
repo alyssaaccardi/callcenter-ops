@@ -1378,6 +1378,27 @@ router.post('/calls/:id/reopen', requireRole(...QC_ADMIN_ROLES), (req, res) => {
   res.json({ ok: true });
 });
 
+router.post('/calls/resolve-critical-bulk', requireRole(...QC_ADMIN_ROLES), (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body?.call_ids) ? req.body.call_ids : []).filter(id => typeof id === 'string'))].slice(0, 200);
+  const note = String(req.body?.resolution_note || '').trim().slice(0, 1000);
+  if (!ids.length) return res.status(400).json({ error: 'Select at least one call.' });
+  if (!note) return res.status(400).json({ error: 'Add a note describing what was addressed.' });
+  const actor = actorFor(req);
+  const now = new Date().toISOString();
+  let resolved = 0;
+  db.transaction(() => {
+    for (const id of ids) {
+      const row = db.prepare('SELECT critical FROM bot_reviews WHERE call_id = ?').get(id);
+      if (!row?.critical) continue;
+      db.prepare(`UPDATE bot_reviews SET status = 'reviewed', outcome = 'ok', critical = 0,
+          reviewed_at = COALESCE(reviewed_at, ?), claim_expires_at = NULL, updated_at = ? WHERE call_id = ?`).run(now, now, id);
+      addEvent(id, actor, 'critical_resolved', { resolution_note: note, bulk: true });
+      resolved += 1;
+    }
+  })();
+  res.json({ ok: true, resolved, skipped: ids.length - resolved });
+});
+
 router.post('/calls/:id/resolve-critical', requireRole(...QC_ADMIN_ROLES), (req, res) => {
   const call = requireCall(req, res);
   if (!call) return;
