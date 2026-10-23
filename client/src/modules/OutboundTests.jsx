@@ -371,7 +371,7 @@ function TestDetail({ id, isAdmin, onBack }) {
               onClick={() => dial(variant)}><Phone size={14} /> {dialing === variant ? 'Calling…' : `Call ${test.phone} with Kixie`}</button>
           </div>
           {callMessage && dialing === '' && <p className="obt-meta">{callMessage}</p>}
-          {test.scenarios[variant] && <p className="obt-scenario">Scenario: {test.scenarios[variant]}</p>}
+          {test.scenarios[variant] && <p className="obt-scenario">Scenario: {fill(test.scenarios[variant], test)}</p>}
           {type.questions.map((q, i) => {
             const a = answers[variant]?.[i] || { choice: '', text: '' };
             return (

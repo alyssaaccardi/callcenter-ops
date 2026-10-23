@@ -107,4 +107,32 @@ module.exports = [
     improvement_prompt: ONE_THING,
     default_scenarios: { 'New Client': NEW_SCENARIO, 'Existing Client': EXISTING_SCENARIO },
   },
+  {
+    title: 'Ambiguous Opening (Who Is Calling?)',
+    objective: 'Whether the bot can correctly identify the caller\'s relationship to the business, the reason for the call, and the appropriate call flow when the caller does not immediately say why they are calling. The bot should ask clarifying questions, avoid assuming who you are, and route you to the correct intake questions or call-handling procedure.',
+    steps: [
+      'Call the assigned account and connect with the bot as normal',
+      'Complete three separate calls using the three assigned scenarios (Call 1, Call 2 and Call 3)',
+      'Begin each call with an ambiguous statement asking to speak with {contact}',
+      'Do NOT immediately identify yourself as a client, family member, employee or salesperson',
+      'Let the bot lead the conversation and ask questions to find out why you are calling',
+      'Only give details about who you are or why you are calling when the bot asks',
+      'Continue the conversation naturally using the assigned persona and scenario',
+    ],
+    call_notes: 'Do NOT announce that you are a client, family member or salesperson. Begin by asking to speak with the owner or the named person. Do NOT volunteer information the bot has not asked for.',
+    variants: ['Call 1: New or Existing Client', 'Call 2: Personal Call', 'Call 3: Telemarketer'],
+    questions: [
+      Q('Did the bot correctly identify the reason for calling?'),
+      Q('Did the bot make any assumptions about you before gathering enough information?'),
+      Q('Did the bot ask intake questions relevant to the call\'s purpose?'),
+      Q('Did the conversation with the bot sound more natural than previous tests?'),
+      Q('Would a real caller have stayed on the phone with the bot and proceeded with the intake questions?'),
+    ],
+    improvement_prompt: ONE_THING,
+    default_scenarios: {
+      'Call 1: New or Existing Client': 'Describe the client situation for this account (new client with a matter, or existing client following up). Opening line: "Hi, I would like to speak with the attorney" (or "the owner" for a non-legal business).',
+      'Call 2: Personal Call': 'You are the caller\'s husband/wife, son/daughter, employee or business partner. Example: you need to know if {contact} can pick up the kids after work. Opening line: "Hi, I need to speak with {contact}"',
+      'Call 3: Telemarketer': 'You are selling a live answering service for businesses and want to email a free trial offer. Opening line: "Hi, is the owner available?"',
+    },
+  },
 ];

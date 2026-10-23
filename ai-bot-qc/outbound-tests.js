@@ -74,6 +74,15 @@ if (!db.prepare('SELECT COUNT(*) AS n FROM bot_outbound_test_types').get().n) {
   }
 }
 
+// Add seeded types introduced after the first install (matched by title).
+for (const t of seeds) {
+  if (db.prepare('SELECT 1 FROM bot_outbound_test_types WHERE title = ?').get(t.title)) continue;
+  db.prepare(`INSERT INTO bot_outbound_test_types
+    (title, objective, steps, call_notes, variants, questions, improvement_prompt, default_scenarios)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(t.title, t.objective, JSON.stringify(t.steps), t.call_notes, JSON.stringify(t.variants),
+    JSON.stringify(t.questions), t.improvement_prompt, JSON.stringify(t.default_scenarios || {}));
+}
+
 for (const t of seeds) {
   db.prepare("UPDATE bot_outbound_test_types SET default_scenarios = ? WHERE title = ? AND default_scenarios = '{}'")
     .run(JSON.stringify(t.default_scenarios || {}), t.title);
