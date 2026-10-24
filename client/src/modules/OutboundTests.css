@@ -74,3 +74,18 @@
 .obt-rowwrap .obt-row { flex: 1; }
 .obt-selectall { float: right; font-size: 12px; font-weight: 400; color: var(--text-muted); display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
 .obt-bulkbar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--surface, #fff); border: 1px solid var(--border, #ddd); border-radius: 8px; box-shadow: 0 -2px 10px rgba(0,0,0,.08); }
+
+.obt-range { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--text-muted); }
+.obt-range input { font: inherit; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--text); }
+.obt-insights { margin-top: 10px; }
+.obt-insights summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.obt-insight-block { margin: 10px 0; display: grid; gap: 4px; }
+.obt-insight-row { display: grid; grid-template-columns: minmax(180px, 1fr) 140px 130px; gap: 10px; align-items: center; font-size: 12px; }
+.obt-bar { height: 8px; border-radius: 4px; background: rgba(220, 60, 60, .35); overflow: hidden; }
+.obt-bar i { display: block; height: 100%; background: #2e9d5b; }
+@media (min-width: 1100px) {
+  .obt-detail { grid-template-columns: minmax(0, 1.15fr) minmax(360px, 1fr); align-items: start; }
+  .obt-detail > * { grid-column: 1; }
+  .obt-detail > .obt-staging-side { grid-column: 2; grid-row: 1 / span 40; position: sticky; top: 10px; max-height: calc(100vh - 20px); overflow: auto; }
+  .obt-detail .obt-staging-side .obt-transcript { max-height: 55vh; }
+}

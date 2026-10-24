@@ -1434,10 +1434,10 @@ router.get('/my-day', (req, res) => {
     FROM bot_reviews r WHERE lower(r.reviewer_email) = ?`)
     .get(today.start, today.end, today.start, today.end, today.start, today.end, lowerEmail);
   const open = db.prepare(`SELECT COUNT(*) AS n FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
-    WHERE lower(r.assigned_to_email) = ? AND r.status != 'reviewed' AND ${NOT_INTERNAL_TEST_SQL}`).get(lowerEmail).n;
+    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${NOT_INTERNAL_TEST_SQL}`).get(lowerEmail).n;
   const openCalls = db.prepare(`SELECT c.id, c.customer, c.call_date, r.status, r.critical, r.assigned_at
     FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
-    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed') AND ${NOT_INTERNAL_TEST_SQL}
+    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${NOT_INTERNAL_TEST_SQL}
     ORDER BY r.critical DESC, r.assigned_at ASC LIMIT 25`).all(lowerEmail)
     .map(row => ({ ...row, hubspot_account_name: hubspotRecordForCustomer(row.customer, hubspotAiriCache.records)?.displayName || '' }));
   let outboundTasks = [];

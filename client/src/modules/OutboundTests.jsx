@@ -121,11 +121,19 @@ export default function OutboundTests({ isAdmin, readOnly, agents, openTestId, o
 function Summary() {
   const [data, setData] = useState(null);
   const [exporting, setExporting] = useState(false);
+  const [range, setRange] = useState({ from: '', to: '' });
+  const [insights, setInsights] = useState(null);
   useEffect(() => { api.get('/api/ai-bot-qc/outbound-tests/summary').then(res => setData(res.data)).catch(() => {}); }, []);
+  useEffect(() => {
+    const params = {};
+    if (range.from) params.from = range.from;
+    if (range.to) params.to = range.to;
+    api.get('/api/ai-bot-qc/outbound-tests/insights', { params }).then(res => setInsights(res.data)).catch(() => {});
+  }, [range]);
   const exportCsv = async () => {
     setExporting(true);
     try {
-      const res = await api.get('/api/ai-bot-qc/outbound-tests/export', { responseType: 'blob' });
+      const res = await api.get('/api/ai-bot-qc/outbound-tests/export', { responseType: 'blob', params: { ...(range.from && { from: range.from }), ...(range.to && { to: range.to }) } });
       const url = URL.createObjectURL(res.data);
       const a = document.createElement('a');
       a.href = url;
@@ -140,7 +148,12 @@ function Summary() {
     <div className="obt-card obt-summary">
       <div className="obt-summary-head">
         <h3>Progress</h3>
-        <button type="button" className="obt-btn" disabled={exporting} onClick={exportCsv}>{exporting ? 'Exporting…' : 'Export results (CSV)'}</button>
+        <div className="obt-range">
+          <label>Assigned from <input type="date" value={range.from} max={range.to || undefined} onChange={e => setRange(cur => ({ ...cur, from: e.target.value }))} /></label>
+          <label>to <input type="date" value={range.to} min={range.from || undefined} onChange={e => setRange(cur => ({ ...cur, to: e.target.value }))} /></label>
+          {(range.from || range.to) && <button type="button" className="obt-btn" onClick={() => setRange({ from: '', to: '' })}>All dates</button>}
+          <button type="button" className="obt-btn" disabled={exporting} onClick={exportCsv}>{exporting ? 'Exporting…' : 'Export results (CSV)'}</button>
+        </div>
       </div>
       <div className="obt-stats">
         <div><b>{totals.assigned}</b><span>To do</span></div>
@@ -159,6 +172,32 @@ function Summary() {
         </table>
       )}
       {types.length > 0 && <p className="obt-meta">By test: {types.map(t => `${t.title} ${t.done}/${t.total}`).join(' · ')}</p>}
+      {insights && insights.tests > 0 && (
+        <details className="obt-insights">
+          <summary>Question results ({insights.tests} submitted test{insights.tests === 1 ? '' : 's'}{range.from || range.to ? ' in range' : ''})</summary>
+          {insights.templates.map(t => (
+            <div key={t.title} className="obt-insight-block">
+              <h4>{t.title} <span className="obt-meta">· {t.tests} test{t.tests === 1 ? '' : 's'}</span></h4>
+              {t.questions.map((q, i) => {
+                const n = q.yes + q.no;
+                const yesPct = n ? Math.round((q.yes / n) * 100) : 0;
+                return (
+                  <div key={i} className="obt-insight-row">
+                    <span className="obt-insight-q">{i + 1}. {q.text}</span>
+                    <span className="obt-bar" title={`${q.yes} yes / ${q.no} no`}><i style={{ width: `${yesPct}%` }} /></span>
+                    <span className="obt-meta">{n ? `${yesPct}% yes · ${q.yes}/${n}` : 'No answers'}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+          <h4>By account <span className="obt-meta">· most "No" answers first</span></h4>
+          <table className="obt-table">
+            <thead><tr><th>Account</th><th>Tests</th><th>Yes</th><th>No</th></tr></thead>
+            <tbody>{insights.accounts.map(a => <tr key={a.account}><td>{a.account}</td><td>{a.tests}</td><td>{a.yes}</td><td className={a.no ? 'is-alert' : ''}>{a.no}</td></tr>)}</tbody>
+          </table>
+        </details>
+      )}
     </div>
   );
 }
@@ -398,10 +437,10 @@ function NoteField({ value, disabled, label, onChange }) {
 
 const secs = n => (n == null ? '' : `${Math.floor(n / 60)}m ${n % 60}s`);
 
-function StagingCall({ testId, link }) {
+function StagingCall({ testId, link, openTranscript }) {
   const [call, setCall] = useState(null);
   const [error, setError] = useState('');
-  const [showTranscript, setShowTranscript] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(Boolean(openTranscript));
   const base = `/api/ai-bot-qc/outbound-tests/assignments/${testId}/staging/${encodeURIComponent(link.call_id)}`;
   useEffect(() => {
     let live = true;
@@ -493,7 +532,7 @@ function TestDetail({ id, isAdmin, onBack }) {
   };
 
   return (
-    <div className="obt">
+    <div className="obt obt-detail">
       <button className="obt-btn" onClick={onBack}>← Back to tests</button>
       <div className="obt-card">
         <h2>{type.title} <em className={`obt-pill is-${test.status}`}>{STATUS_LABEL[test.status]}</em></h2>
@@ -562,11 +601,11 @@ function TestDetail({ id, isAdmin, onBack }) {
       )}
       {test.status === 'reviewed' && !isAdmin && test.admin_note && <div className="obt-card"><h3>Reviewer note</h3><p>{test.admin_note}</p></div>}
 
-      <div className="obt-card">
+      <div className="obt-card obt-staging-side">
         <h3>Staging calls</h3>
         {!test.staging_calls.length && <p className="obt-meta">No staging call found yet. After you call {test.phone} it appears here automatically with the recording, transcript and details.
           {' '}<button type="button" className="obt-btn" onClick={refreshStaging}>Check now</button></p>}
-        {test.staging_calls.map(link => <StagingCall key={link.call_id} testId={test.id} link={link} />)}
+        {test.staging_calls.map(link => <StagingCall key={link.call_id} testId={test.id} link={link} openTranscript />)}
       </div>
 
       <div className="obt-card">

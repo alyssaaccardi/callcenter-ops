@@ -288,6 +288,40 @@ router.get('/summary', requireAdmin, (req, res) => {
   });
 });
 
+router.get('/insights', requireAdmin, (req, res) => {
+  const where = ["status != 'assigned'"];
+  const params = [];
+  if (dateOk(req.query.from)) { where.push('substr(created_at, 1, 10) >= ?'); params.push(req.query.from); }
+  if (dateOk(req.query.to)) { where.push('substr(created_at, 1, 10) <= ?'); params.push(req.query.to); }
+  const rows = db.prepare(`SELECT type_id, account, answers FROM bot_outbound_tests WHERE ${where.join(' AND ')}`).all(...params);
+  const templates = new Map();
+  const accounts = new Map();
+  for (const r of rows) {
+    const type = typeById(r.type_id);
+    if (!type) continue;
+    const questions = parse(type.questions, []);
+    const answers = parse(r.answers, {});
+    const t = templates.get(r.type_id) || { title: type.title, tests: 0, questions: questions.map(q => ({ text: q.text, yesno: q.type !== 'text', yes: 0, no: 0 })) };
+    t.tests += 1;
+    const acct = accounts.get(r.account) || { account: r.account, tests: 0, yes: 0, no: 0 };
+    acct.tests += 1;
+    for (const variant of Object.values(answers)) {
+      questions.forEach((q, i) => {
+        const choice = variant?.[i]?.choice;
+        if (q.type === 'text' || !t.questions[i]) return;
+        if (choice === 'yes') { t.questions[i].yes += 1; acct.yes += 1; } else if (choice === 'no') { t.questions[i].no += 1; acct.no += 1; }
+      });
+    }
+    templates.set(r.type_id, t);
+    accounts.set(r.account, acct);
+  }
+  res.json({
+    tests: rows.length,
+    templates: [...templates.values()].map(t => ({ ...t, questions: t.questions.filter(q => q.yesno) })).sort((a, b) => b.tests - a.tests),
+    accounts: [...accounts.values()].sort((a, b) => b.no - a.no || b.tests - a.tests).slice(0, 30),
+  });
+});
+
 const lastStagingCheck = new Map();
 const utc = value => Date.parse(`${String(value).replace(' ', 'T')}Z`);
 
