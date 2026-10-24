@@ -403,3 +403,22 @@ button.botqc-count:hover { border-color: var(--border-strong); transform: transl
 .botqc-resolve-button:disabled { opacity: .55; cursor: not-allowed; }
 .botqc-data-warning:has(.botqc-resolve-button) { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .botqc-event-note { grid-column: 1 / -1; margin: 2px 0 0; padding-left: 8px; border-left: 2px solid var(--border-strong); color: var(--text-muted); font-size: 9px; }
+
+.botqc-myday { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.botqc-myday-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 6px; font-size: 11px; }
+.botqc-myday-head span { color: var(--text-muted); }
+.botqc-myday > .botqc-myday-head:not(:first-child) { margin-top: 12px; }
+.botqc-myday-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.botqc-myday-stats div { padding: 8px 10px; border-radius: 6px; background: rgba(127,127,127,.08); }
+.botqc-myday-stats b { display: block; font-size: 20px; line-height: 1.1; }
+.botqc-myday-stats span { color: var(--text-muted); font-size: 9px; }
+.botqc-task-count { font-weight: 600; color: var(--text) !important; }
+.botqc-tasks { list-style: none; margin: 0 0 4px; padding: 0; display: grid; gap: 4px; }
+.botqc-tasks button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+.botqc-tasks button:hover { border-color: var(--royal-700); }
+.botqc-task-kind { flex-shrink: 0; min-width: 84px; color: var(--text-muted); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.botqc-task-title { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.botqc-task-meta { color: var(--text-muted); font-size: 10px; }
+.botqc-tasks em { font-style: normal; font-size: 9px; font-weight: 700; color: var(--text-muted); }
+.botqc-tasks em.botqc-task-flag { padding: 1px 6px; border-radius: 10px; background: #fde8e8; color: #b42318; }
+.botqc-task-more { border: 0; background: none; color: var(--royal-700); font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; padding: 2px 0; }

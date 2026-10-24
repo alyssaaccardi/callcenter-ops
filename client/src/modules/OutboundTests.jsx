@@ -16,10 +16,10 @@ const EVENT_LABEL = {
 const when = value => (value ? new Date(`${value.replace(' ', 'T')}Z`).toLocaleString() : '');
 const apiError = (err, fallback) => err.response?.data?.error || fallback;
 
-export default function OutboundTests({ isAdmin, readOnly, agents }) {
+export default function OutboundTests({ isAdmin, readOnly, agents, openTestId, onOpenedTest }) {
   const [tests, setTests] = useState([]);
   const [types, setTypes] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(openTestId || null);
   const [mode, setMode] = useState('list');
   const [agentFilter, setAgentFilter] = useState('');
   const [error, setError] = useState('');
@@ -37,6 +37,7 @@ export default function OutboundTests({ isAdmin, readOnly, agents }) {
   }, [readOnly]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (openTestId) onOpenedTest?.(); }, [openTestId, onOpenedTest]);
 
   if (selectedId) {
     return <TestDetail id={selectedId} isAdmin={isAdmin && !readOnly} onBack={() => { setSelectedId(null); load(); }} />;

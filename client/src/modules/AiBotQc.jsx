@@ -237,6 +237,7 @@ export default function AiBotQc() {
   const [internalTestTotal, setInternalTestTotal] = useState(0);
   const [internalTestInResults, setInternalTestInResults] = useState(0);
   const [dashboard, setDashboard] = useState(null);
+  const [pendingTestId, setPendingTestId] = useState(null);
   const [dashboardPeriod, setDashboardPeriod] = useState('all');
   const [dashboardReviewer, setDashboardReviewer] = useState('all');
   const [history, setHistory] = useState([]);
@@ -972,6 +973,8 @@ export default function AiBotQc() {
         {showAdminControls && <button className={activeView === 'admin-settings' ? 'is-active' : ''} onClick={() => setActiveView('admin-settings')}><Settings2 size={15} /> Admin settings</button>}
       </nav>
 
+      {activeView === 'queue' && !selectedId && !reviewerPreview && <MyDay refreshKey={`${dashboard?.counts?.reviewed ?? ''}-${dashboard?.counts?.critical ?? ''}-${calls.length}`} onOpenCall={id => loadSelected(id)} onOpenTest={id => { setPendingTestId(id); setActiveView('outbound'); }} />}
+
       {activeView === 'queue' && !selectedId && bulletinPosts.filter(post => !post.is_expired).length > 0 && (
         <section className="botqc-bulletin-list" aria-label="Team focus">
           {bulletinPosts.filter(post => !post.is_expired).slice(0, 3).map((post, index) => (
@@ -1149,7 +1152,7 @@ export default function AiBotQc() {
         onOpenHistoryCall={async id => { setActiveView('queue'); await loadSelected(id, { readOnly: true }); }}
       />}
 
-      {activeView === 'outbound' && <OutboundTests isAdmin={isAdmin} readOnly={reviewerPreview} agents={agents} />}
+      {activeView === 'outbound' && <OutboundTests isAdmin={isAdmin} readOnly={reviewerPreview} agents={agents} openTestId={pendingTestId} onOpenedTest={() => setPendingTestId(null)} />}
 
       {activeView === 'forwarding' && <ForwardingChecks
         checks={forwardingChecks}
@@ -1709,6 +1712,65 @@ function InternalTestCallers({ numbers, input, label, saving, onInputChange, onL
         </div>
       </section>
     </div>
+  );
+}
+
+function MyDay({ refreshKey, onOpenCall, onOpenTest }) {
+  const [day, setDay] = useState(null);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => {
+    let live = true;
+    const load = () => api.get('/api/ai-bot-qc/my-day').then(res => { if (live) setDay(res.data); }).catch(() => {});
+    load();
+    const timer = setInterval(load, 60000);
+    return () => { live = false; clearInterval(timer); };
+  }, [refreshKey]);
+  if (!day) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const tasks = [
+    ...day.open_calls.map(call => ({
+      key: `c-${call.id}`, kind: 'Call review', title: accountLabel(call), meta: call.call_date || '', urgent: Boolean(call.critical), flag: call.critical ? 'Critical' : '',
+      open: () => onOpenCall(call.id),
+    })),
+    ...day.outbound_tasks.map(test => ({
+      key: `t-${test.id}`, kind: 'Outbound test', title: `${test.title} · ${test.account}`, meta: test.due_date ? `Due ${test.due_date}` : '', urgent: Boolean(test.due_date && test.due_date < today), flag: test.due_date && test.due_date < today ? 'Overdue' : '',
+      open: () => onOpenTest(test.id),
+    })),
+  ];
+  const total = day.assigned_open + day.outbound_waiting;
+  const visibleTasks = showAll ? tasks : tasks.slice(0, 5);
+  const stats = [
+    { label: 'Calls reviewed', value: day.reviewed_today },
+    { label: 'Flagged critical', value: day.flagged_today },
+    { label: 'Need follow-up', value: day.follow_up_today },
+    { label: 'Outbound tests done', value: day.outbound_submitted_today },
+  ];
+  return (
+    <section className="botqc-myday" aria-label="My tasks">
+      <div className="botqc-myday-head">
+        <strong>My tasks</strong>
+        <span className="botqc-task-count">{total ? `${total} open: ${day.assigned_open} call review${day.assigned_open === 1 ? '' : 's'}, ${day.outbound_waiting} outbound test${day.outbound_waiting === 1 ? '' : 's'}` : 'All caught up. Nothing assigned to you right now.'}</span>
+      </div>
+      {visibleTasks.length > 0 && (
+        <ul className="botqc-tasks">
+          {visibleTasks.map(task => (
+            <li key={task.key}>
+              <button type="button" onClick={task.open}>
+                <span className="botqc-task-kind">{task.kind}</span>
+                <span className="botqc-task-title">{task.title}</span>
+                {task.meta && <span className="botqc-task-meta">{task.meta}</span>}
+                {task.flag && <em className={task.urgent ? 'botqc-task-flag' : ''}>{task.flag}</em>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {tasks.length > 5 && <button type="button" className="botqc-task-more" onClick={() => setShowAll(v => !v)}>{showAll ? 'Show fewer' : `Show all ${tasks.length}`}</button>}
+      <div className="botqc-myday-head"><strong>Done today</strong><span>{day.last_reviewed_at ? `Last review ${new Date(day.last_reviewed_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Nothing finished yet'}</span></div>
+      <div className="botqc-myday-stats">
+        {stats.map(stat => <div key={stat.label}><b>{stat.value}</b><span>{stat.label}</span></div>)}
+      </div>
+    </section>
   );
 }
 

@@ -1424,24 +1424,36 @@ router.get('/queue-summary', async (req, res) => {
 // Personal progress for the signed-in user, for the "Your day" strip.
 router.get('/my-day', (req, res) => {
   const actor = actorFor(req);
+  const lowerEmail = String(actor.email).toLowerCase();
   const today = localDayBounds();
   const mine = db.prepare(`SELECT
       SUM(r.status = 'reviewed' AND r.reviewed_at >= ? AND r.reviewed_at < ?) AS reviewed_today,
       SUM(r.critical = 1 AND r.critical_flagged_at >= ? AND r.critical_flagged_at < ?) AS flagged_today,
       SUM(r.outcome = 'needs_follow_up' AND r.reviewed_at >= ? AND r.reviewed_at < ?) AS follow_up_today,
       MAX(CASE WHEN r.status = 'reviewed' THEN r.reviewed_at END) AS last_reviewed_at
-    FROM bot_reviews r WHERE r.reviewer_email = ?`)
-    .get(today.start, today.end, today.start, today.end, today.start, today.end, actor.email);
+    FROM bot_reviews r WHERE lower(r.reviewer_email) = ?`)
+    .get(today.start, today.end, today.start, today.end, today.start, today.end, lowerEmail);
   const open = db.prepare(`SELECT COUNT(*) AS n FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
-    WHERE r.assigned_to_email = ? AND r.status != 'reviewed' AND ${NOT_INTERNAL_TEST_SQL}`).get(actor.email).n;
+    WHERE lower(r.assigned_to_email) = ? AND r.status != 'reviewed' AND ${NOT_INTERNAL_TEST_SQL}`).get(lowerEmail).n;
+  const openCalls = db.prepare(`SELECT c.id, c.customer, c.call_date, r.status, r.critical, r.assigned_at
+    FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
+    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed') AND ${NOT_INTERNAL_TEST_SQL}
+    ORDER BY r.critical DESC, r.assigned_at ASC LIMIT 25`).all(lowerEmail)
+    .map(row => ({ ...row, hubspot_account_name: hubspotRecordForCustomer(row.customer, hubspotAiriCache.records)?.displayName || '' }));
+  let outboundTasks = [];
   let outbound = { submitted: 0, waiting: 0 };
   try {
     outbound = db.prepare(`SELECT
         COALESCE(SUM(status != 'assigned' AND replace(submitted_at, ' ', 'T') >= ? AND replace(submitted_at, ' ', 'T') < ?), 0) AS submitted,
         COALESCE(SUM(status = 'assigned'), 0) AS waiting
-      FROM bot_outbound_tests WHERE agent_email = ?`).get(today.start, today.end, actor.email);
-  } catch { /* outbound tables are created on first use */ }
+      FROM bot_outbound_tests WHERE lower(agent_email) = ?`).get(today.start, today.end, lowerEmail);
+    outboundTasks = db.prepare(`SELECT t.id, t.account, t.phone, t.due_date, y.title FROM bot_outbound_tests t
+      JOIN bot_outbound_test_types y ON y.id = t.type_id WHERE lower(t.agent_email) = ? AND t.status = 'assigned'
+      ORDER BY (t.due_date IS NULL), t.due_date, t.id LIMIT 25`).all(lowerEmail);
+  } catch (error) { console.error('[ai-bot-qc] my-day outbound lookup failed:', error.message); }
   res.json({
+    open_calls: openCalls,
+    outbound_tasks: outboundTasks,
     reviewed_today: mine.reviewed_today || 0,
     flagged_today: mine.flagged_today || 0,
     follow_up_today: mine.follow_up_today || 0,
