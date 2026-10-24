@@ -82,6 +82,12 @@ Base path: `/api/ai-bot-qc`. All require a logged-in session with `ai_bot_qc`, `
 | GET | `/calls/:id` | QA | One call with review state and history. |
 | GET | `/calls/:id/recording` | QA | Recording-only view: account, date, duration, audio file keys and transcript. No review notes, tags or reviewer details. Used by the `/?recording=<id>` page that the CSV export links to (login required). |
 | GET/POST/PUT/DELETE | `/outbound-tests/types`, `/outbound-tests/assignments[/:id[/answers\|submit\|review\|reopen\|call-click]]` | QA (agents see only their own; templates, assigning, review and delete are admin) | Scripted outbound QC tests: templates (seeded from the test docs), assignment to agents (optionally random), agent feedback form, admin review, audit events. Tables `bot_outbound_test_types`, `bot_outbound_tests`, `bot_outbound_events`. Kixie call/recording attachment is planned (Phase 2). |
+| GET | `/outbound-tests/accounts` | Admin | Accounts and active DIDs for the assign form, read live from the **staging** AI bot Staff API (`ai-bot-qc/staff-api.js`, cached 5 minutes; `?refresh=1` bypasses). |
+| POST | `/outbound-tests/assignments/:id/call` | Assigned agent | Places the call through Kixie's Make a Call API (replaces `tel:` links). |
+| GET/POST | `/outbound-tests/assignments/:id/staging/:callId[/recording]`, `/assignments/:id/staging-refresh` | QA (own tests; admins all) | Staging calls matched to a test (dialed DID + time of the agent's Call click). Detail returns summary, diagnostics, intake and transcript from the Staff API; `/recording` streams audio through the server because recording links expire after one hour and must not be stored. Only call ids are stored (`staging_calls`). |
+| POST | `/kixie/webhook?token=` | Shared secret | Kixie End Call webhook; attaches call time, duration, status and recording to the matching outbound test (agent email + dialed number). |
+| GET | `/my-day` | QA | The signed-in user's progress today (reviews, critical flags, follow-ups, outbound tests). |
+| POST | `/calls/resolve-critical-bulk` | QC admin | Mark several open critical flags addressed with one note. |
 | POST | `/calls/:id/claim` | QA | Claim a call for review (2-minute lease). |
 | PUT | `/calls/:id/draft` | QA (claim holder) | Autosave tags, notes, happiness, outcome, critical flag/details. |
 | POST | `/calls/:id/release` | QA (claim holder) | Release the claim, saving the draft. |
@@ -167,7 +173,10 @@ Ordered roughly by priority.
 | `SESSION_SECRET` | Signs session cookies. |
 | `NODE_ENV` | `production` enables secure cookies. |
 | `IDRIVE_E2_ACCESS_KEY_ID`, `IDRIVE_E2_SECRET_ACCESS_KEY`, `IDRIVE_E2_BUCKET`, `IDRIVE_E2_ENDPOINT`, `IDRIVE_E2_REGION`, `IDRIVE_E2_PREFIX` | Recording storage (read-only). |
-| `HUBSPOT_PRIVATE_APP_TOKEN` | AIRI pipeline lookups (account name, active status, forwarding number). |
+| `HUBSPOT_PRIVATE_APP_TOKEN` | AIRI pipeline lookups (account name, active status, forwarding number). No longer used for the outbound test account list. |
+| `STAFF_API_BASE`, `STAFF_API_KEY` | Staging AI bot Staff API (read-only): outbound test accounts/DIDs and staging call details. Needs Accounts, Calls, Transcripts and Recordings scopes. Server-side only. |
+| `KIXIE_API_KEY`, `KIXIE_BUSINESS_ID` | Kixie click-to-call (Make a Call API). |
+| `KIXIE_WEBHOOK_SECRET` | Token required on the Kixie End Call webhook URL. |
 | `SLACK_AIRI_QC_URL` | Incoming webhook for `#airi-qa-alerts`. |
 | `SLACK_HITSQUAD_GROUP_ID`, `SLACK_QA_AGENTS_GROUP_ID` | Slack user-group IDs so mentions actually notify. |
 | `GEMINI_API_KEY` | Bulletin polish. |
