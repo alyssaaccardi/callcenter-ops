@@ -151,10 +151,12 @@ function cleanTarget(t = {}) {
 
 router.get('/accounts', requireAdmin, async (req, res) => {
   try {
-    res.json({ accounts: await listAccounts() });
+    res.json({ accounts: await listAccounts({ refresh: req.query.refresh === '1' }) });
   } catch (error) {
-    console.error('[ai-bot-qc] outbound test account lookup failed:', error.message);
-    res.status(503).json({ error: 'Could not load AIRI accounts from HubSpot. Try again shortly.' });
+    console.error('[ai-bot-qc] outbound test account lookup failed:', error.response?.status || error.message);
+    res.status(503).json({ error: error.code === 'not_configured'
+      ? 'The staging API key is not configured on the server.'
+      : 'Could not load staging accounts. Try again shortly.' });
   }
 });
 

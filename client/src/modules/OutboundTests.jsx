@@ -113,7 +113,7 @@ function AssignForm({ types, agents, onDone }) {
   const toggleAgent = email => setPicked(cur => (cur.includes(email) ? cur.filter(e => e !== email) : [...cur, email]));
   const toggleAccount = account => setChosen(cur => {
     const next = { ...cur };
-    if (next[account.customer]) delete next[account.customer]; else next[account.customer] = { account, contact: '' };
+    if (next[account.customer]) delete next[account.customer]; else next[account.customer] = { account, contact: account.contact || '' };
     return next;
   });
   const setDid = (key, did) => setChosen(cur => ({ ...cur, [key]: { ...cur[key], did } }));
@@ -128,7 +128,7 @@ function AssignForm({ types, agents, onDone }) {
   const pickRandom = () => {
     const pool = (accounts || []).filter(a => a.did);
     const shuffled = [...pool].sort(() => Math.random() - 0.5).slice(0, Math.max(1, Number(randomCount) || 1));
-    setChosen(Object.fromEntries(shuffled.map(a => [a.customer, { account: a, contact: '' }])));
+    setChosen(Object.fromEntries(shuffled.map(a => [a.customer, { account: a, contact: a.contact || '' }])));
   };
 
   const query = search.trim().toLowerCase();
@@ -164,7 +164,7 @@ function AssignForm({ types, agents, onDone }) {
         </label>
       ))}
 
-      <fieldset className="obt-accounts"><legend>Accounts to test (live from HubSpot and recordings){chosenList.length ? ` · ${chosenList.length} selected` : ''}</legend>
+      <fieldset className="obt-accounts"><legend>Accounts to test (live from the staging AI bot){chosenList.length ? ` · ${chosenList.length} selected` : ''}</legend>
         <div className="obt-toolbar">
           <input placeholder="Search by name or DID" value={search} onChange={e => setSearch(e.target.value)} />
           <span className="obt-meta">Pick</span>
@@ -181,7 +181,7 @@ function AssignForm({ types, agents, onDone }) {
               <span>{a.name}</span>
               {chosen[a.customer]
                 ? <input className="obt-did-input" placeholder="DID to call" value={chosen[a.customer].did ?? a.did ?? ''} onClick={e => e.stopPropagation()} onChange={e => setDid(a.customer, e.target.value)} aria-label={`DID for ${a.name}`} />
-                : <span className="obt-meta">{a.did ? `${a.did}${a.did_source === 'hubspot' ? ' (HubSpot)' : ''}` : 'No DID on file'}</span>}
+                : <span className="obt-meta">{a.did || 'No DID on file'}</span>}
             </label>
           ))}
         </div>

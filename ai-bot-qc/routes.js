@@ -323,29 +323,10 @@ async function notifyDueForwardingChecks() {
 
 // Live, never-static list of accounts that can be tested: every active AIRI HubSpot account that has recordings.
 // The DID is the number the bot actually answered on (latest recording); HubSpot's forwarding number is the fallback.
-async function listTestAccounts() {
-  const records = await hubspotAiriRecords();
-  const latest = db.prepare(`SELECT customer, destination_phone, call_date, started_at_ns FROM (
-      SELECT c.customer, c.destination_phone, c.call_date, c.started_at_ns,
-        ROW_NUMBER() OVER (PARTITION BY c.customer ORDER BY c.started_at_ns DESC, c.id DESC) AS rn
-      FROM bot_calls c WHERE ${NOT_INTERNAL_TEST_SQL}
-    ) WHERE rn = 1`).all();
-  const accounts = [];
-  for (const row of latest) {
-    const record = hubspotRecordForCustomer(row.customer, records);
-    if (!record || record.inactive) continue;
-    const did = row.destination_phone || record.forwardingNumber || '';
-    accounts.push({
-      customer: row.customer,
-      name: record.displayName || accountNameFor(row.customer),
-      did,
-      did_source: row.destination_phone ? 'recording' : (record.forwardingNumber ? 'hubspot' : ''),
-      forwarding_number: record.forwardingNumber || '',
-      last_call_date: row.call_date || '',
-      deal_id: record.dealId || '',
-    });
-  }
-  return accounts.sort((a, b) => a.name.localeCompare(b.name));
+const { listStagingAccounts } = require('./staff-api');
+
+async function listTestAccounts(options) {
+  return listStagingAccounts(options);
 }
 
 async function hubspotInactiveCustomers() {
