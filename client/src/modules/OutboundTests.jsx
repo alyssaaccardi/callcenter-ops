@@ -537,17 +537,6 @@ function TestDetail({ id, isAdmin, onBack }) {
       </div>
 
       <div className="obt-card">
-        <h3>Kixie calls</h3>
-        {!test.calls.length && <p className="obt-meta">No Kixie call has been matched yet. Calls from {test.agent_email} to {test.phone} attach here automatically after they end.</p>}
-        {test.calls.map(c => (
-          <div key={c.call_id} className="obt-kixie">
-            <p><strong>{c.variant || 'Call'}</strong> · {when(c.called_at.replace('T', ' ').replace(/\.\d+Z$/, ''))} · {Math.floor(c.duration_seconds / 60)}m {c.duration_seconds % 60}s · {c.status || 'unknown'}{c.disposition && c.disposition !== 'not disposed' ? ` · ${c.disposition}` : ''}</p>
-            {c.recording_url ? <audio controls preload="none" src={c.recording_url} /> : <p className="obt-meta">No recording was provided for this call.</p>}
-          </div>
-        ))}
-      </div>
-
-      <div className="obt-card">
         <h3>Audit log</h3>
         {events.map(e => (
           <p key={e.id} className="obt-meta">{when(e.created_at)} · {e.actor_name} · {EVENT_LABEL[e.event_type] || e.event_type}

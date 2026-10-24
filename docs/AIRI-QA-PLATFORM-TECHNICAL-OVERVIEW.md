@@ -85,7 +85,6 @@ Base path: `/api/ai-bot-qc`. All require a logged-in session with `ai_bot_qc`, `
 | GET | `/outbound-tests/accounts` | Admin | Accounts and active DIDs for the assign form, read live from the **staging** AI bot Staff API (`ai-bot-qc/staff-api.js`, cached 5 minutes; `?refresh=1` bypasses). |
 | POST | `/outbound-tests/assignments/:id/call` | Assigned agent | Places the call through Kixie's Make a Call API (replaces `tel:` links). |
 | GET/POST | `/outbound-tests/assignments/:id/staging/:callId[/recording]`, `/assignments/:id/staging-refresh` | QA (own tests; admins all) | Staging calls matched to a test (dialed DID + time of the agent's Call click). Detail returns summary, diagnostics, intake and transcript from the Staff API; `/recording` streams audio through the server because recording links expire after one hour and must not be stored. Only call ids are stored (`staging_calls`). |
-| POST | `/kixie/webhook?token=` | Shared secret | Kixie End Call webhook; attaches call time, duration, status and recording to the matching outbound test (agent email + dialed number). |
 | GET | `/outbound-tests/summary`, `/outbound-tests/export` | Admin | Progress totals per agent/test (overdue, awaiting review, avg days to submit) and a CSV with one row per test, call variant and question (formula-safe cells; optional `from`/`to`). |
 | GET | `/my-day` | QA | The signed-in user's progress today (reviews, critical flags, follow-ups, outbound tests). |
 | POST | `/calls/resolve-critical-bulk` | QC admin | Mark several open critical flags addressed with one note. |
@@ -177,7 +176,6 @@ Ordered roughly by priority.
 | `HUBSPOT_PRIVATE_APP_TOKEN` | AIRI pipeline lookups (account name, active status, forwarding number). No longer used for the outbound test account list. |
 | `STAFF_API_BASE`, `STAFF_API_KEY` | Staging AI bot Staff API (read-only): outbound test accounts/DIDs and staging call details. Needs Accounts, Calls, Transcripts and Recordings scopes. Server-side only. |
 | `KIXIE_API_KEY`, `KIXIE_BUSINESS_ID` | Kixie click-to-call (Make a Call API). |
-| `KIXIE_WEBHOOK_SECRET` | Token required on the Kixie End Call webhook URL. |
 | `SLACK_AIRI_QC_URL` | Incoming webhook for `#airi-qa-alerts`. |
 | `SLACK_HITSQUAD_GROUP_ID`, `SLACK_QA_AGENTS_GROUP_ID` | Slack user-group IDs so mentions actually notify. |
 | `GEMINI_API_KEY` | Bulletin polish. |

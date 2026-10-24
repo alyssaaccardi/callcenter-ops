@@ -230,7 +230,7 @@ router.get('/export', requireAdmin, (req, res) => {
   if (dateOk(req.query.to)) { where.push('substr(created_at, 1, 10) <= ?'); params.push(req.query.to); }
   const rows = db.prepare(`SELECT * FROM bot_outbound_tests ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id`).all(...params);
   const header = ['Test ID', 'Test', 'Account', 'DID', 'Agent', 'Status', 'Assigned', 'Due', 'Submitted', 'Reviewed', 'Reviewed by',
-    'Call', 'Scenario', 'Question', 'Answer', 'Details', 'One thing to improve', 'Reviewer note', 'Kixie calls', 'Staging call ids'];
+    'Call', 'Scenario', 'Question', 'Answer', 'Details', 'One thing to improve', 'Reviewer note', 'Staging call ids'];
   const lines = [header.map(csvCell).join(',')];
   for (const row of rows) {
     const type = typeById(row.type_id);
@@ -240,7 +240,7 @@ router.get('/export', requireAdmin, (req, res) => {
     const scenarios = parse(row.scenarios, {});
     const base = [row.id, type?.title || '', row.account, row.phone, row.agent_name || row.agent_email, row.status, row.created_at,
       row.due_date || '', row.submitted_at || '', row.reviewed_at || '', row.reviewed_by || ''];
-    const tail = [row.improvement, row.admin_note, parse(row.calls, []).length, parse(row.staging_calls, []).map(c => c.call_id).join(' ')];
+    const tail = [row.improvement, row.admin_note, parse(row.staging_calls, []).map(c => c.call_id).join(' ')];
     for (const variant of variants) {
       questions.forEach((q, i) => {
         const a = answers[variant]?.[i] || {};
