@@ -58,6 +58,7 @@ export default function OutboundTests({ isAdmin, readOnly, agents }) {
           </select>
         </div>
       )}
+      {isAdmin && !readOnly && mode === 'list' && <Summary key={tests.length + tests.filter(t => t.status !== 'assigned').length} />}
       {mode === 'assign' && <AssignForm types={types} agents={agents} onDone={() => { setMode('list'); load(); }} />}
       {mode === 'types' && <TypeManager types={types} onChange={load} />}
       {mode === 'list' && groups.map(status => {
@@ -79,6 +80,51 @@ export default function OutboundTests({ isAdmin, readOnly, agents }) {
           </section>
         );
       })}
+    </div>
+  );
+}
+
+function Summary() {
+  const [data, setData] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  useEffect(() => { api.get('/api/ai-bot-qc/outbound-tests/summary').then(res => setData(res.data)).catch(() => {}); }, []);
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const res = await api.get('/api/ai-bot-qc/outbound-tests/export', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `airi-outbound-tests-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { /* the button re-enables; nothing else to do */ } finally { setExporting(false); }
+  };
+  if (!data) return null;
+  const { totals, agents, types } = data;
+  return (
+    <div className="obt-card obt-summary">
+      <div className="obt-summary-head">
+        <h3>Progress</h3>
+        <button type="button" className="obt-btn" disabled={exporting} onClick={exportCsv}>{exporting ? 'Exporting…' : 'Export results (CSV)'}</button>
+      </div>
+      <div className="obt-stats">
+        <div><b>{totals.assigned}</b><span>To do</span></div>
+        <div><b>{totals.submitted}</b><span>Awaiting review</span></div>
+        <div><b>{totals.reviewed}</b><span>Reviewed</span></div>
+        <div className={totals.overdue ? 'is-alert' : ''}><b>{totals.overdue}</b><span>Overdue</span></div>
+        <div><b>{totals.submitted_today}</b><span>Submitted today</span></div>
+        <div><b>{totals.avg_days_to_submit ?? '—'}</b><span>Avg days to submit</span></div>
+      </div>
+      {agents.length > 0 && (
+        <table className="obt-table">
+          <thead><tr><th>Agent</th><th>To do</th><th>Awaiting review</th><th>Reviewed</th><th>Overdue</th><th>Last submitted</th></tr></thead>
+          <tbody>{agents.map(a => (
+            <tr key={a.email}><td>{a.name}</td><td>{a.assigned}</td><td>{a.submitted}</td><td>{a.reviewed}</td><td className={a.overdue ? 'is-alert' : ''}>{a.overdue}</td><td>{a.last_submitted_at ? when(a.last_submitted_at) : '—'}</td></tr>
+          ))}</tbody>
+        </table>
+      )}
+      {types.length > 0 && <p className="obt-meta">By test: {types.map(t => `${t.title} ${t.done}/${t.total}`).join(' · ')}</p>}
     </div>
   );
 }

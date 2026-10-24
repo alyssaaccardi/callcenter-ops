@@ -215,6 +215,79 @@ router.get('/assignments', (req, res) => {
   res.json({ tests });
 });
 
+const dateOk = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+function csvCell(value) {
+  let text = value == null ? '' : String(value);
+  if (/^[=+\-@\t\r]/.test(text) && !/^\+?\d[\d\s().-]*$/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+// One row per test, call variant and question so results can be filtered and pivoted in a spreadsheet.
+router.get('/export', requireAdmin, (req, res) => {
+  const where = [];
+  const params = [];
+  if (dateOk(req.query.from)) { where.push('substr(created_at, 1, 10) >= ?'); params.push(req.query.from); }
+  if (dateOk(req.query.to)) { where.push('substr(created_at, 1, 10) <= ?'); params.push(req.query.to); }
+  const rows = db.prepare(`SELECT * FROM bot_outbound_tests ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id`).all(...params);
+  const header = ['Test ID', 'Test', 'Account', 'DID', 'Agent', 'Status', 'Assigned', 'Due', 'Submitted', 'Reviewed', 'Reviewed by',
+    'Call', 'Scenario', 'Question', 'Answer', 'Details', 'One thing to improve', 'Reviewer note', 'Kixie calls', 'Staging call ids'];
+  const lines = [header.map(csvCell).join(',')];
+  for (const row of rows) {
+    const type = typeById(row.type_id);
+    const questions = parse(type?.questions, []);
+    const variants = parse(type?.variants, ['Call']);
+    const answers = parse(row.answers, {});
+    const scenarios = parse(row.scenarios, {});
+    const base = [row.id, type?.title || '', row.account, row.phone, row.agent_name || row.agent_email, row.status, row.created_at,
+      row.due_date || '', row.submitted_at || '', row.reviewed_at || '', row.reviewed_by || ''];
+    const tail = [row.improvement, row.admin_note, parse(row.calls, []).length, parse(row.staging_calls, []).map(c => c.call_id).join(' ')];
+    for (const variant of variants) {
+      questions.forEach((q, i) => {
+        const a = answers[variant]?.[i] || {};
+        lines.push([...base, variant, scenarios[variant] || '', q.text, a.choice || '', a.text || '', ...tail].map(csvCell).join(','));
+      });
+    }
+  }
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="airi-outbound-tests-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.send(`\ufeff${lines.join('\r\n')}\r\n`);
+});
+
+router.get('/summary', requireAdmin, (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = db.prepare('SELECT agent_email, agent_name, type_id, status, due_date, created_at, submitted_at, reviewed_at FROM bot_outbound_tests').all();
+  const overdue = r => r.status === 'assigned' && r.due_date && r.due_date < today;
+  const days = (a, b) => (utc(b) - utc(a)) / 86400000;
+  const agents = new Map();
+  const types = new Map();
+  for (const r of rows) {
+    const agent = agents.get(r.agent_email) || { email: r.agent_email, name: r.agent_name || r.agent_email, assigned: 0, submitted: 0, reviewed: 0, overdue: 0, last_submitted_at: null };
+    agent[r.status] += 1;
+    if (overdue(r)) agent.overdue += 1;
+    if (r.submitted_at && (!agent.last_submitted_at || r.submitted_at > agent.last_submitted_at)) agent.last_submitted_at = r.submitted_at;
+    agents.set(r.agent_email, agent);
+    const type = types.get(r.type_id) || { title: typeById(r.type_id)?.title || 'Unknown', total: 0, done: 0 };
+    type.total += 1;
+    if (r.status !== 'assigned') type.done += 1;
+    types.set(r.type_id, type);
+  }
+  const submittedRows = rows.filter(r => r.submitted_at);
+  res.json({
+    totals: {
+      total: rows.length,
+      assigned: rows.filter(r => r.status === 'assigned').length,
+      submitted: rows.filter(r => r.status === 'submitted').length,
+      reviewed: rows.filter(r => r.status === 'reviewed').length,
+      overdue: rows.filter(overdue).length,
+      submitted_today: rows.filter(r => r.submitted_at && r.submitted_at.slice(0, 10) === today).length,
+      avg_days_to_submit: submittedRows.length ? Math.round((submittedRows.reduce((sum, r) => sum + days(r.created_at, r.submitted_at), 0) / submittedRows.length) * 10) / 10 : null,
+    },
+    agents: [...agents.values()].sort((a, b) => b.overdue - a.overdue || b.assigned - a.assigned || a.name.localeCompare(b.name)),
+    types: [...types.values()].sort((a, b) => b.total - a.total),
+  });
+});
+
 const lastStagingCheck = new Map();
 const utc = value => Date.parse(`${String(value).replace(' ', 'T')}Z`);
 

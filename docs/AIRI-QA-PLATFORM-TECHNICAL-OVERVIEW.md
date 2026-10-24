@@ -86,6 +86,7 @@ Base path: `/api/ai-bot-qc`. All require a logged-in session with `ai_bot_qc`, `
 | POST | `/outbound-tests/assignments/:id/call` | Assigned agent | Places the call through Kixie's Make a Call API (replaces `tel:` links). |
 | GET/POST | `/outbound-tests/assignments/:id/staging/:callId[/recording]`, `/assignments/:id/staging-refresh` | QA (own tests; admins all) | Staging calls matched to a test (dialed DID + time of the agent's Call click). Detail returns summary, diagnostics, intake and transcript from the Staff API; `/recording` streams audio through the server because recording links expire after one hour and must not be stored. Only call ids are stored (`staging_calls`). |
 | POST | `/kixie/webhook?token=` | Shared secret | Kixie End Call webhook; attaches call time, duration, status and recording to the matching outbound test (agent email + dialed number). |
+| GET | `/outbound-tests/summary`, `/outbound-tests/export` | Admin | Progress totals per agent/test (overdue, awaiting review, avg days to submit) and a CSV with one row per test, call variant and question (formula-safe cells; optional `from`/`to`). |
 | GET | `/my-day` | QA | The signed-in user's progress today (reviews, critical flags, follow-ups, outbound tests). |
 | POST | `/calls/resolve-critical-bulk` | QC admin | Mark several open critical flags addressed with one note. |
 | POST | `/calls/:id/claim` | QA | Claim a call for review (2-minute lease). |

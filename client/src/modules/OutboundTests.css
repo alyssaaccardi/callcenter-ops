@@ -59,3 +59,13 @@
 .obt-note.has-text { color: var(--text); padding: 4px 8px; border-left: 2px solid var(--border-strong); }
 .obt-transcript { max-height: 320px; overflow: auto; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; }
 .obt-transcript p { margin: 0 0 6px; }
+.obt-summary-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.obt-summary-head h3 { margin: 0; }
+.obt-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 10px 0; }
+.obt-stats div { padding: 8px 10px; border-radius: 6px; background: rgba(127,127,127,.08); }
+.obt-stats b { display: block; font-size: 20px; line-height: 1.1; }
+.obt-stats span { color: var(--text-muted); font-size: 10px; }
+.obt-stats .is-alert, .obt-table .is-alert { color: #b42318; font-weight: 700; }
+.obt-table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 6px 0; }
+.obt-table th, .obt-table td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+.obt-table th { color: var(--text-muted); font-weight: 600; }
