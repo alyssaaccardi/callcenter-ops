@@ -11,7 +11,7 @@ const fill = (text, test) => String(text || '')
 
 const STATUS_LABEL = { assigned: 'To do', submitted: 'Awaiting review', reviewed: 'Reviewed' };
 const EVENT_LABEL = {
-  assigned: 'Assigned', call_clicked: 'Clicked call', submitted: 'Submitted', reviewed: 'Reviewed', reopened: 'Reopened to agent', kixie_call: 'Kixie call attached', kixie_dial_requested: 'Kixie dial requested',
+  assigned: 'Assigned', call_clicked: 'Clicked call', submitted: 'Submitted', reviewed: 'Reviewed', reopened: 'Reopened to agent', kixie_call: 'Kixie call attached', staging_call: 'Staging call found', kixie_dial_requested: 'Kixie dial requested',
 };
 const when = value => (value ? new Date(`${value.replace(' ', 'T')}Z`).toLocaleString() : '');
 const apiError = (err, fallback) => err.response?.data?.error || fallback;
@@ -316,6 +316,52 @@ function NoteField({ value, disabled, label, onChange }) {
   );
 }
 
+const secs = n => (n == null ? '' : `${Math.floor(n / 60)}m ${n % 60}s`);
+
+function StagingCall({ testId, link }) {
+  const [call, setCall] = useState(null);
+  const [error, setError] = useState('');
+  const [showTranscript, setShowTranscript] = useState(false);
+  const base = `/api/ai-bot-qc/outbound-tests/assignments/${testId}/staging/${encodeURIComponent(link.call_id)}`;
+  useEffect(() => {
+    let live = true;
+    api.get(base).then(res => { if (live) setCall(res.data.call); }).catch(err => { if (live) setError(apiError(err, 'Could not load this call')); });
+    return () => { live = false; };
+  }, [base]);
+  const diag = call?.diagnostics;
+  const intake = Object.entries(call?.intake || {}).filter(([, v]) => v !== null && v !== '');
+  return (
+    <div className="obt-kixie">
+      <p><strong>{link.variant || 'Call'}</strong> · {new Date(link.started_at).toLocaleString()} · from {link.caller_number || 'unknown'}{call ? ` · ${secs(call.billed_duration_seconds)}` : ''}</p>
+      {error && <p className="obt-error">{error}</p>}
+      {!call && !error && <p className="obt-meta">Loading call details…</p>}
+      {call && (
+        <>
+          {call.has_recording ? <audio controls preload="none" src={`${base}/recording`} /> : <p className="obt-meta">No recording for this call.</p>}
+          {call.summary && <p><strong>Summary:</strong> {call.summary}</p>}
+          <p className="obt-meta">
+            {[call.disposition && `Disposition: ${call.disposition}`, call.classification && `Classification: ${call.classification}`,
+              diag?.outcome?.kind && `Ended: ${diag.outcome.kind.replace(/_/g, ' ')}${diag.outcome.fault ? ' (FAULT)' : ''}`,
+              diag?.voice_to_voice_p95_ms != null && `Reply wait (p95): ${(diag.voice_to_voice_p95_ms / 1000).toFixed(1)}s`,
+              call.failed_action_count ? `${call.failed_action_count} failed action(s)` : ''].filter(Boolean).join(' · ')}
+          </p>
+          {intake.length > 0 && (
+            <details><summary>Intake answers ({intake.length})</summary>
+              {intake.map(([k, v]) => <p key={k} className="obt-meta"><strong>{k.replace(/_/g, ' ')}:</strong> {typeof v === 'object' ? JSON.stringify(v) : String(v)}</p>)}
+            </details>
+          )}
+          <button type="button" className="obt-btn" onClick={() => setShowTranscript(v => !v)}>{showTranscript ? 'Hide transcript' : 'Show transcript'}</button>
+          {showTranscript && (
+            <div className="obt-transcript">
+              {call.transcript.length ? call.transcript.map((t, i) => <p key={i}><b>{t.role === 'assistant' ? 'AIRI' : 'Caller'}:</b> {t.content}</p>) : <p className="obt-meta">No transcript for this call.</p>}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function TestDetail({ id, isAdmin, onBack }) {
   const [data, setData] = useState(null);
   const [answers, setAnswers] = useState({});
@@ -336,6 +382,10 @@ function TestDetail({ id, isAdmin, onBack }) {
     setAdminNote(res.data.test.admin_note || '');
   }, [id]);
   useEffect(() => { load().catch(() => setMessage('Could not load this test')); }, [load]);
+
+  const refreshStaging = async () => {
+    try { await api.post(`/api/ai-bot-qc/outbound-tests/assignments/${id}/staging-refresh`); await load(); } catch { setMessage('Could not check staging'); }
+  };
 
   if (!data) return <div className="obt"><button className="obt-btn" onClick={onBack}>← Back</button><p>{message || 'Loading…'}</p></div>;
   const { test, events } = data;
@@ -431,6 +481,13 @@ function TestDetail({ id, isAdmin, onBack }) {
         </div>
       )}
       {test.status === 'reviewed' && !isAdmin && test.admin_note && <div className="obt-card"><h3>Reviewer note</h3><p>{test.admin_note}</p></div>}
+
+      <div className="obt-card">
+        <h3>Staging calls</h3>
+        {!test.staging_calls.length && <p className="obt-meta">No staging call found yet. After you call {test.phone} it appears here automatically with the recording, transcript and details.
+          {' '}<button type="button" className="obt-btn" onClick={refreshStaging}>Check now</button></p>}
+        {test.staging_calls.map(link => <StagingCall key={link.call_id} testId={test.id} link={link} />)}
+      </div>
 
       <div className="obt-card">
         <h3>Kixie calls</h3>

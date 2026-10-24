@@ -83,4 +83,38 @@ async function listStagingAccounts({ refresh = false } = {}) {
   return inflight;
 }
 
-module.exports = { listStagingAccounts };
+const last10 = value => String(value || '').replace(/\D/g, '').slice(-10);
+
+// Newest-first scan of recent calls, stopping once calls are older than `sinceMs`.
+async function recentCalls({ sinceMs, maxPages = 5 }) {
+  const http = client();
+  const day = ms => new Date(ms).toISOString().slice(0, 10);
+  const params = { limit: 200, from: day(sinceMs - 86400000), to: day(Date.now() + 86400000) };
+  const found = [];
+  let cursor = null;
+  for (let page = 0; page < maxPages; page++) {
+    const body = await get(http, '/v1/calls', { ...params, ...(cursor ? { cursor } : {}) });
+    found.push(...body.calls);
+    cursor = body.next_cursor;
+    const oldest = body.calls[body.calls.length - 1];
+    if (!cursor || !oldest || Date.parse(oldest.started_at) < sinceMs) break;
+  }
+  return found.filter(call => call.kind === 'inbound' && Date.parse(call.started_at) >= sinceMs);
+}
+
+async function getCall(id) {
+  const body = await get(client(), `/v1/calls/${encodeURIComponent(id)}`);
+  return body.call || body;
+}
+
+// Recording links expire after an hour and must not be stored; keep one briefly in memory only.
+const linkCache = new Map();
+async function recordingUrl(id) {
+  const hit = linkCache.get(id);
+  if (hit && hit.until > Date.now()) return hit.url;
+  const url = (await getCall(id)).recording_url || null;
+  if (url) linkCache.set(id, { url, until: Date.now() + 45 * 60 * 1000 });
+  return url;
+}
+
+module.exports = { listStagingAccounts, recentCalls, getCall, recordingUrl, last10 };

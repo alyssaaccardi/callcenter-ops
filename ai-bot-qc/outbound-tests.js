@@ -3,6 +3,7 @@ const axios = require('axios');
 const { listUsers } = require('../auth');
 const { db } = require('./db');
 const seeds = require('./outbound-seeds');
+const staff = require('./staff-api');
 
 module.exports = function createOutboundTests({ listAccounts }) {
 const router = express.Router();
@@ -59,6 +60,9 @@ CREATE TABLE IF NOT EXISTS bot_outbound_events (
 );
 `);
 
+if (!db.prepare('PRAGMA table_info(bot_outbound_tests)').all().some(c => c.name === 'staging_calls')) {
+  db.exec("ALTER TABLE bot_outbound_tests ADD COLUMN staging_calls TEXT NOT NULL DEFAULT '[]'");
+}
 if (!db.prepare('PRAGMA table_info(bot_outbound_test_types)').all().some(c => c.name === 'default_scenarios')) {
   db.exec("ALTER TABLE bot_outbound_test_types ADD COLUMN default_scenarios TEXT NOT NULL DEFAULT '{}'");
 }
@@ -117,7 +121,7 @@ function testOut(row, type) {
   return {
     id: row.id, type_id: row.type_id, type: type ? typeOut(type) : null, agent_email: row.agent_email, agent_name: row.agent_name,
     account: row.account, phone: row.phone, contact: row.contact, scenarios: parse(row.scenarios, {}), due_date: row.due_date,
-    status: row.status, answers: parse(row.answers, {}), improvement: row.improvement, calls: parse(row.calls, []),
+    status: row.status, answers: parse(row.answers, {}), improvement: row.improvement, calls: parse(row.calls, []), staging_calls: parse(row.staging_calls, []),
     admin_note: row.admin_note, assigned_by: row.assigned_by, reviewed_by: row.reviewed_by, created_at: row.created_at,
     submitted_at: row.submitted_at, reviewed_at: row.reviewed_at,
   };
@@ -211,9 +215,91 @@ router.get('/assignments', (req, res) => {
   res.json({ tests });
 });
 
-router.get('/assignments/:id', (req, res) => {
+const lastStagingCheck = new Map();
+const utc = value => Date.parse(`${String(value).replace(' ', 'T')}Z`);
+
+// Finds staging calls to the test's DID made after the agent clicked Call and links them by id.
+async function matchStagingCalls(row, { force = false } = {}) {
+  if (!process.env.STAFF_API_KEY) return;
+  if (!force && Date.now() - (lastStagingCheck.get(row.id) || 0) < 30000) return;
+  lastStagingCheck.set(row.id, Date.now());
+  const clicks = db.prepare("SELECT created_at, details FROM bot_outbound_events WHERE test_id = ? AND event_type = 'call_clicked' ORDER BY id").all(row.id)
+    .map(e => ({ at: utc(e.created_at), variant: parse(e.details, {}).variant || '' }));
+  if (!clicks.length) return;
+  const wanted = staff.last10(row.phone);
+  const calls = await staff.recentCalls({ sinceMs: clicks[0].at - 2 * 60 * 1000 });
+  const known = parse(row.staging_calls, []);
+  let changed = false;
+  for (const call of calls) {
+    if (staff.last10(call.dialed_number) !== wanted || known.some(k => k.call_id === call.id)) continue;
+    const startedAt = Date.parse(call.started_at);
+    const click = [...clicks].reverse().find(c => c.at - 2 * 60 * 1000 <= startedAt);
+    known.push({ call_id: call.id, variant: click?.variant || '', started_at: call.started_at, caller_number: call.caller_number || '' });
+    changed = true;
+  }
+  if (changed) {
+    known.sort((a, b) => a.started_at.localeCompare(b.started_at));
+    db.prepare("UPDATE bot_outbound_tests SET staging_calls = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(known), row.id);
+    addEvent(row.id, { email: 'system', name: 'Staging API' }, 'staging_call', { count: known.length });
+  }
+}
+
+async function freshRow(row, options) {
+  try { await matchStagingCalls(row, options); } catch (error) { console.error('[ai-bot-qc] staging call match failed:', error.response?.status || error.message); }
+  return db.prepare('SELECT * FROM bot_outbound_tests WHERE id = ?').get(row.id);
+}
+
+router.get('/assignments/:id/staging/:callId', async (req, res) => {
   const row = visibleTest(req, req.params.id);
   if (!row) return res.status(404).json({ error: 'Test not found' });
+  if (!parse(row.staging_calls, []).some(k => k.call_id === req.params.callId)) return res.status(404).json({ error: 'Call not linked to this test' });
+  try {
+    const call = await staff.getCall(req.params.callId);
+    res.json({ call: {
+      id: call.id, started_at: call.started_at, ended_at: call.ended_at, caller_number: call.caller_number, dialed_number: call.dialed_number,
+      billed_duration_seconds: call.billed_duration_seconds, classification: call.classification, classification_type: call.classification_type,
+      disposition: call.disposition, summary: call.summary, failed_action_count: call.failed_action_count, diagnostics: call.diagnostics,
+      intake: call.intake, transfer: call.transfer, legs: call.legs, actions: call.actions, transcript: call.transcript || [], has_recording: !!call.recording_url,
+    } });
+  } catch (error) {
+    console.error('[ai-bot-qc] staging call detail failed:', error.response?.status || error.message);
+    res.status(502).json({ error: 'Could not load the staging call. Try again shortly.' });
+  }
+});
+
+router.get('/assignments/:id/staging/:callId/recording', async (req, res) => {
+  const row = visibleTest(req, req.params.id);
+  if (!row || !parse(row.staging_calls, []).some(k => k.call_id === req.params.callId)) return res.status(404).end();
+  try {
+    const url = await staff.recordingUrl(req.params.callId);
+    if (!url) return res.status(404).end();
+    const upstream = await axios.get(url, {
+      responseType: 'stream', timeout: 20000, validateStatus: () => true,
+      headers: req.headers.range ? { Range: req.headers.range } : {},
+    });
+    res.status(upstream.status);
+    for (const name of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+      if (upstream.headers[name]) res.setHeader(name, upstream.headers[name]);
+    }
+    res.setHeader('Cache-Control', 'private, no-store');
+    upstream.data.pipe(res);
+  } catch (error) {
+    console.error('[ai-bot-qc] staging recording failed:', error.response?.status || error.message);
+    res.status(502).end();
+  }
+});
+
+router.post('/assignments/:id/staging-refresh', async (req, res) => {
+  const row = visibleTest(req, req.params.id);
+  if (!row) return res.status(404).json({ error: 'Test not found' });
+  const next = await freshRow(row, { force: true });
+  res.json({ staging_calls: parse(next.staging_calls, []) });
+});
+
+router.get('/assignments/:id', async (req, res) => {
+  let row = visibleTest(req, req.params.id);
+  if (!row) return res.status(404).json({ error: 'Test not found' });
+  row = await freshRow(row);
   const events = db.prepare('SELECT * FROM bot_outbound_events WHERE test_id = ? ORDER BY id').all(row.id)
     .map(e => ({ ...e, details: parse(e.details, {}) }));
   res.json({ test: testOut(row, typeById(row.type_id)), events });
@@ -311,7 +397,10 @@ function saveAnswers(req, res, submit) {
   db.prepare(`UPDATE bot_outbound_tests SET answers = ?, improvement = ?, status = ?,
     submitted_at = CASE WHEN ? THEN datetime('now') ELSE submitted_at END, updated_at = datetime('now') WHERE id = ?`)
     .run(JSON.stringify(answers), improvement, status, submit ? 1 : 0, row.id);
-  if (submit) addEvent(row.id, actorFor(req), 'submitted');
+  if (submit) {
+    addEvent(row.id, actorFor(req), 'submitted');
+    freshRow(row, { force: true });
+  }
   res.json({ test: testOut(db.prepare('SELECT * FROM bot_outbound_tests WHERE id = ?').get(row.id), type) });
 }
 router.put('/assignments/:id/answers', (req, res) => saveAnswers(req, res, false));
