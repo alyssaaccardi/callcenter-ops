@@ -23,6 +23,8 @@ export default function OutboundTests({ isAdmin, readOnly, agents, openTestId, o
   const [mode, setMode] = useState('list');
   const [agentFilter, setAgentFilter] = useState('');
   const [error, setError] = useState('');
+  const [picked, setPicked] = useState([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -45,6 +47,19 @@ export default function OutboundTests({ isAdmin, readOnly, agents, openTestId, o
 
   const visible = tests.filter(t => !agentFilter || t.agent_email === agentFilter);
   const groups = ['assigned', 'submitted', 'reviewed'];
+  const canBulk = isAdmin && !readOnly;
+  const togglePick = id => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  const bulk = async action => {
+    const word = action === 'delete' ? 'Delete' : 'Mark as completed';
+    if (!window.confirm(`${word} ${picked.length} test${picked.length === 1 ? '' : 's'}?${action === 'delete' ? ' This cannot be undone.' : ''}`)) return;
+    setBulkBusy(true);
+    try {
+      await api.post('/api/ai-bot-qc/outbound-tests/assignments/bulk', { ids: picked, action });
+      setPicked([]);
+      await load();
+    } catch (err) { setError(apiError(err, 'Bulk action failed')); }
+    setBulkBusy(false);
+  };
 
   return (
     <div className="obt">
@@ -67,20 +82,38 @@ export default function OutboundTests({ isAdmin, readOnly, agents, openTestId, o
         if (status === 'reviewed' && !rows.length) return null;
         return (
           <section key={status} className="obt-group">
-            <h3>{STATUS_LABEL[status]} <span>{rows.length}</span></h3>
+            <h3>{STATUS_LABEL[status]} <span>{rows.length}</span>
+              {canBulk && rows.length > 0 && (
+                <label className="obt-selectall">
+                  <input type="checkbox" checked={rows.every(t => picked.includes(t.id))}
+                    onChange={e => setPicked(p => e.target.checked ? [...new Set([...p, ...rows.map(t => t.id)])] : p.filter(id => !rows.some(t => t.id === id)))} /> Select all
+                </label>
+              )}
+            </h3>
             {!rows.length && <p className="obt-empty">{status === 'assigned' ? 'Nothing assigned right now.' : 'None.'}</p>}
             {rows.map(t => (
-              <button key={t.id} className="obt-row" onClick={() => setSelectedId(t.id)}>
+              <div key={t.id} className="obt-rowwrap">
+                {canBulk && <input type="checkbox" aria-label="Select test" checked={picked.includes(t.id)} onChange={() => togglePick(t.id)} />}
+                <button className="obt-row" onClick={() => setSelectedId(t.id)}>
                 <strong>{t.type?.title}</strong>
                 <span>{t.account} · {t.phone}</span>
                 {isAdmin && !readOnly && <span>{t.agent_name}</span>}
                 {t.due_date && <span>Due {t.due_date}</span>}
                 <em className={`obt-pill is-${t.status}`}>{STATUS_LABEL[t.status]}</em>
-              </button>
+                </button>
+              </div>
             ))}
           </section>
         );
       })}
+      {canBulk && picked.length > 0 && (
+        <div className="obt-bulkbar">
+          <strong>{picked.length} selected</strong>
+          <button className="obt-btn is-primary" disabled={bulkBusy} onClick={() => bulk('complete')}>Mark completed</button>
+          <button className="obt-btn" disabled={bulkBusy} onClick={() => bulk('delete')}>Delete</button>
+          <button className="obt-btn" disabled={bulkBusy} onClick={() => setPicked([])}>Clear</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -521,7 +554,7 @@ function TestDetail({ id, isAdmin, onBack }) {
           <h3>Admin review</h3>
           <textarea rows={3} placeholder="Review note (optional)" value={adminNote} onChange={e => setAdminNote(e.target.value)} />
           <div className="obt-toolbar">
-            <button className="obt-btn is-primary" disabled={busy || test.status === 'assigned'} onClick={() => run(() => api.post(`${base}/review`, { admin_note: adminNote }), 'Marked reviewed')}>Mark reviewed</button>
+            <button className="obt-btn is-primary" disabled={busy} onClick={() => run(() => api.post(`${base}/review`, { admin_note: adminNote }), 'Marked completed')}>{test.status === 'assigned' ? 'Mark completed (without agent)' : 'Mark reviewed'}</button>
             <button className="obt-btn" disabled={busy || test.status === 'assigned'} onClick={() => run(() => api.post(`${base}/reopen`), 'Sent back to agent')}>Send back to agent</button>
             <button className="obt-btn" disabled={busy} onClick={async () => { if (window.confirm('Delete this assignment?')) { await api.delete(base); onBack(); } }}>Delete</button>
           </div>

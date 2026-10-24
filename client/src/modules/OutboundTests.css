@@ -69,3 +69,8 @@
 .obt-table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 6px 0; }
 .obt-table th, .obt-table td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--border); }
 .obt-table th { color: var(--text-muted); font-weight: 600; }
+
+.obt-rowwrap { display: flex; align-items: center; gap: 8px; }
+.obt-rowwrap .obt-row { flex: 1; }
+.obt-selectall { float: right; font-size: 12px; font-weight: 400; color: var(--text-muted); display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
+.obt-bulkbar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--surface, #fff); border: 1px solid var(--border, #ddd); border-radius: 8px; box-shadow: 0 -2px 10px rgba(0,0,0,.08); }

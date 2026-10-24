@@ -482,12 +482,11 @@ router.post('/assignments/:id/submit', (req, res) => saveAnswers(req, res, true)
 router.post('/assignments/:id/review', requireAdmin, (req, res) => {
   const row = db.prepare('SELECT * FROM bot_outbound_tests WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Test not found' });
-  if (row.status === 'assigned') return res.status(409).json({ error: 'The agent has not submitted this test yet' });
   const actor = actorFor(req);
   const note = str(req.body?.admin_note, 3000);
   db.prepare(`UPDATE bot_outbound_tests SET status = 'reviewed', admin_note = ?, reviewed_by = ?, reviewed_at = datetime('now'),
     updated_at = datetime('now') WHERE id = ?`).run(note, actor.email, row.id);
-  addEvent(row.id, actor, 'reviewed', { note });
+  addEvent(row.id, actor, 'reviewed', { note, ...(row.status === 'assigned' ? { completed_by_admin: true } : {}) });
   res.json({ ok: true });
 });
 
@@ -499,7 +498,30 @@ router.post('/assignments/:id/reopen', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+router.post('/assignments/bulk', requireAdmin, (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger))].slice(0, 500);
+  const action = req.body?.action;
+  if (!ids.length || !['complete', 'delete'].includes(action)) return res.status(400).json({ error: 'Choose tests and an action' });
+  const actor = actorFor(req);
+  const marks = ids.map(() => '?').join(',');
+  const apply = db.transaction(() => {
+    if (action === 'delete') {
+      db.prepare(`DELETE FROM bot_outbound_events WHERE test_id IN (${marks})`).run(...ids);
+      return db.prepare(`DELETE FROM bot_outbound_tests WHERE id IN (${marks})`).run(...ids).changes;
+    }
+    const rows = db.prepare(`SELECT id, status FROM bot_outbound_tests WHERE id IN (${marks}) AND status != 'reviewed'`).all(...ids);
+    for (const row of rows) {
+      db.prepare(`UPDATE bot_outbound_tests SET status = 'reviewed', reviewed_by = ?, reviewed_at = datetime('now'),
+        updated_at = datetime('now') WHERE id = ?`).run(actor.email, row.id);
+      addEvent(row.id, actor, 'reviewed', { completed_by_admin: row.status === 'assigned', bulk: true });
+    }
+    return rows.length;
+  });
+  res.json({ ok: true, count: apply() });
+});
+
 router.delete('/assignments/:id', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM bot_outbound_events WHERE test_id = ?').run(req.params.id);
   db.prepare('DELETE FROM bot_outbound_tests WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
