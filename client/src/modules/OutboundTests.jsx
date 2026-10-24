@@ -303,6 +303,19 @@ function TypeManager({ types, onChange }) {
   );
 }
 
+// Shows a quiet one-line prompt (or the saved text) and only opens the text box when clicked.
+function NoteField({ value, disabled, label, onChange }) {
+  const [open, setOpen] = useState(false);
+  if (open) {
+    return <textarea autoFocus rows={3} value={value} disabled={disabled} onChange={e => onChange(e.target.value)} onBlur={() => setOpen(false)} />;
+  }
+  return (
+    <button type="button" className={`obt-note${value ? ' has-text' : ''}`} disabled={disabled && !value} onClick={() => !disabled && setOpen(true)}>
+      {value || `+ ${label}`}
+    </button>
+  );
+}
+
 function TestDetail({ id, isAdmin, onBack }) {
   const [data, setData] = useState(null);
   const [answers, setAnswers] = useState({});
@@ -376,15 +389,17 @@ function TestDetail({ id, isAdmin, onBack }) {
             const a = answers[variant]?.[i] || { choice: '', text: '' };
             return (
               <div key={i} className="obt-question">
-                <p>{q.text}</p>
-                {q.type === 'yesno' && (
-                  <div className="obt-choices">
-                    {['yes', 'no'].map(c => (
-                      <button key={c} type="button" disabled={!editable} className={a.choice === c ? 'is-on' : ''} onClick={() => setAnswer(variant, i, { choice: c })}>{c === 'yes' ? 'Yes' : 'No'}</button>
-                    ))}
-                  </div>
-                )}
-                <textarea rows={2} disabled={!editable} placeholder={q.type === 'yesno' ? 'Details' : 'Your answer'} value={a.text} onChange={e => setAnswer(variant, i, { text: e.target.value })} />
+                <div className="obt-question-row">
+                  <p><span className="obt-qnum">{i + 1}.</span> {q.text}</p>
+                  {q.type === 'yesno' && (
+                    <div className="obt-choices">
+                      {['yes', 'no'].map(c => (
+                        <button key={c} type="button" disabled={!editable} className={a.choice === c ? 'is-on' : ''} onClick={() => setAnswer(variant, i, { choice: a.choice === c ? '' : c })}>{c === 'yes' ? 'Yes' : 'No'}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <NoteField value={a.text} disabled={!editable} label={q.type === 'yesno' ? 'Add details' : 'Write your answer'} onChange={text => setAnswer(variant, i, { text })} />
               </div>
             );
           })}

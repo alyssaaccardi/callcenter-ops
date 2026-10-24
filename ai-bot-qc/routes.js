@@ -1421,6 +1421,37 @@ router.get('/queue-summary', async (req, res) => {
   res.json({ counts: Object.fromEntries(Object.entries(counts).map(([key, value]) => [key, value || 0])) });
 });
 
+// Personal progress for the signed-in user, for the "Your day" strip.
+router.get('/my-day', (req, res) => {
+  const actor = actorFor(req);
+  const today = localDayBounds();
+  const mine = db.prepare(`SELECT
+      SUM(r.status = 'reviewed' AND r.reviewed_at >= ? AND r.reviewed_at < ?) AS reviewed_today,
+      SUM(r.critical = 1 AND r.critical_flagged_at >= ? AND r.critical_flagged_at < ?) AS flagged_today,
+      SUM(r.outcome = 'needs_follow_up' AND r.reviewed_at >= ? AND r.reviewed_at < ?) AS follow_up_today,
+      MAX(CASE WHEN r.status = 'reviewed' THEN r.reviewed_at END) AS last_reviewed_at
+    FROM bot_reviews r WHERE r.reviewer_email = ?`)
+    .get(today.start, today.end, today.start, today.end, today.start, today.end, actor.email);
+  const open = db.prepare(`SELECT COUNT(*) AS n FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
+    WHERE r.assigned_to_email = ? AND r.status != 'reviewed' AND ${NOT_INTERNAL_TEST_SQL}`).get(actor.email).n;
+  let outbound = { submitted: 0, waiting: 0 };
+  try {
+    outbound = db.prepare(`SELECT
+        COALESCE(SUM(status != 'assigned' AND replace(submitted_at, ' ', 'T') >= ? AND replace(submitted_at, ' ', 'T') < ?), 0) AS submitted,
+        COALESCE(SUM(status = 'assigned'), 0) AS waiting
+      FROM bot_outbound_tests WHERE agent_email = ?`).get(today.start, today.end, actor.email);
+  } catch { /* outbound tables are created on first use */ }
+  res.json({
+    reviewed_today: mine.reviewed_today || 0,
+    flagged_today: mine.flagged_today || 0,
+    follow_up_today: mine.follow_up_today || 0,
+    last_reviewed_at: mine.last_reviewed_at || null,
+    assigned_open: open,
+    outbound_submitted_today: outbound.submitted || 0,
+    outbound_waiting: outbound.waiting || 0,
+  });
+});
+
 router.get('/dashboard', requireRole(...QC_ADMIN_ROLES), async (req, res) => {
   releaseExpiredClaims();
   const base = await countableCallFilter();
