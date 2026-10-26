@@ -12,7 +12,7 @@ At a high level:
 
 ```mermaid
 flowchart LR
-  R[Recording archive in iDrive e2] --> I[Sidecar and audio indexing]
+  R[Answering AI Staff API] --> I[Call indexing and transfer risk checks]
   I --> Q[Call review queue]
   H[HubSpot AIRI Onboarding deals] --> E[Account eligibility and deal details]
   E --> Q
@@ -35,13 +35,13 @@ The internal-test caller list is shared by all admins. It is not a personal pref
 
 ## How Recordings Enter The Queue
 
-1. AIRI QA reads JSON sidecars and audio objects from the configured iDrive e2 bucket and archive prefix.
-2. Sidecars are organized under account and date folders. Their `files[].location` entries are matched to audio objects in the same folder.
-3. The sidecar supplies the recording identity and available call metadata: room name/ID, egress ID, start/end timestamps, and recording file references.
-4. AIRI QA stores the call record, audio references, review state, and audit events in `ai-bot-qc.db`.
-5. Opening AIRI QA syncs the archive before loading the queue. Use **Sync new recordings** to request a fresh sync.
+1. AIRI QA pulls completed inbound calls from the Answering AI Staff API (internal-only calls are skipped). The first sync covers the last 7 days; after that it picks up new and updated calls every 2 minutes.
+2. The API supplies the call identity, account, caller and dialed numbers, start/end times, and the recording and transcript.
+3. AIRI QA stores the call record, review state, and audit events in `ai-bot-qc.db`. Audio is played through AIRI QA; recording links are never stored.
+4. Opening AIRI QA syncs before loading the queue. Use **Sync new recordings** to request a fresh sync.
+5. Calls indexed before the move to the Staff API (from the old recording archive) stay in the queue and remain playable.
 
-These are AIRI/LiveKit recordings from the configured recording archive; this workflow is not attached to MiCC. The internal call ID identifies the indexed recording sidecar, while room and egress IDs identify recording sessions within this archive.
+**Transfer risk badges:** calls where a transfer failed, was declined, went unanswered, reached voicemail, or never connected show a badge in the queue and review panel. Use the **Transfer risk** status filter to see only those calls. Flagged calls sort higher in the queue, but they are not marked Critical automatically. Transfer details are checked only for calls the API reports as transferred or with failed actions.
 
 ### Caller Number And Internal Test Calls
 
@@ -107,7 +107,7 @@ Do not put caller phone numbers, credentials, tokens, full call transcripts, or 
 
 | Symptom | First checks | Escalate when |
 |---|---|---|
-| Call is missing | Sync status, selected date/account, and whether its sidecar/audio exists in the expected archive folder | Sidecar exists but indexing or audio matching fails |
+| Call is missing | Sync status, selected date/account, and whether the call is an inbound, non-internal call that has ended in the Staff API | The call exists in the Staff API but does not appear after a fresh sync |
 | Account is missing from a HubSpot-linked view | AIRI Onboarding pipeline, deal/company/account names, inactive stage, and ambiguity | A valid active deal cannot be matched conservatively |
 | Caller number says not detected | Room-name format and whether it includes a number-shaped segment | The telephony source has a number but the room name does not |
 | No destination number appears | Check HubSpot deal fields; recording metadata does not currently supply a dependable `To` number | HubSpot has the right value but AIRI QA is blank or stale |

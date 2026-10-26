@@ -12,7 +12,7 @@ AIRI is the AI phone-answering bot. This platform lets QA Agents review the bot'
 
 | Capability | Summary |
 |---|---|
-| Review queue | Every bot call is indexed from the recording archive. QA Agents open a call, listen, rate caller happiness, add tags and notes, and click **Complete review**. |
+| Review queue | Every completed inbound bot call is indexed from the Answering AI Staff API. QA Agents open a call, listen, rate caller happiness, add tags and notes, and click **Complete review**. |
 | Assignment | Any QA user can multi-select calls and assign them to any QA Agent. Agents default to a "My assigned calls" filter and can switch to all calls. |
 | Needs Follow Up / Critical Flags | A reviewer explicitly marks a call Needs Follow Up, or flags it Critical with required issue details. Admins resolve critical flags, which moves the call back to Reviewed. |
 | Forwarding checks | An account with no calls for 36 business hours appears in the forwarding queue. A QA Agent tests the number and records PASS (reached AIRI) or FAIL. A FAIL automatically raises a Critical flag. |
@@ -30,7 +30,7 @@ AIRI is the AI phone-answering bot. This platform lets QA Agents review the bot'
 | Backend | Node.js (Express 4). Single process; routes for this module live in `ai-bot-qc/routes.js`, mounted at `/api/ai-bot-qc`. |
 | Database | SQLite via `better-sqlite3`, file `ai-bot-qc.db`, WAL mode. |
 | Auth | Google OAuth 2.0 (Passport) with server-side sessions (`express-session`). |
-| Recording storage | iDrive e2 (S3-compatible), accessed with `@aws-sdk/client-s3` using path-style URLs. |
+| Call source | Answering AI Staff API (`ai-bot-qc/staff-api.js`, `call-sync.js`). Legacy calls indexed earlier from the iDrive e2 archive remain playable through read-only S3 access. |
 | Integrations | HubSpot CRM API (deals search, AIRI pipeline), Slack incoming webhook, Google OAuth, Google Gemini API (bulletin text polish; `GEMINI_API_KEY`). |
 | Hosting | DigitalOcean VPS, PM2 process `ccops`, domain `ops.answeringlegal.com`. |
 | Security middleware | `helmet` (CSP), `cors`, `express-rate-limit` (auth routes only). |
@@ -38,13 +38,13 @@ AIRI is the AI phone-answering bot. This platform lets QA Agents review the bot'
 ### Data flow
 
 ```
-Bot platform ──writes──> iDrive e2 bucket  recordings-v1-production/<customer>/<MM-DD-YY>/...
-                              │  (read-only credentials)
+Answering AI Staff API  (/v1/calls, /v1/calls/{id}, /v1/accounts, recording links)
+                              │  (x-staff-api-key; sync on start and every 2 minutes)
                               ▼
-Express API  ── index metadata/transcripts ──> ai-bot-qc.db (SQLite)
+Express API  ── index calls + transfer risk flags ──> ai-bot-qc.db (SQLite)
      │   ▲
      │   └── HubSpot deals (AIRI pipeline): account names, active/inactive, forwarding number
-     ├── streams audio to the browser through /artifact (never exposes bucket URLs)
+     ├── streams audio to the browser through /calls/:id/audio (signed recording URLs expire after 1 hour and are never sent to the browser; legacy archive calls use /artifact)
      └── POSTs alerts to Slack incoming webhook
 React SPA ── session cookie ──> /api/ai-bot-qc/*
 ```
@@ -108,8 +108,10 @@ Base path: `/api/ai-bot-qc`. All require a logged-in session with `ai_bot_qc`, `
 | Method | Path | Access | Purpose |
 |---|---|---|---|
 | GET | `/artifact` | QA (download: Admin) | Streams an audio/transcript file with HTTP Range support. The key must belong to an indexed call. |
-| POST | `/sync` | QA | Re-index new recordings from the bucket. |
-| GET | `/status`, `/buckets`, `/customers`, `/dates`, `/files` | QA | Storage browsing and health. |
+| POST | `/sync` | QA | Pull new and updated calls from the Staff API (503 if `STAFF_API_KEY` is unset). |
+| GET | `/status` | QA | Staff API configuration health. |
+| GET | `/calls/:id/audio` | QA | Streams a Staff API recording with Range support (`?download=1` is admin-only). |
+| GET | `/queue?risk=1`, `sort_by=risk` | QA | Transfer-risk filter and sort. |
 | GET | `/account-names` | QA | UUID to account name map. Triggers resolution for new folders. |
 
 ### Admin and team
@@ -172,7 +174,13 @@ Ordered roughly by priority.
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` | Google OAuth. If the client ID is omitted outside production, dev auto-login is active (see gap 4). |
 | `SESSION_SECRET` | Signs session cookies. |
 | `NODE_ENV` | `production` enables secure cookies. |
-| `IDRIVE_E2_ACCESS_KEY_ID`, `IDRIVE_E2_SECRET_ACCESS_KEY`, `IDRIVE_E2_BUCKET`, `IDRIVE_E2_ENDPOINT`, `IDRIVE_E2_REGION`, `IDRIVE_E2_PREFIX` | Recording storage (read-only). |
+| `STAFF_API_KEY`, `STAFF_API_BASE` | Staff API access (scopes: Calls, Accounts, Transcripts, Recordings). `STAFF_API_BASE` defaults to staging; set the production URL and a production key in production. |
+| `AI_BOT_QC_BACKFILL_DAYS` | Days of history pulled on the first sync (default 7). |
+| `IDRIVE_E2_*` | Optional read-only access to the legacy archive, only needed to play calls indexed before the Staff API migration. |
+
+### Transfer risk flags
+
+`ai-bot-qc/call-risk.js` inspects the call detail (`transfer` and `legs[]`) and flags failed (high), declined, unanswered, voicemail and not-connected (medium) transfers, plus bridged transfers the voicemail detector heard as no person. Flags do not set Critical; they show as badges and raise queue priority. Because the call list does not include legs, detail is fetched only for calls whose outcome is `transferred` or that have failed actions (25 per sync, due to the detail rate limit). "Rang for" is derived from leg timestamps and may be blank.
 | `HUBSPOT_PRIVATE_APP_TOKEN` | AIRI pipeline lookups (account name, active status, forwarding number). No longer used for the outbound test account list. |
 | `STAFF_API_BASE`, `STAFF_API_KEY` | Staging AI bot Staff API (read-only): outbound test accounts/DIDs and staging call details. Needs Accounts, Calls, Transcripts and Recordings scopes. Server-side only. |
 | `KIXIE_API_KEY`, `KIXIE_BUSINESS_ID` | Kixie click-to-call (Make a Call API). |
