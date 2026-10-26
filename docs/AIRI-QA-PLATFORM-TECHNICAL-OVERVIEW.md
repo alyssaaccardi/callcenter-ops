@@ -174,7 +174,8 @@ Ordered roughly by priority.
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` | Google OAuth. If the client ID is omitted outside production, dev auto-login is active (see gap 4). |
 | `SESSION_SECRET` | Signs session cookies. |
 | `NODE_ENV` | `production` enables secure cookies. |
-| `STAFF_API_KEY`, `STAFF_API_BASE` | Staff API access (scopes: Calls, Accounts, Transcripts, Recordings). `STAFF_API_BASE` defaults to staging; set the production URL and a production key in production. |
+| `AI_BOT_QC_STAFF_API_KEY`, `AI_BOT_QC_STAFF_API_BASE` | Staff API access for the review queue: the production (live calls) URL and key, scopes Calls, Accounts, Transcripts, Recordings, Leads. If unset, falls back to `STAFF_API_KEY`/`STAFF_API_BASE`. |
+| `STAFF_API_KEY`, `STAFF_API_BASE` | Staging Staff API, used by the outbound tests only (unless the `AI_BOT_QC_` settings above are unset). |
 | `AI_BOT_QC_BACKFILL_DAYS` | Days of history pulled on the first sync (default 7). |
 | `IDRIVE_E2_*` | Optional read-only access to the legacy archive, only needed to play calls indexed before the Staff API migration. |
 

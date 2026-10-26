@@ -80,7 +80,7 @@ let leadsUnavailable = false;
 
 // Detail- and lead-based flags for one call. `recheck` keeps a still-pending lead delivery in the queue.
 async function evaluateCall(id) {
-  const call = await staff.getCall(id);
+  const call = await staff.getCall(id, 'qc');
   const flags = callRiskFlags(call);
   let recheck = false;
   if (!leadsUnavailable) {

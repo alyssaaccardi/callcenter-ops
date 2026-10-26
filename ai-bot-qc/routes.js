@@ -628,9 +628,9 @@ router.delete('/excluded-phone-numbers/:id', requireRole(...QC_ADMIN_ROLES), (re
 
 router.get('/status', (req, res) => {
   res.json({
-    configured: Boolean(process.env.STAFF_API_KEY),
+    configured: staffApi.qcConfigured(),
     source: 'staff_api',
-    missing: process.env.STAFF_API_KEY ? [] : ['STAFF_API_KEY'],
+    missing: staffApi.qcConfigured() ? [] : ['AI_BOT_QC_STAFF_API_KEY'],
   });
 });
 
@@ -720,7 +720,7 @@ router.get('/bulletin/history', requireRole(...QC_ADMIN_ROLES), (req, res) => {
 });
 
 router.post('/sync', async (req, res) => {
-  if (!process.env.STAFF_API_KEY) return res.status(503).json({ error: 'STAFF_API_KEY is not configured', configured: false });
+  if (!staffApi.qcConfigured()) return res.status(503).json({ error: 'AI_BOT_QC_STAFF_API_KEY is not configured', configured: false });
   try {
     res.json({ ok: true, ...(await syncCalls()) });
   } catch (error) {
@@ -1020,7 +1020,7 @@ router.post('/changes', requireRole(...QC_ADMIN_ROLES), (req, res) => {
 router.get('/calls/:id', async (req, res) => {
   let call = requireCall(req, res);
   if (!call) return;
-  if (call.source === 'staff_api' && process.env.STAFF_API_KEY) {
+  if (call.source === 'staff_api' && staffApi.qcConfigured()) {
     // Opening a call re-reads its transfer legs so the badge is never stale; failures keep the stored flags.
     try {
       await refreshCallRisk(call.id);
@@ -1048,7 +1048,7 @@ router.get('/calls/:id/recording', async (req, res) => {
   };
   if (call.source === 'staff_api') {
     try {
-      const detail = await staffApi.getCall(call.id);
+      const detail = await staffApi.getCall(call.id, 'qc');
       const transcript = (Array.isArray(detail.transcript) ? detail.transcript : [])
         .filter(message => message && message.content)
         .map(message => ({ role: String(message.role || ''), content: String(message.content).slice(0, 5000) }))
@@ -1523,7 +1523,7 @@ setInterval(() => {
 }, 10 * 60_000).unref();
 
 // Keep the queue current without anyone opening the page; the shared run makes overlapping triggers safe.
-if (process.env.STAFF_API_KEY) {
+if (staffApi.qcConfigured()) {
   const runSync = () => syncCalls().catch(error => console.error('[ai-bot-qc] call sync failed:', error.response?.status || error.message));
   setTimeout(runSync, 5000).unref();
   setInterval(runSync, 2 * 60_000).unref();

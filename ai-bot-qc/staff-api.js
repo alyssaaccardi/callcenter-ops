@@ -6,12 +6,29 @@ const CONCURRENCY = 3;
 let cache = { at: 0, accounts: null };
 let inflight = null;
 
-function client() {
-  const key = process.env.STAFF_API_KEY;
-  if (!key) throw Object.assign(new Error('STAFF_API_KEY is not set'), { code: 'not_configured' });
+const STAGING_BASE = 'https://staff-api.staging-answeringai.cticloud.us';
+
+// The outbound tests use the shared STAFF_API_* settings (staging). The review queue ('qc') reads live calls
+// with AI_BOT_QC_STAFF_API_*, falling back to the shared settings when those are not set.
+function settings(scope) {
+  const shared = { key: process.env.STAFF_API_KEY, base: process.env.STAFF_API_BASE };
+  if (scope !== 'qc') return shared;
+  return {
+    key: process.env.AI_BOT_QC_STAFF_API_KEY || shared.key,
+    base: process.env.AI_BOT_QC_STAFF_API_BASE || shared.base,
+  };
+}
+
+function qcConfigured() {
+  return Boolean(settings('qc').key);
+}
+
+function client(scope) {
+  const { key, base } = settings(scope);
+  if (!key) throw Object.assign(new Error(scope === 'qc' ? 'AI_BOT_QC_STAFF_API_KEY is not set' : 'STAFF_API_KEY is not set'), { code: 'not_configured' });
   return axios.create({
     httpsAgent: new https.Agent({ keepAlive: true, maxSockets: CONCURRENCY }),
-    baseURL: (process.env.STAFF_API_BASE || 'https://staff-api.staging-answeringai.cticloud.us').replace(/\/$/, ''),
+    baseURL: (base || STAGING_BASE).replace(/\/$/, ''),
     headers: { 'x-staff-api-key': key },
     timeout: 15000,
   });
@@ -102,15 +119,15 @@ async function recentCalls({ sinceMs, maxPages = 5 }) {
   return found.filter(call => call.kind === 'inbound' && Date.parse(call.started_at) >= sinceMs);
 }
 
-async function getCall(id) {
-  const body = await get(client(), `/v1/calls/${encodeURIComponent(id)}`);
+async function getCall(id, scope) {
+  const body = await get(client(scope), `/v1/calls/${encodeURIComponent(id)}`);
   return body.call || body;
 }
 
 // A call that filed no lead answers 404; that is reported as null.
 async function getLead(id) {
   try {
-    const body = await get(client(), `/v1/calls/${encodeURIComponent(id)}/lead`);
+    const body = await get(client('qc'), `/v1/calls/${encodeURIComponent(id)}/lead`);
     return body.lead || body;
   } catch (error) {
     if (error.response?.status === 404) return null;
@@ -120,7 +137,7 @@ async function getLead(id) {
 
 // Pages through /v1/calls (newest first). `complete` is false when maxPages stopped the walk early.
 async function listCalls(params, { maxPages = 50 } = {}) {
-  const http = client();
+  const http = client('qc');
   const calls = [];
   let cursor = null;
   for (let page = 0; page < maxPages; page++) {
@@ -133,7 +150,7 @@ async function listCalls(params, { maxPages = 50 } = {}) {
 }
 
 async function listAccountSummaries() {
-  const http = client();
+  const http = client('qc');
   const accounts = [];
   let cursor = null;
   do {
@@ -146,7 +163,7 @@ async function listAccountSummaries() {
 
 // Streams the audio through the server; the signed link is never sent to the browser.
 async function openRecording(id, range) {
-  const url = await recordingUrl(id);
+  const url = await recordingUrl(id, 'qc');
   if (!url) return null;
   return axios.get(url, {
     responseType: 'stream',
@@ -158,12 +175,13 @@ async function openRecording(id, range) {
 
 // Recording links expire after an hour and must not be stored; keep one briefly in memory only.
 const linkCache = new Map();
-async function recordingUrl(id) {
-  const hit = linkCache.get(id);
+async function recordingUrl(id, scope) {
+  const cacheKey = `${scope || 'staging'}:${id}`;
+  const hit = linkCache.get(cacheKey);
   if (hit && hit.until > Date.now()) return hit.url;
-  const url = (await getCall(id)).recording_url || null;
-  if (url) linkCache.set(id, { url, until: Date.now() + 45 * 60 * 1000 });
+  const url = (await getCall(id, scope)).recording_url || null;
+  if (url) linkCache.set(cacheKey, { url, until: Date.now() + 45 * 60 * 1000 });
   return url;
 }
 
-module.exports = { listStagingAccounts, listAccountSummaries, listCalls, recentCalls, getCall, getLead, recordingUrl, openRecording, last10 };
+module.exports = { listStagingAccounts, listAccountSummaries, listCalls, recentCalls, getCall, getLead, qcConfigured, recordingUrl, openRecording, last10 };
