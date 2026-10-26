@@ -2329,6 +2329,286 @@ app.get('/api/zendesk/agents', requireAuth, async (req, res) => {
   }
 });
 
+// ─── Zendesk: Admin Overview ─────────────────────────────────────────────────
+let zendeskAdminOverviewCache = null;
+let zendeskAdminOverviewCachedAt = 0;
+let zendeskAdminOverviewPending = null;
+let zendeskAdminTicketActivityCache = new Map();
+const ZD_ADMIN_OVERVIEW_CACHE_TTL = 60_000;
+
+function subtractEasternBusinessMinutes(date, minutes) {
+  const result = new Date(date);
+  const weekdayHour = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    hour: 'numeric',
+    hourCycle: 'h23',
+  });
+  let remaining = minutes;
+  while (remaining > 0) {
+    result.setTime(result.getTime() - 60_000);
+    const parts = Object.fromEntries(weekdayHour.formatToParts(result).map(part => [part.type, part.value]));
+    if (['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(parts.weekday) && Number(parts.hour) >= 9 && Number(parts.hour) < 17) {
+      remaining--;
+    }
+  }
+  return result;
+}
+
+async function fetchZendeskPaginated(url, headers, params = {}) {
+  const rows = [];
+  let nextUrl = url;
+  let nextParams = params;
+  while (nextUrl) {
+    const response = await axios.get(nextUrl, { headers, params: nextParams });
+    rows.push(...(response.data?.groups || response.data?.users || response.data?.results || []));
+    nextUrl = response.data?.next_page || null;
+    nextParams = {};
+  }
+  return rows;
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await worker(items[index], index);
+    }
+  }));
+  return results;
+}
+
+async function getZendeskTicketAudits(base, headers, ticketId) {
+  const audits = [];
+  let url = `${base}/tickets/${ticketId}/audits.json`;
+  let params = { per_page: 100 };
+  while (url) {
+    const response = await axios.get(url, { headers, params });
+    audits.push(...(response.data?.audits || []));
+    url = response.data?.next_page || null;
+    params = {};
+    if (!url && response.data?.meta?.has_more && response.data?.meta?.after_cursor) {
+      url = `${base}/tickets/${ticketId}/audits.json`;
+      params = { 'page[after]': response.data.meta.after_cursor, 'page[size]': 100 };
+    }
+  }
+  return audits;
+}
+
+async function buildZendeskAdminOverview() {
+  const headers = zdHeaders();
+  const base = zdBase();
+  const groups = await fetchZendeskPaginated(`${base}/groups.json`, headers, { per_page: 100 });
+  const activeGroups = groups.filter(group => group.active !== false);
+  const groupResults = await mapWithConcurrency(activeGroups, 3, async group => {
+    const query = `type:ticket status<solved group_id:${group.id}`;
+    const results = [];
+    let count = 0;
+    let page = 1;
+    while (page <= 10) {
+      const response = await axios.get(`${base}/search.json`, {
+        headers,
+        params: { query, per_page: 100, page, sort_by: 'updated_at', sort_order: 'asc' },
+      });
+      count = response.data?.count ?? count;
+      const tickets = response.data?.results || [];
+      results.push(...tickets);
+      if (tickets.length < 100 || results.length >= count) break;
+      page++;
+    }
+    return { group, count, tickets: results, truncated: count > results.length };
+  });
+
+  const unassignedTickets = [];
+  let unassignedCount = 0;
+  for (let page = 1; page <= 10; page++) {
+    const response = await axios.get(`${base}/search.json`, {
+      headers,
+      params: { query: 'type:ticket status<solved group_id:none', per_page: 100, page, sort_by: 'updated_at', sort_order: 'asc' },
+    });
+    unassignedCount = response.data?.count ?? unassignedCount;
+    const rows = response.data?.results || [];
+    unassignedTickets.push(...rows);
+    if (rows.length < 100 || unassignedTickets.length >= unassignedCount) break;
+  }
+
+  const allTicketRows = [
+    ...groupResults.flatMap(result => result.tickets.map(ticket => ({ ...ticket, groupName: result.group.name }))),
+    ...unassignedTickets.map(ticket => ({ ...ticket, groupName: 'Unassigned' })),
+  ];
+  const uniqueTickets = [...new Map(allTicketRows.map(ticket => [ticket.id, ticket])).values()];
+  const ticketUsers = new Map();
+
+  for (const role of ['agent', 'admin']) {
+    const users = await fetchZendeskPaginated(`${base}/users.json`, headers, { role, per_page: 100 });
+    for (const user of users) {
+      ticketUsers.set(user.id, user);
+    }
+  }
+
+  const activityByTicket = new Map();
+  const ticketsNeedingAudits = [];
+  for (const ticket of uniqueTickets) {
+    const cached = zendeskAdminTicketActivityCache.get(ticket.id);
+    if (cached?.updatedAt === ticket.updated_at) activityByTicket.set(ticket.id, cached.activity);
+    else ticketsNeedingAudits.push(ticket);
+  }
+  const auditResults = await mapWithConcurrency(ticketsNeedingAudits, 5, async ticket => {
+    try {
+      return { ticketId: ticket.id, audits: await getZendeskTicketAudits(base, headers, ticket.id) };
+    } catch (error) {
+      return { ticketId: ticket.id, error };
+    }
+  });
+  const auditErrors = auditResults.filter(result => result.error);
+  if (auditErrors.length) {
+    console.error(`[zendesk-admin-overview] Failed to load ticket audits for ${auditErrors.length} ticket(s):`,
+      auditErrors.slice(0, 10).map(result => `${result.ticketId}: ${result.error.response?.status || result.error.message}`).join('; '));
+  }
+
+  const agentIds = new Set([...ticketUsers.keys()].map(String));
+  const ticketById = new Map(uniqueTickets.map(ticket => [ticket.id, ticket]));
+  const currentTicketIds = new Set(uniqueTickets.map(ticket => ticket.id));
+  zendeskAdminTicketActivityCache = new Map([...zendeskAdminTicketActivityCache].filter(([ticketId]) => currentTicketIds.has(ticketId)));
+  for (const result of auditResults) {
+    if (result.error) {
+      activityByTicket.set(result.ticketId, { available: false });
+      continue;
+    }
+    let lastTouch = null;
+    let lastReply = null;
+    let lastRequesterReply = null;
+    for (const audit of result.audits) {
+      const at = audit.created_at;
+      const actorId = String(audit.author_id);
+      if (agentIds.has(actorId)) {
+        if (!lastTouch || new Date(at) > new Date(lastTouch.at)) {
+          lastTouch = { at, userId: audit.author_id };
+        }
+      }
+      for (const event of audit.events || []) {
+        if (event.type !== 'Comment' || event.public !== true) continue;
+        const authorId = String(event.author_id ?? audit.author_id);
+        if (agentIds.has(authorId) && (!lastReply || new Date(at) > new Date(lastReply.at))) {
+          lastReply = { at, userId: Number(authorId) };
+        }
+        const requesterId = String(ticketById.get(result.ticketId)?.requester_id ?? '');
+        if (requesterId && authorId === requesterId && (!lastRequesterReply || new Date(at) > new Date(lastRequesterReply.at))) {
+          lastRequesterReply = { at, userId: Number(authorId) };
+        }
+      }
+    }
+    const activity = { available: true, lastTouch, lastReply, lastRequesterReply };
+    activityByTicket.set(result.ticketId, activity);
+    const ticket = ticketById.get(result.ticketId);
+    if (ticket) zendeskAdminTicketActivityCache.set(result.ticketId, { updatedAt: ticket.updated_at, activity });
+  }
+
+  const missingAssignees = [...new Set(uniqueTickets.map(ticket => ticket.assignee_id).filter(id => id && !ticketUsers.has(id)))];
+  for (let offset = 0; offset < missingAssignees.length; offset += 100) {
+    const ids = missingAssignees.slice(offset, offset + 100);
+    const response = await axios.get(`${base}/users/show_many.json`, {
+      headers,
+      params: { ids: ids.join(',') },
+    });
+    for (const user of response.data?.users || []) ticketUsers.set(user.id, user);
+  }
+
+  const cutoff = subtractEasternBusinessMinutes(new Date(), 24 * 60);
+  const tickets = uniqueTickets.map(ticket => {
+    const activity = activityByTicket.get(ticket.id) || { available: false };
+    const replyAt = activity.lastReply?.at || null;
+    const requesterReplyAt = activity.lastRequesterReply?.at || null;
+    const waitingSince = requesterReplyAt
+      ? (!replyAt || new Date(requesterReplyAt) > new Date(replyAt) ? requesterReplyAt : null)
+      : (replyAt ? null : ticket.created_at);
+    return {
+      id: ticket.id,
+      subject: ticket.subject || '(no subject)',
+      status: ticket.status,
+      groupId: ticket.group_id || null,
+      groupName: ticket.groupName,
+      assigneeName: ticketUsers.get(ticket.assignee_id)?.name || null,
+      createdAt: ticket.created_at,
+      updatedAt: ticket.updated_at,
+      activityAvailable: activity.available,
+      lastAgentTouchAt: activity.lastTouch?.at || null,
+      lastAgentTouchBy: ticketUsers.get(activity.lastTouch?.userId)?.name || null,
+      lastAgentReplyAt: replyAt,
+      lastAgentReplyBy: ticketUsers.get(activity.lastReply?.userId)?.name || null,
+      waitingSince,
+      sitting: activity.available && Boolean(waitingSince) && ['new', 'open'].includes(ticket.status) && new Date(waitingSince) <= cutoff,
+      link: `https://${process.env.ZENDESK_SUBDOMAIN}.zendesk.com/agent/tickets/${ticket.id}`,
+    };
+  }).sort((a, b) => {
+    if (a.sitting !== b.sitting) return a.sitting ? -1 : 1;
+    const aAt = a.waitingSince || a.updatedAt || a.createdAt;
+    const bAt = b.waitingSince || b.updatedAt || b.createdAt;
+    return new Date(aAt) - new Date(bAt);
+  });
+
+  const groupsSummary = groupResults.map(({ group, count, tickets: rows, truncated }) => ({
+    id: group.id,
+    name: group.name,
+    total: count,
+    truncated,
+    new: rows.filter(ticket => ticket.status === 'new').length,
+    open: rows.filter(ticket => ticket.status === 'open').length,
+    pending: rows.filter(ticket => ticket.status === 'pending').length,
+    hold: rows.filter(ticket => ticket.status === 'hold').length,
+  }));
+  if (unassignedCount > 0) {
+    groupsSummary.push({
+      id: null,
+      name: 'Unassigned',
+      total: unassignedCount,
+      truncated: unassignedCount > unassignedTickets.length,
+      new: unassignedTickets.filter(ticket => ticket.status === 'new').length,
+      open: unassignedTickets.filter(ticket => ticket.status === 'open').length,
+      pending: unassignedTickets.filter(ticket => ticket.status === 'pending').length,
+      hold: unassignedTickets.filter(ticket => ticket.status === 'hold').length,
+    });
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    sittingThresholdBusinessHours: 24,
+    activeGroupCount: activeGroups.length,
+    totalUnsolved: groupsSummary.reduce((sum, group) => sum + group.total, 0),
+    sittingCount: tickets.filter(ticket => ticket.sitting).length,
+    activityErrors: auditErrors.length,
+    groups: groupsSummary.sort((a, b) => b.total - a.total),
+    tickets,
+    zdSubdomain: process.env.ZENDESK_SUBDOMAIN || null,
+  };
+}
+
+app.get('/api/zendesk/admin-overview', requireRole('super_admin'), async (req, res) => {
+  try {
+    if (zendeskAdminOverviewCache && Date.now() - zendeskAdminOverviewCachedAt < ZD_ADMIN_OVERVIEW_CACHE_TTL) {
+      return res.json(zendeskAdminOverviewCache);
+    }
+    if (!zendeskAdminOverviewPending) {
+      zendeskAdminOverviewPending = buildZendeskAdminOverview()
+        .then(data => {
+          zendeskAdminOverviewCache = data;
+          zendeskAdminOverviewCachedAt = Date.now();
+          return data;
+        })
+        .finally(() => { zendeskAdminOverviewPending = null; });
+    }
+    res.json(await zendeskAdminOverviewPending);
+  } catch (err) {
+    if (err.message === 'Zendesk not configured' || err.message === 'ZENDESK_SUBDOMAIN not configured') {
+      return res.json({ unconfigured: true });
+    }
+    console.error('Zendesk admin overview error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch Zendesk admin overview' });
+  }
+});
+
 // ─── Zendesk: Queue stats — open/new/pending counts ─────────────────────────
 app.get('/api/zendesk/queue-stats', async (req, res) => {
   const token = req.query.t;

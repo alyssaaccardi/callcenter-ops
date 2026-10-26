@@ -18,6 +18,7 @@ const ALL_NAV_ITEMS = [
   { id: 'tech-leaderboard', icon: '🏆', label: 'Team Leaderboard', roles: ['super_admin', 'tech'], section: 'Tech'           },
   { id: 'app-portal',       icon: '🌐', label: 'App Portal',       roles: ['super_admin', 'tech'], section: 'Tech'           },
   { id: 'user-management',  icon: '👥', label: 'User Management',  roles: ['super_admin'],                          section: 'Administration' },
+  { id: 'zendesk-admin-overview', icon: '🎫', label: 'Zendesk Admin Overview', roles: ['super_admin'], section: 'Administration' },
   { id: 'admin-dashboard',  icon: '🛡️', label: 'Admin Dashboard',                    roles: ['super_admin', 'call_center_ops', 'zendesk_auditor'], section: 'Analytics'      },
   { id: 'zendesk-auditor', icon: '🔎', label: 'The Farewell Reporter',              roles: ['super_admin', 'call_center_ops', 'zendesk_auditor'], section: 'Analytics'      },
   { id: 'minute-auditor',  icon: '💰', label: 'Minute Usage Auditor',                roles: ['super_admin', 'call_center_ops', 'billing'],  section: 'Billing'        },

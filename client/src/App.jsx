@@ -27,6 +27,7 @@ import SupportTVPage from './pages/SupportTVPage';
 import AdminTVPage from './pages/AdminTVPage';
 import WhatsNew from './components/WhatsNew';
 import ZendeskAuditor from './modules/ZendeskAuditor';
+import ZendeskAdminOverview from './modules/ZendeskAdminOverview';
 import MinuteAuditor from './modules/MinuteAuditor';
 import OverageAlerter from './modules/OverageAlerter';
 import SalespersonAuditor from './modules/SalespersonAuditor';
@@ -111,6 +112,7 @@ function DashboardInner({ user, defaultModule }) {
     settings:           (user?.role === 'super_admin' || user?.role === 'call_center_ops') ? <Settings /> : null,
     'user-management':  user?.role === 'super_admin' ? <UserManagementModule /> : null,
     'zendesk-auditor':  isAnalytics ? <ZendeskAuditor /> : null,
+    'zendesk-admin-overview': hasRole('super_admin') ? <ZendeskAdminOverview /> : null,
     'minute-auditor':   isBilling ? <MinuteAuditor /> : null,
     'salesperson-auditor': isBilling ? <SalespersonAuditor /> : null,
     'overage-alerter':  isBilling ? <OverageAlerter /> : null,
