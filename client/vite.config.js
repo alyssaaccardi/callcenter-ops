@@ -6,9 +6,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:3001',
-      '/auth': 'http://localhost:3001',
-      '/dialed-in': 'http://localhost:3001',
+      '/api': { target: 'http://localhost:3001', changeOrigin: false },
+      '/auth': { target: 'http://localhost:3001', changeOrigin: false },
+      '/dialed-in': { target: 'http://localhost:3001', changeOrigin: false },
     }
   },
   build: { outDir: '../public/app' }

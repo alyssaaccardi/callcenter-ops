@@ -223,6 +223,23 @@ for (const column of [
   }
 }
 db.exec('CREATE TABLE IF NOT EXISTS bot_sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+
+// Reviewer verdicts on risk badges (correct / incorrect / missed), kept as feedback for developers.
+db.exec(`CREATE TABLE IF NOT EXISTS bot_flag_feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  call_id TEXT NOT NULL REFERENCES bot_calls(id) ON DELETE CASCADE,
+  flag_code TEXT NOT NULL,
+  target_id TEXT NOT NULL DEFAULT '',
+  flag_label TEXT NOT NULL DEFAULT '',
+  flag_detail TEXT NOT NULL DEFAULT '',
+  verdict TEXT NOT NULL CHECK (verdict IN ('correct', 'incorrect', 'missed')),
+  note TEXT NOT NULL DEFAULT '',
+  reviewer_email TEXT NOT NULL,
+  reviewer_name TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (call_id, flag_code, target_id, reviewer_email)
+)`);
 db.exec('CREATE INDEX IF NOT EXISTS idx_bot_calls_risk ON bot_calls(risk_level DESC, started_at_ns DESC)');
 
 const insertCall = db.prepare(`

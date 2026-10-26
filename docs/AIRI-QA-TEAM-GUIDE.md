@@ -76,6 +76,8 @@ If a valid account is missing from a HubSpot-linked workflow, ask an admin to ve
 4. If a call is already claimed by someone else, coordinate with that QA Agent rather than duplicating the review. Claims expire after a short lease; drafts and changes are recorded in review history.
 5. Admins may reopen a review when correction is needed. Reopening changes the review state; it does not erase the event history.
 
+6. Under **Why this call was flagged**, tell the developers whether each badge was right: click **Yes, correct** or **No, wrong** and add an optional note (**Save note**). If the system missed a problem, describe it in **Did the system miss a problem?** and choose **Report missed problem**. Your answers can be changed later and are used to tune the badges.
+
 Use flags for observable call behavior, not guesses about caller intent. Keep notes factual, concise, and useful to the person who will follow up.
 
 ## Forwarding Checks

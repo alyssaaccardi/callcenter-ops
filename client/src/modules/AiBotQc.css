@@ -437,3 +437,12 @@ button.botqc-count:hover { border-color: var(--border-strong); transform: transl
 .botqc-risk-item small { margin-left: 8px; font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; }
 .botqc-risk-item p { margin: 4px 0 0; font-size: 12px; line-height: 1.4; }
 .botqc-risk-item .botqc-risk-detail { color: var(--text-muted); }
+.botqc-risk-feedback { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; font-size: 11px; }
+.botqc-risk-feedback > span { font-weight: 700; color: var(--text-muted); }
+.botqc-risk-feedback button { border: 1px solid #cdd5df; background: #fff; border-radius: 8px; padding: 3px 10px; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+.botqc-risk-feedback button:disabled { opacity: 0.5; cursor: default; }
+.botqc-risk-feedback button.is-correct { background: #e3f4e8; border-color: #2f855a; color: #276749; }
+.botqc-risk-feedback button.is-incorrect { background: #fde8e8; border-color: #b42318; color: #b42318; }
+.botqc-risk-feedback input { flex: 1 1 220px; min-width: 180px; border: 1px solid #cdd5df; border-radius: 8px; padding: 4px 8px; font: inherit; font-size: 11px; }
+.botqc-risk-missed { margin-top: 10px; padding-top: 10px; border-top: 1px solid #eef1f5; }
+.botqc-risk-note { color: #276749; font-size: 11px; font-weight: 700; }

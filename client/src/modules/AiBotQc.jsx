@@ -127,18 +127,71 @@ function RiskBadges({ flags }) {
   return <span className="botqc-risk-badges">{flags.map(flag => <span key={`${flag.code}-${flag.target_id || ''}`} className={`botqc-risk-badge botqc-risk-badge--${flag.severity}`} title={`${RISK_SEVERITY_TEXT[flag.severity] || ''}: ${riskTip(flag)}`}>{flag.label}</span>)}</span>;
 }
 
-function RiskExplanations({ flags }) {
-  if (!flags?.length) return null;
+function RiskExplanations({ callId, flags, feedback, viewerEmail, readOnly }) {
+  const [rows, setRows] = useState(feedback || []);
+  const [drafts, setDrafts] = useState({});
+  const [busy, setBusy] = useState('');
+  const [message, setMessage] = useState('');
+  const [missedNote, setMissedNote] = useState('');
+  const mine = (code, targetId = '') => rows.find(row => row.flag_code === code && row.target_id === targetId && row.reviewer_email === viewerEmail);
+
+  async function send(key, body) {
+    setBusy(key);
+    setMessage('');
+    try {
+      const result = await api.post(`/api/ai-bot-qc/calls/${encodeURIComponent(callId)}/flag-feedback`, body);
+      setRows(result.data.flag_feedback || []);
+      setMessage('Thanks, your feedback was saved for the developers.');
+      return true;
+    } catch (err) {
+      setMessage(err.response?.data?.error || 'Could not save feedback');
+      return false;
+    } finally {
+      setBusy('');
+    }
+  }
+
+  const hasFlags = Boolean(flags?.length);
+  if (!hasFlags && readOnly) return null;
   return (
     <section className="botqc-risk-panel" aria-label="Why this call was flagged">
-      <div className="botqc-section-heading">WHY THIS CALL WAS FLAGGED</div>
-      {flags.map(flag => (
-        <div className={`botqc-risk-item botqc-risk-item--${flag.severity}`} key={`${flag.code}-${flag.target_id || ''}`}>
-          <div><span className={`botqc-risk-badge botqc-risk-badge--${flag.severity}`}>{flag.label}</span><small>{RISK_SEVERITY_TEXT[flag.severity]}</small></div>
-          {flag.help && <p>{flag.help}</p>}
-          {flag.detail && <p className="botqc-risk-detail">{flag.detail}</p>}
+      <div className="botqc-section-heading">{hasFlags ? 'WHY THIS CALL WAS FLAGGED' : 'NO BADGES ON THIS CALL'}</div>
+      {flags?.map(flag => {
+        const key = `${flag.code}-${flag.target_id || ''}`;
+        const saved = mine(flag.code, flag.target_id || '');
+        const draft = drafts[key] ?? saved?.note ?? '';
+        return (
+          <div className={`botqc-risk-item botqc-risk-item--${flag.severity}`} key={key}>
+            <div><span className={`botqc-risk-badge botqc-risk-badge--${flag.severity}`}>{flag.label}</span><small>{RISK_SEVERITY_TEXT[flag.severity]}</small></div>
+            {flag.help && <p>{flag.help}</p>}
+            {flag.detail && <p className="botqc-risk-detail">{flag.detail}</p>}
+            {!readOnly && (
+              <div className="botqc-risk-feedback">
+                <span>Was this badge right?</span>
+                {['correct', 'incorrect'].map(verdict => (
+                  <button type="button" key={verdict} disabled={busy === key} className={saved?.verdict === verdict ? `is-active is-${verdict}` : ''}
+                    onClick={() => send(key, { flag_code: flag.code, target_id: flag.target_id || '', verdict, note: draft })}>
+                    {verdict === 'correct' ? 'Yes, correct' : 'No, wrong'}
+                  </button>
+                ))}
+                <input value={draft} maxLength={1000} placeholder="Optional note for the developers (what was wrong?)"
+                  onChange={event => setDrafts(current => ({ ...current, [key]: event.target.value }))} />
+                {saved && draft !== saved.note && <button type="button" disabled={busy === key} onClick={() => send(key, { flag_code: flag.code, target_id: flag.target_id || '', verdict: saved.verdict, note: draft })}>Save note</button>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {!readOnly && (
+        <div className="botqc-risk-feedback botqc-risk-missed">
+          <span>Did the system miss a problem on this call?</span>
+          <input value={missedNote} maxLength={1000} placeholder="Describe what it should have flagged"
+            onChange={event => setMissedNote(event.target.value)} />
+          <button type="button" disabled={!missedNote.trim() || busy === 'missed'} onClick={async () => { if (await send('missed', { verdict: 'missed', note: missedNote })) setMissedNote(''); }}>Report missed problem</button>
         </div>
-      ))}
+      )}
+      {rows.filter(row => row.flag_code === 'missed' && row.reviewer_email === viewerEmail).map(row => <p className="botqc-risk-detail" key="missed-saved">You reported: {row.note}</p>)}
+      {message && <p className="botqc-risk-note" role="status">{message}</p>}
     </section>
   );
 }
@@ -1233,7 +1286,7 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
       </div>
 
       <div className="botqc-recordings">
-<RiskExplanations flags={call.risk_flags} />
+{call.source === 'staff_api' && <RiskExplanations key={call.id} callId={call.id} flags={call.risk_flags} feedback={data.flag_feedback} viewerEmail={viewerEmail} readOnly={previewMode} />}
         <div className="botqc-section-heading"><Headphones size={15} /> RECORDING{audioFiles.length === 1 ? '' : 'S'} <span>{audioFiles.length}</span></div>
         {bulletinPosts?.map((post, index) => (
           <div className={`botqc-review-bulletin botqc-review-bulletin--rank-${index + 1}`} key={post.id}>

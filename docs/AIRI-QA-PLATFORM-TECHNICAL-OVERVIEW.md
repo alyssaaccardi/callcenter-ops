@@ -89,6 +89,8 @@ Base path: `/api/ai-bot-qc`. All require a logged-in session with `ai_bot_qc`, `
 | GET | `/my-day` | QA | The signed-in user's progress today (reviews, critical flags, follow-ups, outbound tests). |
 | POST | `/calls/resolve-critical-bulk` | QC admin | Mark several open critical flags addressed with one note. |
 | POST | `/calls/:id/claim` | QA | Claim a call for review (2-minute lease). |
+| POST | `/calls/:id/flag-feedback` | QA | Mark a risk badge `correct` or `incorrect` (optional note), or report a `missed` problem (note required). One row per reviewer per badge in `bot_flag_feedback`; the badge must currently be on the call. |
+| GET | `/flag-feedback` | Admin | Developer feedback on badges as JSON, or CSV with `?format=csv`. |
 | PUT | `/calls/:id/draft` | QA (claim holder) | Autosave tags, notes, happiness, outcome, critical flag/details. |
 | POST | `/calls/:id/release` | QA (claim holder) | Release the claim, saving the draft. |
 | POST | `/calls/:id/complete` | QA (claim holder) | Complete the review. Validates required fields. **Sends the Slack alert** for Critical or Needs Follow Up. |

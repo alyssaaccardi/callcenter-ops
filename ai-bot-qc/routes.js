@@ -1029,7 +1029,56 @@ router.get('/calls/:id', async (req, res) => {
       console.error('[ai-bot-qc] risk refresh failed:', error.response?.status || error.message);
     }
   }
-  res.json({ call: callRow(call), history: eventRows(call.id) });
+  res.json({ call: callRow(call), history: eventRows(call.id), flag_feedback: flagFeedbackRows(call.id) });
+});
+
+function flagFeedbackRows(callId) {
+  return db.prepare(`SELECT flag_code, target_id, flag_label, verdict, note, reviewer_email, reviewer_name, updated_at
+    FROM bot_flag_feedback WHERE call_id = ? ORDER BY updated_at DESC`).all(callId);
+}
+
+// A reviewer's verdict on one badge: correct, incorrect, or "missed" (a problem the system did not flag).
+router.post('/calls/:id/flag-feedback', (req, res) => {
+  const call = requireCall(req, res);
+  if (!call) return;
+  const actor = actorFor(req);
+  const verdict = String(req.body?.verdict || '');
+  const note = String(req.body?.note || '').trim().slice(0, 1000);
+  if (!['correct', 'incorrect', 'missed'].includes(verdict)) return res.status(400).json({ error: 'Choose correct, incorrect or missed.' });
+  let flag = { code: 'missed', label: 'Problem the system missed', detail: '' };
+  let targetId = '';
+  if (verdict === 'missed') {
+    if (!note) return res.status(400).json({ error: 'Describe the problem the system missed.' });
+  } else {
+    const code = String(req.body?.flag_code || '');
+    targetId = String(req.body?.target_id || '');
+    const current = JSON.parse(call.risk_flags || '[]').find(f => f.code === code && (f.target_id || '') === targetId);
+    if (!current) return res.status(400).json({ error: 'That badge is no longer on this call.' });
+    flag = { code, label: current.label, detail: current.detail || '' };
+  }
+  db.prepare(`INSERT INTO bot_flag_feedback (call_id, flag_code, target_id, flag_label, flag_detail, verdict, note, reviewer_email, reviewer_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (call_id, flag_code, target_id, reviewer_email) DO UPDATE SET
+      verdict = excluded.verdict, note = excluded.note, flag_label = excluded.flag_label,
+      flag_detail = excluded.flag_detail, reviewer_name = excluded.reviewer_name, updated_at = datetime('now')`)
+    .run(call.id, flag.code, targetId, flag.label, flag.detail, verdict, note, actor.email, actor.name);
+  res.json({ ok: true, flag_feedback: flagFeedbackRows(call.id) });
+});
+
+// Developer export of reviewer feedback on badges. ?format=csv downloads a spreadsheet.
+router.get('/flag-feedback', requireRole(...QC_ADMIN_ROLES), (req, res) => {
+  const rows = db.prepare(`SELECT f.call_id, c.customer, c.call_date, f.flag_code, f.flag_label, f.flag_detail, f.verdict,
+      f.note, f.reviewer_name, f.reviewer_email, f.updated_at
+    FROM bot_flag_feedback f JOIN bot_calls c ON c.id = f.call_id ORDER BY f.updated_at DESC LIMIT 5000`).all();
+  if (req.query.format !== 'csv') return res.json({ feedback: rows });
+  const cell = value => {
+    let text = String(value ?? '');
+    if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+  const columns = ['call_id', 'customer', 'call_date', 'flag_code', 'flag_label', 'flag_detail', 'verdict', 'note', 'reviewer_name', 'reviewer_email', 'updated_at'];
+  res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="airi-qa-flag-feedback.csv"' });
+  res.send([columns.join(','), ...rows.map(row => columns.map(col => cell(row[col])).join(','))].join('\n'));
 });
 
 // Recording-only view: audio and transcript, with no review notes, tags or reviewer details.
