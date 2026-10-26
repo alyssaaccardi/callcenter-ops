@@ -36,12 +36,28 @@ function Status({ value }) {
   return <span style={{ color, background, padding: '3px 8px', borderRadius: 99, fontSize: 11, fontWeight: 700, textTransform: 'uppercase' }}>{value}</span>;
 }
 
-function Stat({ label, value, accent }) {
+function Stat({ label, value, accent, active, onClick, describedBy }) {
   return (
-    <div className="card" style={{ flex: '1 1 160px', minWidth: 150 }}>
+    <button
+      type="button"
+      className="card"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-describedby={describedBy}
+      style={{
+        flex: '1 1 160px',
+        minWidth: 150,
+        textAlign: 'left',
+        color: 'var(--text)',
+        cursor: 'pointer',
+        border: `1px solid ${active ? 'var(--royal)' : 'var(--border)'}`,
+        boxShadow: active ? '0 0 0 1px var(--royal)' : undefined,
+      }}
+    >
       <div style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase' }}>{label}</div>
       <div style={{ fontSize: 28, fontWeight: 750, color: accent || 'var(--text)', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
-    </div>
+      <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 6 }}>Click to view</div>
+    </button>
   );
 }
 
@@ -51,7 +67,7 @@ export default function ZendeskAdminOverview() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState('all');
-  const [sittingOnly, setSittingOnly] = useState(false);
+  const [ticketFilter, setTicketFilter] = useState('all');
   const [search, setSearch] = useState('');
 
   const fetchOverview = useCallback(async (isRefresh = false) => {
@@ -82,14 +98,34 @@ export default function ZendeskAdminOverview() {
     const normalizedSearch = search.trim().toLowerCase();
     return (data?.tickets || []).filter(ticket => {
       if (selectedGroup !== 'all' && String(ticket.groupId ?? 'unassigned') !== selectedGroup) return false;
-      if (sittingOnly && !ticket.sitting) return false;
+      if (ticketFilter === 'sitting' && !ticket.sitting) return false;
+      if (ticketFilter === 'activity-error' && ticket.activityAvailable) return false;
       if (!normalizedSearch) return true;
       return `${ticket.id} ${ticket.subject} ${ticket.assigneeName || ''} ${ticket.groupName}`.toLowerCase().includes(normalizedSearch);
     });
-  }, [data, search, selectedGroup, sittingOnly]);
+  }, [data, search, selectedGroup, ticketFilter]);
 
   const truncatedGroups = (data?.groups || []).filter(group => group.truncated);
   const sittingCount = data?.sittingCount ?? 0;
+  const summaryLabels = {
+    all: 'All unsolved tickets',
+    sitting: 'Waiting on agent · 24 business hours',
+    'activity-error': 'Tickets with activity lookup issues',
+  };
+
+  function showTicketRecords(filter) {
+    setTicketFilter(filter);
+    setSelectedGroup('all');
+    setSearch('');
+    window.setTimeout(() => document.getElementById('ticket-activity')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  }
+
+  function showGroupRecords() {
+    setTicketFilter('all');
+    setSelectedGroup('all');
+    setSearch('');
+    document.getElementById('group-breakdown')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   return (
     <div style={{ padding: 20, maxWidth: 1800, margin: '0 auto' }}>
@@ -114,10 +150,38 @@ export default function ZendeskAdminOverview() {
       {data && !data.unconfigured && (
         <>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
-            <Stat label="Unsolved tickets" value={data.totalUnsolved ?? 0} />
-            <Stat label="Waiting on agent · 24 business hours" value={sittingCount} accent={sittingCount ? 'var(--danger)' : undefined} />
-            <Stat label="Active groups" value={data.activeGroupCount ?? 0} />
-            {data.activityErrors > 0 && <Stat label="Activity lookup issues" value={data.activityErrors} accent="var(--danger)" />}
+            <Stat
+              label="Unsolved tickets"
+              value={data.totalUnsolved ?? 0}
+              active={ticketFilter === 'all'}
+              onClick={() => showTicketRecords('all')}
+              describedBy="ticket-activity"
+            />
+            <Stat
+              label="Waiting on agent · 24 business hours"
+              value={sittingCount}
+              accent={sittingCount ? 'var(--danger)' : undefined}
+              active={ticketFilter === 'sitting'}
+              onClick={() => showTicketRecords('sitting')}
+              describedBy="ticket-activity"
+            />
+            <Stat
+              label="Active groups"
+              value={data.activeGroupCount ?? 0}
+              active={false}
+              onClick={showGroupRecords}
+              describedBy="group-breakdown"
+            />
+            {data.activityErrors > 0 && (
+              <Stat
+                label="Activity lookup issues"
+                value={data.activityErrors}
+                accent="var(--danger)"
+                active={ticketFilter === 'activity-error'}
+                onClick={() => showTicketRecords('activity-error')}
+                describedBy="ticket-activity"
+              />
+            )}
           </div>
 
           {data.activityErrors > 0 && (
@@ -131,7 +195,7 @@ export default function ZendeskAdminOverview() {
             </div>
           )}
 
-          <div className="card" style={{ marginBottom: 16, overflowX: 'auto' }}>
+          <div className="card" id="group-breakdown" style={{ marginBottom: 16, overflowX: 'auto', scrollMarginTop: 24 }}>
             <div className="card-title">Unsolved tickets by group</div>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 620 }}>
               <thead>
@@ -155,9 +219,12 @@ export default function ZendeskAdminOverview() {
             </table>
           </div>
 
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="card" id="ticket-activity" style={{ padding: 0, overflow: 'hidden', scrollMarginTop: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: 16 }}>
-              <div className="card-title" style={{ margin: 0 }}>Ticket activity <span style={{ color: 'var(--muted)', fontWeight: 500 }}>({visibleTickets.length})</span></div>
+              <div className="card-title" style={{ margin: 0 }}>
+                {ticketFilter === 'all' ? 'Ticket activity' : summaryLabels[ticketFilter]}
+                <span style={{ color: 'var(--muted)', fontWeight: 500 }}> · {visibleTickets.length} ticket{visibleTickets.length === 1 ? '' : 's'}</span>
+              </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <input
                   value={search}
@@ -166,11 +233,11 @@ export default function ZendeskAdminOverview() {
                   aria-label="Search ticket activity"
                   style={{ minWidth: 220, padding: '7px 10px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
                 />
-                <button className={`btn ${sittingOnly ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSittingOnly(value => !value)}>
-                  {sittingOnly ? 'Showing sitting only' : 'Show sitting only'}
+                <button className={`btn ${ticketFilter === 'sitting' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTicketFilter(value => value === 'sitting' ? 'all' : 'sitting')}>
+                  {ticketFilter === 'sitting' ? 'Showing sitting only' : 'Show sitting only'}
                 </button>
-                {(selectedGroup !== 'all' || search || sittingOnly) && (
-                  <button className="btn btn-secondary" onClick={() => { setSelectedGroup('all'); setSearch(''); setSittingOnly(false); }}>Clear filters</button>
+                {(selectedGroup !== 'all' || search || ticketFilter !== 'all') && (
+                  <button className="btn btn-secondary" onClick={() => { setSelectedGroup('all'); setSearch(''); setTicketFilter('all'); }}>Clear filters</button>
                 )}
               </div>
             </div>
