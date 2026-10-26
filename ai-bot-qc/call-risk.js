@@ -1,5 +1,6 @@
 // Derives QA risk flags from a Staff API call detail. Pure: no I/O.
-const SEVERITY = { high: 2, medium: 1 };
+// Low flags show a badge but do not raise queue priority.
+const SEVERITY = { high: 2, medium: 1, low: 0 };
 
 const LEG_OUTCOME_FLAGS = {
   failed: { code: 'transfer_failed', severity: 'high', label: 'Transfer failed' },
@@ -52,4 +53,43 @@ function riskLevel(flags) {
   return flags.reduce((level, flag) => Math.max(level, SEVERITY[flag.severity] || 0), 0);
 }
 
-module.exports = { transferRiskFlags, riskLevel };
+const FAULT_LABELS = {
+  media_timeout: 'No caller audio',
+  did_not_found: 'DID not recognized',
+  config_unavailable: 'Account configuration unavailable',
+  error: 'Call error',
+};
+
+const SLOW_REPLY_MS = Number(process.env.AI_BOT_QC_SLOW_REPLY_MS) || 5000;
+
+// Flags that come from the end-of-call report, present on both list rows and call detail.
+function diagnosticFlags(call) {
+  if (!call || !call.ended_at) return [];
+  const flags = [];
+  const diagnostics = call.diagnostics;
+  const outcome = diagnostics?.outcome;
+  if (outcome?.fault) {
+    flags.push({ code: 'fault', severity: 'high', label: FAULT_LABELS[outcome.kind] || 'Call fault', detail: outcome.detail || outcome.kind || '' });
+  }
+  if (Number(call.failed_action_count) > 0) {
+    flags.push({ code: 'failed_action', severity: 'medium', label: 'Failed bot action', detail: `${call.failed_action_count} action(s) reported failure` });
+  }
+  const p95 = diagnostics?.voice_to_voice_p95_ms;
+  if (Number.isFinite(p95) && p95 > SLOW_REPLY_MS) {
+    flags.push({ code: 'slow_replies', severity: 'medium', label: 'Slow replies', detail: `Callers waited ${(p95 / 1000).toFixed(1)}s on 95% of turns` });
+  }
+  if (diagnostics?.ended_prematurely) {
+    flags.push({ code: 'ended_early', severity: 'low', label: 'Ended early', detail: outcome?.kind ? `Outcome: ${outcome.kind}` : '' });
+  }
+  const missing = diagnostics?.missing_required?.count;
+  if (missing > 0) {
+    flags.push({ code: 'intake_gaps', severity: 'low', label: `Intake incomplete (${missing} missing)`, detail: (diagnostics.missing_required.field_ids || []).join(', ') });
+  }
+  return flags;
+}
+
+function callRiskFlags(call) {
+  return [...diagnosticFlags(call), ...transferRiskFlags(call)];
+}
+
+module.exports = { transferRiskFlags, diagnosticFlags, callRiskFlags, riskLevel };

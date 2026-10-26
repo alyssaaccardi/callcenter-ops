@@ -41,3 +41,25 @@ test('attempted transfer with no usable legs is still flagged', () => {
   assert.equal(flags[0].code, 'transfer_not_connected');
   assert.equal(riskLevel(flags), 1);
 });
+
+test('end-of-call report flags: fault, slow replies, early end, intake gaps', () => {
+  const { callRiskFlags } = require('./call-risk');
+  const call = {
+    ended_at: '2026-10-25T14:03:00Z',
+    failed_action_count: 1,
+    diagnostics: { outcome: { kind: 'media_timeout', fault: true }, voice_to_voice_p95_ms: 6200, ended_prematurely: true, missing_required: { count: 2, field_ids: ['a', 'b'] } },
+  };
+  const flags = callRiskFlags(call);
+  assert.deepEqual(flags.map(f => f.code), ['fault', 'failed_action', 'slow_replies', 'ended_early', 'intake_gaps']);
+  assert.equal(flags[0].label, 'No caller audio');
+  assert.equal(riskLevel(flags), 2);
+});
+
+test('low-severity flags do not raise priority and healthy calls are clean', () => {
+  const { callRiskFlags } = require('./call-risk');
+  const low = callRiskFlags({ ended_at: 'x', diagnostics: { ended_prematurely: true, voice_to_voice_p95_ms: 2000 } });
+  assert.deepEqual(low.map(f => f.code), ['ended_early']);
+  assert.equal(riskLevel(low), 0);
+  assert.deepEqual(callRiskFlags({ ended_at: 'x', diagnostics: { voice_to_voice_p95_ms: 4000, missing_required: { count: 0 } } }), []);
+  assert.deepEqual(callRiskFlags({ diagnostics: { outcome: { fault: true } } }), []);
+});

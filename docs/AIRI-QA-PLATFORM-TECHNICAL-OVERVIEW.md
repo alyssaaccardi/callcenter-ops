@@ -178,9 +178,23 @@ Ordered roughly by priority.
 | `AI_BOT_QC_BACKFILL_DAYS` | Days of history pulled on the first sync (default 7). |
 | `IDRIVE_E2_*` | Optional read-only access to the legacy archive, only needed to play calls indexed before the Staff API migration. |
 
-### Transfer risk flags
+### Risk flags
 
-`ai-bot-qc/call-risk.js` inspects the call detail (`transfer` and `legs[]`) and flags failed (high), declined, unanswered, voicemail and not-connected (medium) transfers, plus bridged transfers the voicemail detector heard as no person. Flags do not set Critical; they show as badges and raise queue priority. Because the call list does not include legs, detail is fetched only for calls whose outcome is `transferred` or that have failed actions (25 per sync, due to the detail rate limit). "Rang for" is derived from leg timestamps and may be blank.
+`ai-bot-qc/call-risk.js` derives flags from the Staff API. Flags never set Critical; they show as badges, and high/medium flags raise queue priority. The "Risk flagged" filter (`risk=1`) lists every call with any flag.
+
+| Flag | Severity | Source |
+|---|---|---|
+| Fault (No caller audio, DID not recognized, Account configuration unavailable, Call error) | High | `diagnostics.outcome.fault` |
+| Transfer failed | High | `legs[].outcome = failed` |
+| Transfer declined / not answered / voicemail / never connected, or connected with no person detected | Medium | `legs[]`, `transfer.answered` |
+| Failed bot action | Medium | `failed_action_count` |
+| Slow replies | Medium | `diagnostics.voice_to_voice_p95_ms` above `AI_BOT_QC_SLOW_REPLY_MS` (default 5000) |
+| Ended early | Low (no priority change) | `diagnostics.ended_prematurely` |
+| Intake incomplete | Low (no priority change) | `diagnostics.missing_required.count` |
+
+Fault, slow-reply, early-end and intake flags come from the call list, so they need no extra request. Transfer flags need the call detail, which is fetched only for calls whose outcome is `transferred` or that have failed actions (25 per sync, due to the detail rate limit). "Rang for" is derived from leg timestamps and may be blank. The API only reports a p95 reply time, not per-turn pauses. Changing the rules means bumping `risk_rules_version` in `call-sync.js` so existing calls are re-evaluated.
+
+Not implemented yet: classification confidence, lead delivery failures, and billing checks.
 | `HUBSPOT_PRIVATE_APP_TOKEN` | AIRI pipeline lookups (account name, active status, forwarding number). No longer used for the outbound test account list. |
 | `STAFF_API_BASE`, `STAFF_API_KEY` | Staging AI bot Staff API (read-only): outbound test accounts/DIDs and staging call details. Needs Accounts, Calls, Transcripts and Recordings scopes. Server-side only. |
 | `KIXIE_API_KEY`, `KIXIE_BUSINESS_ID` | Kixie click-to-call (Make a Call API). |

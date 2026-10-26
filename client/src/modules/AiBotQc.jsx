@@ -1014,7 +1014,7 @@ export default function AiBotQc() {
                     <option value="mine">My assigned calls</option><option value="all">All calls</option>
                   </SelectField>
                   <SelectField label="Status" value={queueStatus} onChange={event => updateQueueStatus(event.target.value)}>
-                    <option value="all">All calls</option><option value="unreviewed">Unreviewed</option><option value="in_review">In progress</option><option value="reviewed">Reviewed</option><option value="critical">Critical</option><option value="risk">Transfer risk</option>
+                    <option value="all">All calls</option><option value="unreviewed">Unreviewed</option><option value="in_review">In progress</option><option value="reviewed">Reviewed</option><option value="critical">Critical</option><option value="risk">Risk flagged</option>
                   </SelectField>
                   {(internalTestTotal > 0 || internalTestFilter !== 'hide') && <SelectField label="Internal tests" value={internalTestFilter} onChange={event => updateInternalTestFilter(event.target.value)}>
                     <option value="hide">Hide</option><option value="include">Include</option><option value="only">Only</option>

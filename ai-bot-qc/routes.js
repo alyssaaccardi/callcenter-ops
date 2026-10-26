@@ -736,7 +736,7 @@ router.get('/queue', async (req, res) => {
   const status = ['unreviewed', 'in_review', 'reviewed'].includes(req.query.status) ? req.query.status : '';
   if (status) { where.push('r.status = ?'); params.push(status); }
   if (req.query.critical === '1') where.push('r.critical = 1');
-  if (req.query.risk === '1') where.push('c.risk_level > 0');
+  if (req.query.risk === '1') where.push("c.risk_flags != '[]'");
   if (req.query.assigned === 'me') { where.push('r.assigned_to_email = ?'); params.push(String(actorFor(req).email).toLowerCase()); }
   if (req.query.customer) { where.push('c.customer = ?'); params.push(safeSegment(req.query.customer)); }
   if (req.query.reviewer_email) { where.push('r.reviewer_email = ?'); params.push(String(req.query.reviewer_email).slice(0, 180)); }

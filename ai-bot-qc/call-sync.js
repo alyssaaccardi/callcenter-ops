@@ -1,7 +1,7 @@
 // Indexes calls from the Answering AI Staff API into bot_calls (replaces the iDrive recording archive).
 const { db, upsertCall } = require('./db');
 const staff = require('./staff-api');
-const { transferRiskFlags, riskLevel } = require('./call-risk');
+const { callRiskFlags, riskLevel } = require('./call-risk');
 
 const BACKFILL_DAYS = Math.max(1, Number.parseInt(process.env.AI_BOT_QC_BACKFILL_DAYS, 10) || 7);
 const DETAIL_BATCH = 25; // call detail is limited to 30 requests a minute for keys with Transcripts or Recordings
@@ -51,7 +51,8 @@ function toRecord(row, checkedAt) {
   };
 }
 
-const markSource = db.prepare("UPDATE bot_calls SET source = 'staff_api', risk_pending = ? WHERE id = ?");
+const markSource = db.prepare(`UPDATE bot_calls SET source = 'staff_api', risk_pending = ?, risk_flags = ?, risk_level = ?,
+  risk_checked_at = ? WHERE id = ?`);
 
 const indexRows = db.transaction((rows, checkedAt) => {
   let indexed = 0;
@@ -61,7 +62,8 @@ const indexRows = db.transaction((rows, checkedAt) => {
     const existing = db.prepare('SELECT metadata_last_modified FROM bot_calls WHERE id = ?').get(row.id);
     if (existing && existing.metadata_last_modified === (row.updated_at || null)) continue;
     upsertCall(toRecord(row, checkedAt));
-    markSource.run(needsDetail(row) ? 1 : 0, row.id);
+    const flags = callRiskFlags(row);
+    markSource.run(needsDetail(row) ? 1 : 0, JSON.stringify(flags), riskLevel(flags), checkedAt, row.id);
     indexed += 1;
   }
   return indexed;
@@ -80,7 +82,7 @@ async function enrichPending() {
   const save = db.prepare(`UPDATE bot_calls SET risk_flags = ?, risk_level = ?, risk_checked_at = ?, risk_pending = 0 WHERE id = ?`);
   for (const { id } of pending) {
     try {
-      const flags = transferRiskFlags(await staff.getCall(id));
+      const flags = callRiskFlags(await staff.getCall(id));
       save.run(JSON.stringify(flags), riskLevel(flags), new Date().toISOString(), id);
     } catch (error) {
       if (error.response?.status === 404) save.run('[]', 0, new Date().toISOString(), id);
@@ -94,6 +96,12 @@ let running = null;
 
 async function run() {
   const startedAt = new Date();
+  // Bump when the flag rules change so already-indexed calls are re-evaluated by a fresh backfill.
+  if (getState('risk_rules_version') !== '2') {
+    db.prepare("DELETE FROM bot_sync_state WHERE key = 'calls_synced_at'").run();
+    db.prepare("UPDATE bot_calls SET metadata_last_modified = NULL WHERE source = 'staff_api'").run();
+    setState('risk_rules_version', '2');
+  }
   const last = getState('calls_synced_at');
   const params = last
     ? { updated_since: new Date(Date.parse(last) - 60_000).toISOString() }
@@ -115,7 +123,7 @@ function syncCalls() {
 
 // Refreshes one call's risk flags (used when a reviewer opens it).
 async function refreshCallRisk(id) {
-  const flags = transferRiskFlags(await staff.getCall(id));
+  const flags = callRiskFlags(await staff.getCall(id));
   db.prepare('UPDATE bot_calls SET risk_flags = ?, risk_level = ?, risk_checked_at = ?, risk_pending = 0 WHERE id = ?')
     .run(JSON.stringify(flags), riskLevel(flags), new Date().toISOString(), id);
   return flags;
