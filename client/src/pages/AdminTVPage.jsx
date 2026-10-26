@@ -10,6 +10,7 @@ const CHARGEOVER_POLL_MS = 60_000;
 const MITEL_POLL_MS      = 10_000;
 const TASKS_POLL_MS      = 30_000;
 const QUALITY_POLL_MS    = 120_000;
+const ZD_OVERVIEW_POLL_MS = 60_000;
 const AGENTS_POLL_MS     = 60_000;
 const STATUS_POLL_MS     = 15_000;
 const DIDS_POLL_MS       = 30_000;
@@ -24,6 +25,13 @@ function withToken(url, token) {
 function usd(n) {
   const v = Number(n) || 0;
   return v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+}
+
+function fmtAge(iso) {
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60_000));
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
 function fmtWait(seconds) {
@@ -166,6 +174,7 @@ export default function AdminTVPage() {
   const [mitelQueues, setMitelQueues] = useState(null);
   const [supportTasks, setSupportTasks] = useState(null);
   const [quality, setQuality]         = useState(null);
+  const [zdOverview, setZdOverview]   = useState(null);
   const [agentCounts, setAgentCounts] = useState(null);
   const [trainees, setTrainees]       = useState(null);
   const [interviews, setInterviews]   = useState(null);
@@ -225,6 +234,11 @@ export default function AdminTVPage() {
     if (!tokenValid) return;
     const run = () => get('/api/zendesk/quality?period=this-month').then(r => setQuality(r.data)).catch(() => {});
     run(); const id = setInterval(run, QUALITY_POLL_MS); return () => clearInterval(id);
+  }, [tokenValid, get]);
+  useEffect(() => {
+    if (!tokenValid) return;
+    const run = () => get('/api/zendesk/admin-overview').then(r => setZdOverview(r.data)).catch(() => {});
+    run(); const id = setInterval(run, ZD_OVERVIEW_POLL_MS); return () => clearInterval(id);
   }, [tokenValid, get]);
   useEffect(() => {
     if (!tokenValid) return;
@@ -413,6 +427,42 @@ export default function AdminTVPage() {
           href="https://answeringlegal-unit.monday.com/boards/9606096056"
         />
       </div>
+
+      {/* Zendesk — Support / Billing / Escalation backlog and tickets waiting on an agent */}
+      {zdOverview?.sections && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, marginBottom: 12 }}>
+          {zdOverview.sections.map(section => (
+            <Panel
+              key={section.key}
+              title={`Zendesk · ${section.label}`}
+              right={<span style={{ fontSize: 11, color: 'rgba(240,244,255,0.5)' }}>{section.partial ? 'partial · ' : ''}waiting = no agent reply 24 biz hrs</span>}
+            >
+              <div style={{ display: 'flex', gap: 24, alignItems: 'flex-end', marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{section.total}</div>
+                  <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.55)', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 3 }}>Unsolved</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: section.sitting ? '#f87171' : '#4ade80' }}>{section.sitting}</div>
+                  <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.55)', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 3 }}>Waiting on agent</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'rgba(240,244,255,0.7)', marginBottom: 8, fontVariantNumeric: 'tabular-nums' }}>
+                <span>{section.new} new</span><span>{section.open} open</span><span>{section.pending} pending</span><span>{section.hold} hold</span>
+              </div>
+              {section.oldestWaiting.length === 0
+                ? <div style={{ fontSize: 12, color: 'rgba(240,244,255,0.45)', fontStyle: 'italic' }}>Nothing waiting</div>
+                : section.oldestWaiting.map(t => (
+                  <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, padding: '4px 0', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>#{t.id}</span>
+                    <span style={{ color: 'rgba(240,244,255,0.6)', flex: 1, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.assigneeName || 'Unassigned'}</span>
+                    <span style={{ color: '#f87171', fontVariantNumeric: 'tabular-nums' }}>{fmtAge(t.waitingSince)}</span>
+                  </div>
+                ))}
+            </Panel>
+          ))}
+        </div>
+      )}
 
       {/* Ops row — Mitel queues (wide left) + stacked Outstanding & Overdue Tasks (right) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1.1fr)', gap: 12, marginBottom: 12 }}>

@@ -2585,21 +2585,66 @@ async function buildZendeskAdminOverview() {
   };
 }
 
-app.get('/api/zendesk/admin-overview', requireRole('super_admin'), async (req, res) => {
+const ZD_ADMIN_TV_SECTIONS = [
+  { key: 'support',    label: 'Support',    groupIds: ['54526693127963'] },
+  { key: 'billing',    label: 'Billing',    groupIds: ['21144086647963', '54535973877787'] },
+  { key: 'escalation', label: 'Escalation', groupIds: [ZD_ESCALATION_GROUP] },
+];
+
+// Wall-display view: Support/Billing/Escalation only, no ticket subjects.
+function buildZendeskAdminTvView(data) {
+  const sections = ZD_ADMIN_TV_SECTIONS.map(section => {
+    const ids = new Set(section.groupIds.map(String));
+    const groups = data.groups.filter(group => ids.has(String(group.id)));
+    const tickets = data.tickets.filter(ticket => ids.has(String(ticket.groupId)));
+    const sitting = tickets.filter(ticket => ticket.sitting);
+    const sum = key => groups.reduce((total, group) => total + group[key], 0);
+    return {
+      key: section.key,
+      label: section.label,
+      total: sum('total'),
+      new: sum('new'),
+      open: sum('open'),
+      pending: sum('pending'),
+      hold: sum('hold'),
+      sitting: sitting.length,
+      partial: groups.some(group => group.truncated),
+      oldestWaiting: sitting
+        .sort((a, b) => new Date(a.waitingSince) - new Date(b.waitingSince))
+        .slice(0, 5)
+        .map(ticket => ({
+          id: ticket.id,
+          status: ticket.status,
+          assigneeName: ticket.assigneeName,
+          waitingSince: ticket.waitingSince,
+        })),
+    };
+  });
+  return {
+    generatedAt: data.generatedAt,
+    activityErrors: data.activityErrors,
+    sections,
+    totalUnsolved: sections.reduce((total, section) => total + section.total, 0),
+    sittingCount: sections.reduce((total, section) => total + section.sitting, 0),
+  };
+}
+
+app.get('/api/zendesk/admin-overview', tvOrRole('super_admin'), async (req, res) => {
   try {
-    if (zendeskAdminOverviewCache && Date.now() - zendeskAdminOverviewCachedAt < ZD_ADMIN_OVERVIEW_CACHE_TTL) {
-      return res.json(zendeskAdminOverviewCache);
+    let data = zendeskAdminOverviewCache;
+    if (!data || Date.now() - zendeskAdminOverviewCachedAt >= ZD_ADMIN_OVERVIEW_CACHE_TTL) {
+      if (!zendeskAdminOverviewPending) {
+        zendeskAdminOverviewPending = buildZendeskAdminOverview()
+          .then(result => {
+            zendeskAdminOverviewCache = result;
+            zendeskAdminOverviewCachedAt = Date.now();
+            return result;
+          })
+          .finally(() => { zendeskAdminOverviewPending = null; });
+      }
+      data = await zendeskAdminOverviewPending;
     }
-    if (!zendeskAdminOverviewPending) {
-      zendeskAdminOverviewPending = buildZendeskAdminOverview()
-        .then(data => {
-          zendeskAdminOverviewCache = data;
-          zendeskAdminOverviewCachedAt = Date.now();
-          return data;
-        })
-        .finally(() => { zendeskAdminOverviewPending = null; });
-    }
-    res.json(await zendeskAdminOverviewPending);
+    res.json(req.query.t ? buildZendeskAdminTvView(data) : data);
   } catch (err) {
     if (err.message === 'Zendesk not configured' || err.message === 'ZENDESK_SUBDOMAIN not configured') {
       return res.json({ unconfigured: true });
