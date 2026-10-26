@@ -211,6 +211,19 @@ try { db.exec('ALTER TABLE bot_calls ADD COLUMN destination_phone_checked_at TEX
 try { db.exec("ALTER TABLE bot_qc_excluded_phone_numbers ADD COLUMN label TEXT NOT NULL DEFAULT ''"); } catch (error) {
   if (!String(error.message).includes('duplicate column name')) throw error;
 }
+for (const column of [
+  "source TEXT NOT NULL DEFAULT 'archive'",
+  "risk_flags TEXT NOT NULL DEFAULT '[]'",
+  'risk_level INTEGER NOT NULL DEFAULT 0',
+  'risk_checked_at TEXT',
+  'risk_pending INTEGER NOT NULL DEFAULT 0',
+]) {
+  try { db.exec(`ALTER TABLE bot_calls ADD COLUMN ${column}`); } catch (error) {
+    if (!String(error.message).includes('duplicate column name')) throw error;
+  }
+}
+db.exec('CREATE TABLE IF NOT EXISTS bot_sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_bot_calls_risk ON bot_calls(risk_level DESC, started_at_ns DESC)');
 
 const insertCall = db.prepare(`
   INSERT INTO bot_calls (

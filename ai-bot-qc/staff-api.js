@@ -107,6 +107,44 @@ async function getCall(id) {
   return body.call || body;
 }
 
+// Pages through /v1/calls (newest first). `complete` is false when maxPages stopped the walk early.
+async function listCalls(params, { maxPages = 50 } = {}) {
+  const http = client();
+  const calls = [];
+  let cursor = null;
+  for (let page = 0; page < maxPages; page++) {
+    const body = await get(http, '/v1/calls', { limit: 200, ...params, ...(cursor ? { cursor } : {}) });
+    calls.push(...body.calls);
+    cursor = body.next_cursor;
+    if (!cursor) return { calls, complete: true };
+  }
+  return { calls, complete: false };
+}
+
+async function listAccountSummaries() {
+  const http = client();
+  const accounts = [];
+  let cursor = null;
+  do {
+    const page = await get(http, '/v1/accounts', { limit: 200, ...(cursor ? { cursor } : {}) });
+    accounts.push(...page.accounts);
+    cursor = page.next_cursor;
+  } while (cursor);
+  return accounts;
+}
+
+// Streams the audio through the server; the signed link is never sent to the browser.
+async function openRecording(id, range) {
+  const url = await recordingUrl(id);
+  if (!url) return null;
+  return axios.get(url, {
+    responseType: 'stream',
+    timeout: 30000,
+    headers: range ? { Range: range } : {},
+    validateStatus: status => status === 200 || status === 206,
+  });
+}
+
 // Recording links expire after an hour and must not be stored; keep one briefly in memory only.
 const linkCache = new Map();
 async function recordingUrl(id) {
@@ -117,4 +155,4 @@ async function recordingUrl(id) {
   return url;
 }
 
-module.exports = { listStagingAccounts, recentCalls, getCall, recordingUrl, last10 };
+module.exports = { listStagingAccounts, listAccountSummaries, listCalls, recentCalls, getCall, recordingUrl, openRecording, last10 };

@@ -424,3 +424,7 @@ button.botqc-count:hover { border-color: var(--border-strong); transform: transl
 .botqc-task-more { border: 0; background: none; color: var(--royal-700); font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; padding: 2px 0; }
 
 .botqc-resolve-row { display: flex; margin-top: 6px; }
+
+.botqc-risk-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.botqc-risk-badge { padding: 1px 7px; border-radius: 10px; font-size: 10px; font-weight: 700; background: #fef3c7; color: #92400e; }
+.botqc-risk-badge--high { background: #fde8e8; color: #b42318; }

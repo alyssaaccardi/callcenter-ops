@@ -116,7 +116,13 @@ function wavBlob(channelData, sampleRate) {
   return new Blob([buffer], { type: 'audio/wav' });
 }
 
+function RiskBadges({ flags }) {
+  if (!flags?.length) return null;
+  return <span className="botqc-risk-badges">{flags.map(flag => <span key={`${flag.code}-${flag.target_id || ''}`} className={`botqc-risk-badge botqc-risk-badge--${flag.severity}`} title={flag.detail || flag.label}>{flag.label}</span>)}</span>;
+}
+
 function artifactUrl(call, bucket, key, download = false) {
+  if (call.source === 'staff_api') return `/api/ai-bot-qc/calls/${encodeURIComponent(call.id)}/audio${download ? '?download=1' : ''}`;
   const params = new URLSearchParams({ bucket, date: call.call_date, customer: call.customer, key });
   if (download) params.set('download', '1');
   return `/api/ai-bot-qc/artifact?${params.toString()}`;
@@ -339,7 +345,7 @@ export default function AiBotQc() {
         ? api.get('/api/ai-bot-qc/dashboard', { params: { period: nextPeriod, reviewer_email: nextReviewer } })
         : api.get('/api/ai-bot-qc/queue-summary'),
     ]);
-    setBucket(statusResult.data.bucket || '');
+    setBucket(statusResult.data.configured ? 'Answering AI Staff API' : '');
     setDashboard(isAdmin ? dashboardResult.data : { counts: dashboardResult.data.counts || {} });
     setDashboardPeriod(nextPeriod);
     setDashboardReviewer(nextReviewer);
@@ -498,6 +504,7 @@ export default function AiBotQc() {
     const requestId = ++queueRequestRef.current;
     const params = { limit: 100, offset: nextPage * 100, internal_tests: nextInternal };
     if (nextStatus === 'critical') params.critical = '1';
+    else if (nextStatus === 'risk') params.risk = '1';
     else if (nextStatus !== 'all') params.status = nextStatus;
     if (assignedViewRef.current === 'mine') params.assigned = 'me';
     if (nextQuery.trim()) params.q = nextQuery.trim();
@@ -569,7 +576,7 @@ export default function AiBotQc() {
           const availableAgents = agentsResult.data.agents || [];
           setAgents(availableAgents);
           setAssignmentTarget(current => current || availableAgents.find(agent => agent.email === user?.email)?.email || '');
-        setBucket(statusResult.data.bucket || '');
+        setBucket(statusResult.data.configured ? 'Answering AI Staff API' : '');
         setDashboard(isAdmin ? dashboardResult.data : { counts: dashboardResult.data.counts || {} });
         // A failed sync must not block the queue from loading.
         await api.post('/api/ai-bot-qc/sync', null, { params: { bucket: statusResult.data.bucket } }).catch(() => {});
@@ -954,7 +961,7 @@ export default function AiBotQc() {
           <p>Review every call once, keep feedback saved, surface serious issues.</p>
         </div>
         <div className="botqc-header-actions">
-          <div className="botqc-bucket-name"><span>Recording archive</span>{bucket || 'Not connected'}</div>
+          <div className="botqc-bucket-name"><span>Call source</span>{bucket || 'Not connected'}</div>
           <button className="botqc-icon-button" onClick={() => refresh(true)} disabled={loading || syncing} title="Sync new recordings" aria-label="Sync new recordings">
             <RefreshCw size={16} className={syncing ? 'botqc-spin' : ''} />
           </button>
@@ -1007,7 +1014,7 @@ export default function AiBotQc() {
                     <option value="mine">My assigned calls</option><option value="all">All calls</option>
                   </SelectField>
                   <SelectField label="Status" value={queueStatus} onChange={event => updateQueueStatus(event.target.value)}>
-                    <option value="all">All calls</option><option value="unreviewed">Unreviewed</option><option value="in_review">In progress</option><option value="reviewed">Reviewed</option><option value="critical">Critical</option>
+                    <option value="all">All calls</option><option value="unreviewed">Unreviewed</option><option value="in_review">In progress</option><option value="reviewed">Reviewed</option><option value="critical">Critical</option><option value="risk">Transfer risk</option>
                   </SelectField>
                   {(internalTestTotal > 0 || internalTestFilter !== 'hide') && <SelectField label="Internal tests" value={internalTestFilter} onChange={event => updateInternalTestFilter(event.target.value)}>
                     <option value="hide">Hide</option><option value="include">Include</option><option value="only">Only</option>
@@ -1028,7 +1035,7 @@ export default function AiBotQc() {
                   <tbody>
                     {calls.map(call => (
                         <tr key={call.id} className={`${selectedId === call.id ? 'is-selected ' : ''}${call.critical ? 'is-critical' : ''}`} onClick={() => loadSelected(call.id, { readOnly: reviewerPreview })}>
-                        <td><strong>{callDateTime(call)}</strong><small>{call.room_name || call.room_id}</small></td>
+                        <td><strong>{callDateTime(call)}</strong><small>{call.room_name || call.room_id}</small><RiskBadges flags={call.risk_flags} /></td>
                         <td className="botqc-caller-id">{call.caller_phone ? formatCallerId(call.caller_phone) : <span className="botqc-dash">Not detected</span>}</td>
                         <td className="botqc-account-cell">{accountLabel(call)}{(call.is_internal_test || call.call_tags?.length > 0 || call.caller_happiness) && <div className="botqc-row-tags">{call.is_internal_test && <span className="botqc-internal-test-badge" title={call.internal_test_label || undefined}>Internal test call</span>}{call.caller_happiness && <span title={HAPPINESS_RATINGS.find(rating => rating.value === call.caller_happiness)?.label}>{HAPPINESS_RATINGS.find(rating => rating.value === call.caller_happiness)?.face} Caller sentiment</span>}{call.call_tags?.map(tag => <span key={tag}>{CALL_SIGNAL_FLAGS.find(flag => flag.value === tag)?.shortLabel || tag}</span>)}</div>}</td>
                         <td><span className={`botqc-status botqc-status--${statusClass(call)}`}>{relativeStatus(call)}</span>{showAdminControls && !reviewerPreview && call.critical && <button type="button" className="botqc-resolve-button botqc-resolve-row" disabled={Boolean(resolvingCriticalId)} onClick={event => { event.stopPropagation(); resolveCritical(call); }}>{resolvingCriticalId === call.id ? 'Saving…' : 'Mark addressed'}</button>}</td>
@@ -1203,6 +1210,7 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
       </div>
 
       <div className="botqc-recordings">
+<RiskBadges flags={call.risk_flags} />
         <div className="botqc-section-heading"><Headphones size={15} /> RECORDING{audioFiles.length === 1 ? '' : 'S'} <span>{audioFiles.length}</span></div>
         {bulletinPosts?.map((post, index) => (
           <div className={`botqc-review-bulletin botqc-review-bulletin--rank-${index + 1}`} key={post.id}>
@@ -1341,7 +1349,7 @@ export function RecordingView({ callId }) {
       {data.recordings.map(({ key, transcript }) => (
         <div className="botqc-audio-row" key={key}>
           <div className="botqc-audio-name"><AudioLines size={15} /><span>{key.split('/').pop()}</span></div>
-          <DecodedAudioPlayer src={artifactUrl({ call_date: data.call_date, customer: data.customer }, data.bucket, key)} name={key.split('/').pop()} />
+          <DecodedAudioPlayer src={artifactUrl({ id: data.id || callId, source: data.source, call_date: data.call_date, customer: data.customer }, data.bucket, key)} name={key.split('/').pop()} />
           {transcript.length > 0 && (
             <div className="botqc-recording-transcript">
               <div className="botqc-section-heading">TRANSCRIPT</div>

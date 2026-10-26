@@ -5,11 +5,12 @@ const rateLimit = require('express-rate-limit');
 const {
   S3Client,
   ListBucketsCommand,
-  ListObjectsV2Command,
   GetObjectCommand,
 } = require('@aws-sdk/client-s3');
 const { requireRole, listUsers, isRecordingOnly } = require('../auth');
-const { db, upsertCall, addEvent } = require('./db');
+const { db, addEvent } = require('./db');
+const { syncCalls, refreshCallRisk } = require('./call-sync');
+const staffApi = require('./staff-api');
 const { createBusinessHours } = require('./business-time');
 
 const router = express.Router();
@@ -210,54 +211,6 @@ async function hubspotAiriMatch(customer) {
 }
 
 db.exec('CREATE TABLE IF NOT EXISTS bot_customer_names (customer TEXT PRIMARY KEY, name TEXT NOT NULL, source TEXT NOT NULL, resolved_at TEXT NOT NULL DEFAULT (datetime(\'now\')))');
-const UUID_CUSTOMER = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function greetingToName(greeting) {
-  return String(greeting || '')
-    .replace(/^(good (morning|afternoon|evening)|hello|hi)[\s,.!…]*/i, '')
-    .replace(/^(thank you for calling|thanks for calling|you have reached|welcome to)\s+(the\s+)?/i, '')
-    .replace(/[\s,.!…]*(how (may|can) (i|we) (help|assist)).*$/i, '')
-    .replace(/^[\s.…]+|[\s.…]+$/g, '')
-    .trim();
-}
-
-function plainKey(value) {
-  return String(value || '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-async function firstGreeting(bucket, customer) {
-  const calls = db.prepare('SELECT object_key FROM bot_calls WHERE customer = ? ORDER BY call_date DESC, discovered_at DESC LIMIT 6').all(customer);
-  for (const { object_key: key } of calls) {
-    try {
-      const transcript = JSON.parse(await readObjectText(bucket, key));
-      const greeting = Array.isArray(transcript) ? transcript.find(message => message?.role === 'assistant' && message.content)?.content : '';
-      if (greeting) return String(greeting);
-    } catch { /* try the next call */ }
-  }
-  return '';
-}
-
-async function resolveCustomerNames(bucket) {
-  const known = new Set(db.prepare('SELECT customer FROM bot_customer_names').all().map(row => row.customer));
-  const pending = db.prepare('SELECT DISTINCT customer FROM bot_calls').all().map(row => row.customer).filter(customer => UUID_CUSTOMER.test(customer) && !known.has(customer));
-  if (!pending.length) return;
-  let records = new Map();
-  try { records = await hubspotAiriRecords(); } catch (error) { console.error('[ai-bot-qc] HubSpot name lookup unavailable:', error.message); }
-  const insert = db.prepare('INSERT OR REPLACE INTO bot_customer_names (customer, name, source) VALUES (?, ?, ?)');
-  for (const customer of pending) {
-    const greeting = await firstGreeting(bucket, customer);
-    if (!greeting) continue;
-    const greetingKey = ` ${plainKey(greeting)} `;
-    let best = null;
-    for (const record of records.values()) {
-      const nameKey = plainKey(record.displayName);
-      if (nameKey.length >= 4 && greetingKey.includes(` ${nameKey} `) && (!best || nameKey.length > plainKey(best.displayName).length)) best = record;
-    }
-    const parsed = greetingToName(greeting);
-    if (best?.displayName) insert.run(customer, best.displayName, 'hubspot');
-    else if (parsed) insert.run(customer, parsed, 'greeting');
-  }
-}
 
 // ─── Slack notifications ─────────────────────────────────────────────────────
 // Needs SLACK_AIRI_QC_URL (incoming webhook). Optional SLACK_HITSQUAD_GROUP_ID /
@@ -445,23 +398,7 @@ async function resolveBucket(req) {
   return buckets.includes(requestedBucket) ? requestedBucket : null;
 }
 
-async function listAll(bucket, input) {
-  const s3 = getClient();
-  const entries = [];
-  let continuationToken;
-  do {
-    const page = await s3.send(new ListObjectsV2Command({
-      Bucket: bucket,
-      ...input,
-      ContinuationToken: continuationToken,
-    }));
-    entries.push(...(page.Contents || []));
-    if (input.Delimiter) entries.push(...(page.CommonPrefixes || []));
-    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
-  } while (continuationToken);
-  return entries;
-}
-
+// Legacy archive recordings (calls indexed before the Staff API switch) stay playable from iDrive e2.
 async function readObjectText(bucket, key) {
   const result = await getClient().send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   let text = '';
@@ -476,104 +413,12 @@ function actorFor(req) {
   };
 }
 
-function callId(bucket, metadataKey) {
-  return require('crypto').createHash('sha256').update(`${bucket}:${metadataKey}`).digest('hex');
-}
-
-async function indexCall(bucket, customer, date, metadataObject, audioObjects) {
-  const metadataKey = metadataObject.Key;
-  const metadata = JSON.parse(await readObjectText(bucket, metadataKey));
-  const recordingLocations = (Array.isArray(metadata.files) ? metadata.files : [])
-    .map(file => String(file?.location || '').split('?')[0]);
-  const audioKeys = audioObjects
-    .filter(object => recordingLocations.some(location => location.endsWith(object.Key)))
-    .map(object => object.Key);
-  const key = metadataKey;
-  const id = callId(bucket, key);
-  upsertCall({
-    id,
-    bucket,
-    object_key: key,
-    customer,
-    caller_phone: phoneFromMetadata(metadata, 'from'),
-    caller_phone_checked_at: new Date().toISOString(),
-    destination_phone: phoneFromMetadata(metadata, 'to'),
-    destination_phone_checked_at: new Date().toISOString(),
-    call_date: date,
-    room_name: String(metadata.room_name || ''),
-    room_id: String(metadata.room_id || ''),
-    egress_id: String(metadata.egress_id || ''),
-    started_at_ns: Number.isFinite(Number(metadata.started_at)) ? Math.trunc(Number(metadata.started_at)) : null,
-    ended_at_ns: Number.isFinite(Number(metadata.ended_at)) ? Math.trunc(Number(metadata.ended_at)) : null,
-    recording_keys: JSON.stringify(audioKeys),
-    metadata_key: key,
-    metadata_last_modified: metadataObject.LastModified?.toISOString?.() || null,
-  });
-  return id;
-}
-
-async function syncCustomer(bucket, customer) {
-  const customerPrefix = `${ARCHIVE_PREFIX}${customer}/`;
-  const dateEntries = await listAll(bucket, { Prefix: customerPrefix, Delimiter: '/' });
-  const dates = dateEntries.filter(entry => entry.Prefix)
-    .map(entry => entry.Prefix.slice(customerPrefix.length, -1));
-  let indexed = 0;
-  for (const date of dates) {
-    const prefix = `${customerPrefix}${date}/`;
-    const objects = await listAll(bucket, { Prefix: prefix });
-    const audioObjects = objects.filter(object => /\.(ogg|mp3|wav|m4a|opus|webm|aac)$/i.test(object.Key));
-    const metadataObjects = objects.filter(object => /\.json$/i.test(object.Key));
-    for (const object of metadataObjects) {
-      try {
-        const existing = db.prepare('SELECT metadata_last_modified, caller_phone_checked_at, destination_phone_checked_at FROM bot_calls WHERE object_key = ?').get(object.Key);
-        const modified = object.LastModified?.toISOString?.() || null;
-        if (existing && existing.metadata_last_modified === modified && existing.caller_phone_checked_at && existing.destination_phone_checked_at) continue;
-        await indexCall(bucket, customer, date, object, audioObjects);
-        indexed += 1;
-      } catch (error) {
-        console.error('[ai-bot-qc] sidecar skipped:', object.Key, error.message);
-      }
-    }
-  }
-  return indexed;
-}
-
-async function syncArchive(bucket) {
-  const objects = await listAll(bucket, { Prefix: ARCHIVE_PREFIX });
-  const metadataObjects = objects.filter(object => object.Key && /\.json$/i.test(object.Key));
-  const audioByFolder = new Map();
-  for (const object of objects) {
-    if (!object.Key || !/\.(ogg|mp3|wav|m4a|opus|webm|aac)$/i.test(object.Key)) continue;
-    const segments = object.Key.split('/');
-    if (segments.length < 4) continue;
-    const folder = segments.slice(0, -1).join('/');
-    if (!audioByFolder.has(folder)) audioByFolder.set(folder, []);
-    audioByFolder.get(folder).push(object);
-  }
-  let indexed = 0;
-  for (const object of metadataObjects) {
-    const segments = object.Key.slice(ARCHIVE_PREFIX.length).split('/');
-    if (segments.length < 3) continue;
-    const [customer, date] = segments;
-    if (!safeSegment(customer) || !safeSegment(date)) continue;
-    const existing = db.prepare('SELECT metadata_last_modified, caller_phone_checked_at, destination_phone_checked_at FROM bot_calls WHERE object_key = ?').get(object.Key);
-    const modified = object.LastModified?.toISOString?.() || null;
-    if (existing && existing.metadata_last_modified === modified && existing.caller_phone_checked_at && existing.destination_phone_checked_at) continue;
-    try {
-      await indexCall(bucket, customer, date, object, audioByFolder.get(`${ARCHIVE_PREFIX}${customer}/${date}`) || []);
-      indexed += 1;
-    } catch (error) {
-      console.error('[ai-bot-qc] sidecar skipped:', object.Key, error.message);
-    }
-  }
-  return { indexed, object_count: objects.length };
-}
-
 function callRow(row) {
   return {
     ...row,
     hubspot_account_name: hubspotRecordForCustomer(row.customer, hubspotAiriCache.records)?.displayName || '',
     recording_keys: JSON.parse(row.recording_keys || '[]'),
+    risk_flags: JSON.parse(row.risk_flags || '[]'),
     call_tags: JSON.parse(row.call_tags || '[]'),
     is_internal_test: Boolean(row.is_internal_test),
     caller_happiness: Number.isInteger(row.caller_happiness) && row.caller_happiness >= 1 && row.caller_happiness <= 5 ? row.caller_happiness : null,
@@ -673,7 +518,7 @@ const qcGate = requireRole(...QC_ROLES);
 const internGate = requireRole('ai_bot_qc_intern');
 router.use((req, res, next) => {
   if (!isRecordingOnly(req.user)) return qcGate(req, res, next);
-  const allowed = req.method === 'GET' && (/^\/calls\/[^/]+\/recording$/.test(req.path) || req.path === '/artifact');
+  const allowed = req.method === 'GET' && (/^\/calls\/[^/]+\/(recording|audio)$/.test(req.path) || req.path === '/artifact');
   if (!allowed) return res.status(403).json({ error: 'Forbidden' });
   internGate(req, res, next);
 });
@@ -706,15 +551,7 @@ router.get('/agents', (req, res) => {
   res.json({ agents });
 });
 
-router.get('/account-names', async (req, res) => {
-  try {
-    if (getClient()) {
-      const bucket = await resolveBucket(req);
-      if (bucket) await resolveCustomerNames(bucket);
-    }
-  } catch (error) {
-    console.error('[ai-bot-qc] account name resolution failed:', error.message);
-  }
+router.get('/account-names', (req, res) => {
   const names = {};
   for (const row of db.prepare('SELECT customer, name FROM bot_customer_names').all()) names[row.customer] = row.name;
   res.json({ names });
@@ -790,18 +627,10 @@ router.delete('/excluded-phone-numbers/:id', requireRole(...QC_ADMIN_ROLES), (re
 });
 
 router.get('/status', (req, res) => {
-  const config = storageConfig();
   res.json({
-    configured: Boolean(config.accessKeyId && config.secretAccessKey),
-    bucket: config.bucket || '',
-    bucketDiscovery: !config.bucket,
-    archivePrefix: ARCHIVE_PREFIX,
-    endpoint: ENDPOINT,
-    region: REGION,
-    missing: [
-      !config.accessKeyId && 'IDRIVE_E2_ACCESS_KEY_ID',
-      !config.secretAccessKey && 'IDRIVE_E2_SECRET_ACCESS_KEY',
-    ].filter(Boolean),
+    configured: Boolean(process.env.STAFF_API_KEY),
+    source: 'staff_api',
+    missing: process.env.STAFF_API_KEY ? [] : ['STAFF_API_KEY'],
   });
 });
 
@@ -891,14 +720,12 @@ router.get('/bulletin/history', requireRole(...QC_ADMIN_ROLES), (req, res) => {
 });
 
 router.post('/sync', async (req, res) => {
-  if (!needStorage(res)) return;
+  if (!process.env.STAFF_API_KEY) return res.status(503).json({ error: 'STAFF_API_KEY is not configured', configured: false });
   try {
-    const bucket = await resolveBucket(req);
-    if (!bucket) return res.status(400).json({ error: 'Choose a valid bucket first' });
-    const result = await syncArchive(bucket);
-    res.json({ ok: true, ...result });
+    res.json({ ok: true, ...(await syncCalls()) });
   } catch (error) {
-    storageFailure(res, error, 'Could not sync recordings from iDrive e2', 's3:ListBucket and s3:GetObject');
+    console.error('[ai-bot-qc] call sync failed:', error.response?.status || error.message);
+    res.status(502).json({ error: 'Could not sync calls from the Answering AI Staff API' });
   }
 });
 
@@ -909,6 +736,7 @@ router.get('/queue', async (req, res) => {
   const status = ['unreviewed', 'in_review', 'reviewed'].includes(req.query.status) ? req.query.status : '';
   if (status) { where.push('r.status = ?'); params.push(status); }
   if (req.query.critical === '1') where.push('r.critical = 1');
+  if (req.query.risk === '1') where.push('c.risk_level > 0');
   if (req.query.assigned === 'me') { where.push('r.assigned_to_email = ?'); params.push(String(actorFor(req).email).toLowerCase()); }
   if (req.query.customer) { where.push('c.customer = ?'); params.push(safeSegment(req.query.customer)); }
   if (req.query.reviewer_email) { where.push('r.reviewer_email = ?'); params.push(String(req.query.reviewer_email).slice(0, 180)); }
@@ -948,13 +776,14 @@ router.get('/queue', async (req, res) => {
     status: `CASE r.status WHEN 'unreviewed' THEN 0 WHEN 'in_review' THEN 1 ELSE 2 END`,
     qa_agent: 'r.reviewer_name COLLATE NOCASE',
     duration: `CASE WHEN c.started_at_ns IS NOT NULL AND c.ended_at_ns IS NOT NULL THEN c.ended_at_ns - c.started_at_ns ELSE -1 END`,
+    risk: 'c.risk_level',
   };
   const sortColumn = Object.hasOwn(sortColumns, req.query.sort_by) ? sortColumns[req.query.sort_by] : null;
   const sortDirection = req.query.sort_dir === 'asc' ? 'ASC' : 'DESC';
   const orderSql = sortColumn
     ? `ORDER BY ${sortColumn} ${sortDirection}, c.started_at_ns DESC, c.id DESC`
     : `ORDER BY CASE r.status WHEN 'unreviewed' THEN 0 WHEN 'in_review' THEN 1 ELSE 2 END,
-      r.critical DESC, c.started_at_ns DESC`;
+      r.critical DESC, c.risk_level DESC, c.started_at_ns DESC`;
   const rows = db.prepare(`SELECT c.*, r.status, r.outcome, r.caller_happiness, r.feedback, r.call_tags, r.critical, r.critical_note,
       r.reviewer_email, r.reviewer_name, r.assigned_to_email, r.assigned_to_name, r.assigned_by_email, r.assigned_by_name, r.assigned_at,
       r.claimed_at, r.claim_expires_at, r.last_saved_at,
@@ -1188,9 +1017,18 @@ router.post('/changes', requireRole(...QC_ADMIN_ROLES), (req, res) => {
   res.status(201).json({ change });
 });
 
-router.get('/calls/:id', (req, res) => {
-  const call = requireCall(req, res);
+router.get('/calls/:id', async (req, res) => {
+  let call = requireCall(req, res);
   if (!call) return;
+  if (call.source === 'staff_api' && process.env.STAFF_API_KEY) {
+    // Opening a call re-reads its transfer legs so the badge is never stale; failures keep the stored flags.
+    try {
+      await refreshCallRisk(call.id);
+      call = { ...call, ...db.prepare('SELECT risk_flags, risk_level FROM bot_calls WHERE id = ?').get(call.id) };
+    } catch (error) {
+      console.error('[ai-bot-qc] risk refresh failed:', error.response?.status || error.message);
+    }
+  }
   res.json({ call: callRow(call), history: eventRows(call.id) });
 });
 
@@ -1198,6 +1036,29 @@ router.get('/calls/:id', (req, res) => {
 router.get('/calls/:id/recording', async (req, res) => {
   const call = db.prepare('SELECT * FROM bot_calls WHERE id = ?').get(req.params.id);
   if (!call) return res.status(404).json({ error: 'Recording not found.' });
+  const summary = {
+    id: call.id,
+    bucket: call.bucket,
+    source: call.source,
+    customer: call.customer,
+    account_name: accountNameFor(call.customer),
+    call_date: call.call_date,
+    started_at_ns: call.started_at_ns,
+    duration_seconds: call.started_at_ns && call.ended_at_ns ? Math.max(0, Math.round((call.ended_at_ns - call.started_at_ns) / 1e9)) : null,
+  };
+  if (call.source === 'staff_api') {
+    try {
+      const detail = await staffApi.getCall(call.id);
+      const transcript = (Array.isArray(detail.transcript) ? detail.transcript : [])
+        .filter(message => message && message.content)
+        .map(message => ({ role: String(message.role || ''), content: String(message.content).slice(0, 5000) }))
+        .slice(0, 500);
+      return res.json({ ...summary, recordings: detail.recording_url ? [{ key: 'recording', transcript }] : [] });
+    } catch (error) {
+      console.error('[ai-bot-qc] call detail failed:', error.response?.status || error.message);
+      return res.status(502).json({ error: 'Could not load this call from the Answering AI Staff API.' });
+    }
+  }
   const keys = JSON.parse(call.recording_keys || '[]');
   const recordings = [];
   for (const key of keys) {
@@ -1213,16 +1074,34 @@ router.get('/calls/:id/recording', async (req, res) => {
     } catch { /* transcript is optional */ }
     recordings.push({ key, transcript });
   }
-  res.json({
-    id: call.id,
-    bucket: call.bucket,
-    customer: call.customer,
-    account_name: accountNameFor(call.customer),
-    call_date: call.call_date,
-    started_at_ns: call.started_at_ns,
-    duration_seconds: call.started_at_ns && call.ended_at_ns ? Math.max(0, Math.round((call.ended_at_ns - call.started_at_ns) / 1e9)) : null,
-    recordings,
-  });
+  res.json({ ...summary, recordings });
+});
+
+// Streams a Staff API recording through the server (signed links expire and must not reach the browser).
+router.get('/calls/:id/audio', async (req, res) => {
+  const download = req.query.download === '1';
+  const userRoles = [req.user?.role, ...(req.user?.additionalRoles || [])];
+  if (download && !userRoles.some(role => QC_ADMIN_ROLES.includes(role))) {
+    return res.status(403).json({ error: 'Only AIRI QA admins can download recordings' });
+  }
+  const call = db.prepare("SELECT id FROM bot_calls WHERE id = ? AND source = 'staff_api'").get(req.params.id);
+  if (!call) return res.status(404).json({ error: 'Recording not found.' });
+  try {
+    const upstream = await staffApi.openRecording(call.id, req.headers.range);
+    if (!upstream) return res.status(404).json({ error: 'This call has no recording.' });
+    for (const header of ['content-type', 'content-length', 'content-range']) {
+      if (upstream.headers[header]) res.setHeader(header, upstream.headers[header]);
+    }
+    if (download) res.setHeader('Content-Disposition', `attachment; filename="call-${encodeURIComponent(call.id)}.audio"`);
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.status(upstream.status);
+    upstream.data.pipe(res);
+  } catch (error) {
+    if (res.headersSent) return res.destroy(error);
+    console.error('[ai-bot-qc] recording stream failed:', error.response?.status || error.message);
+    res.status(502).json({ error: 'Could not open this recording.' });
+  }
 });
 
 router.post('/calls/:id/claim', (req, res) => {
@@ -1595,82 +1474,7 @@ router.get('/history', requireRole(...QC_ADMIN_ROLES), (req, res) => {
   res.json({ events: rows.map(event => ({ ...event, details: JSON.parse(event.details || '{}') })) });
 });
 
-router.get('/buckets', async (req, res) => {
-  if (!needStorage(res)) return;
-  try {
-    res.json({ buckets: await discoverBuckets() });
-  } catch (error) {
-    console.error('[ai-bot-qc] bucket discovery failed:', error.message);
-    res.status(502).json({ error: 'Could not discover buckets. The key may not have permission to list buckets; set IDRIVE_E2_BUCKET to select one directly.' });
-  }
-});
-
-router.get('/customers', async (req, res) => {
-  if (!needStorage(res)) return;
-  try {
-    const bucket = await resolveBucket(req);
-    if (!bucket) return res.status(400).json({ error: 'Choose a valid bucket first' });
-    const entries = await listAll(bucket, { Prefix: ARCHIVE_PREFIX, Delimiter: '/' });
-    const customers = entries.filter(entry => entry.Prefix)
-      .map(entry => entry.Prefix.slice(ARCHIVE_PREFIX.length, -1))
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b));
-    res.json({ customers });
-  } catch (error) {
-    storageFailure(res, error, 'Could not list customer folders from iDrive e2', 's3:ListBucket');
-  }
-});
-
-router.get('/dates', async (req, res) => {
-  const customer = safeSegment(req.query.customer);
-  if (!customer) return res.status(400).json({ error: 'A valid customer folder is required' });
-  if (!needStorage(res)) return;
-  try {
-    const bucket = await resolveBucket(req);
-    if (!bucket) return res.status(400).json({ error: 'Choose a valid bucket first' });
-    const customerPrefix = `${ARCHIVE_PREFIX}${customer}/`;
-    const entries = await listAll(bucket, { Prefix: customerPrefix, Delimiter: '/' });
-    const dates = entries.filter(entry => entry.Prefix)
-      .map(entry => entry.Prefix.slice(customerPrefix.length, -1))
-      .filter(Boolean)
-      .sort()
-      .reverse();
-    res.json({ dates });
-  } catch (error) {
-    storageFailure(res, error, 'Could not list date folders from iDrive e2', 's3:ListBucket');
-  }
-});
-
-router.get('/files', async (req, res) => {
-  const date = safeSegment(req.query.date);
-  const customer = safeSegment(req.query.customer);
-  if (!date || !customer) return res.status(400).json({ error: 'Date and customer folders are required' });
-  const calls = db.prepare(`SELECT c.object_key, c.recording_keys FROM bot_calls c
-    WHERE c.customer = ? AND c.call_date = ?`).all(customer, date);
-  const allowedKeys = new Set();
-  for (const call of calls) {
-    allowedKeys.add(call.object_key);
-    for (const key of JSON.parse(call.recording_keys || '[]')) allowedKeys.add(key);
-  }
-  if (!needStorage(res)) return;
-  try {
-    const bucket = await resolveBucket(req);
-    if (!bucket) return res.status(400).json({ error: 'Choose a valid bucket first' });
-    const prefix = `${ARCHIVE_PREFIX}${customer}/${date}/`;
-    const files = (await listAll(bucket, { Prefix: prefix }))
-      .filter(entry => entry.Key && entry.Key !== prefix && allowedKeys.has(entry.Key))
-      .map(entry => ({
-        key: entry.Key,
-        name: entry.Key.slice(prefix.length),
-        size: entry.Size,
-        lastModified: entry.LastModified,
-      }));
-    res.json({ files });
-  } catch (error) {
-    storageFailure(res, error, 'Could not list customer files from iDrive e2', 's3:ListBucket');
-  }
-});
-
+// Legacy archive playback only: calls indexed before the Staff API switch keep their iDrive e2 recordings.
 router.get('/artifact', async (req, res) => {
   const download = req.query.download === '1';
   const userRoles = [req.user?.role, ...(req.user?.additionalRoles || [])];
@@ -1717,5 +1521,12 @@ router.get('/artifact', async (req, res) => {
 setInterval(() => {
   notifyDueForwardingChecks().catch(error => console.error('[ai-bot-qc] forwarding notice failed:', error.message));
 }, 10 * 60_000).unref();
+
+// Keep the queue current without anyone opening the page; the shared run makes overlapping triggers safe.
+if (process.env.STAFF_API_KEY) {
+  const runSync = () => syncCalls().catch(error => console.error('[ai-bot-qc] call sync failed:', error.response?.status || error.message));
+  setTimeout(runSync, 5000).unref();
+  setInterval(runSync, 2 * 60_000).unref();
+}
 
 module.exports = router;
