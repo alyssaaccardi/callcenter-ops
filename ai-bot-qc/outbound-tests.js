@@ -48,6 +48,11 @@ CREATE TABLE IF NOT EXISTS bot_outbound_tests (
   submitted_at TEXT,
   reviewed_at TEXT
 );
+CREATE TABLE IF NOT EXISTS bot_kixie_emails (
+  agent_email TEXT PRIMARY KEY,
+  kixie_email TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE INDEX IF NOT EXISTS idx_outbound_tests_agent ON bot_outbound_tests(agent_email, status);
 CREATE TABLE IF NOT EXISTS bot_outbound_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -222,12 +227,31 @@ function csvCell(value) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+// UTC "YYYY-MM-DD HH:MM:SS" bounds (as stored by SQLite) of an America/New_York calendar day.
+function easternDayBounds(day) {
+  const [y, m, d] = day.split('-').map(Number);
+  const offsetMs = ms => {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(ms)).map(p => [p.type, p.value]));
+    return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - ms;
+  };
+  const midnight = (yy, mm, dd) => { const guess = Date.UTC(yy, mm - 1, dd); return guess - offsetMs(guess - offsetMs(guess)); };
+  const fmt = ms => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+  return { start: fmt(midnight(y, m, d)), end: fmt(midnight(y, m, d + 1)) };
+}
+
 // One row per test, call variant and question so results can be filtered and pivoted in a spreadsheet.
 router.get('/export', requireAdmin, (req, res) => {
   const where = [];
   const params = [];
   if (dateOk(req.query.from)) { where.push('substr(created_at, 1, 10) >= ?'); params.push(req.query.from); }
   if (dateOk(req.query.to)) { where.push('substr(created_at, 1, 10) <= ?'); params.push(req.query.to); }
+  // "Today's results" = tests submitted (or reviewed) on that Eastern-time day.
+  if (dateOk(req.query.day)) {
+    const { start, end } = easternDayBounds(req.query.day);
+    where.push('((submitted_at >= ? AND submitted_at < ?) OR (reviewed_at >= ? AND reviewed_at < ?))');
+    params.push(start, end, start, end);
+  }
   const rows = db.prepare(`SELECT * FROM bot_outbound_tests ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id`).all(...params);
   const header = ['Test ID', 'Test', 'Account', 'DID', 'Agent', 'Status', 'Assigned', 'Due', 'Submitted', 'Reviewed', 'Reviewed by',
     'Call', 'Scenario', 'Question', 'Answer', 'Details', 'One thing to improve', 'Reviewer note', 'Staging call ids'];
@@ -325,29 +349,52 @@ router.get('/insights', requireAdmin, (req, res) => {
 const lastStagingCheck = new Map();
 const utc = value => Date.parse(`${String(value).replace(' ', 'T')}Z`);
 
+// Every staging call belongs to exactly one test, so two agents testing the same DID never see each other's calls.
+// Owner = the latest Call click on that DID before the call started (a click just after it only covers clock skew).
+// Once a caller number has been linked to an agent, only that agent's clicks can own calls from it.
+function callOwnerId(call, wanted, clicks, agentByCaller) {
+  const startedAt = Date.parse(call.started_at);
+  const agent = agentByCaller.get(call.caller_number);
+  const candidates = clicks.filter(c => c.wanted === wanted && (!agent || c.agent === agent));
+  const before = candidates.filter(c => c.at <= startedAt).sort((a, b) => b.at - a.at)[0];
+  if (before) return before.testId;
+  const skewed = candidates.filter(c => c.at - startedAt <= 2 * 60 * 1000).sort((a, b) => a.at - b.at)[0];
+  return skewed ? skewed.testId : null;
+}
+
 // Finds staging calls to the test's DID made after the agent clicked Call and links them by id.
 async function matchStagingCalls(row, { force = false } = {}) {
   if (!process.env.STAFF_API_KEY) return;
   if (!force && Date.now() - (lastStagingCheck.get(row.id) || 0) < 30000) return;
   lastStagingCheck.set(row.id, Date.now());
-  const clicks = db.prepare("SELECT created_at, details FROM bot_outbound_events WHERE test_id = ? AND event_type = 'call_clicked' ORDER BY id").all(row.id)
-    .map(e => ({ at: utc(e.created_at), variant: parse(e.details, {}).variant || '' }));
-  if (!clicks.length) return;
   const wanted = staff.last10(row.phone);
-  const calls = await staff.recentCalls({ sinceMs: clicks[0].at - 2 * 60 * 1000 });
+  const clicks = db.prepare(`SELECT e.test_id, e.created_at, e.details, t.phone, t.agent_email FROM bot_outbound_events e
+    JOIN bot_outbound_tests t ON t.id = e.test_id WHERE e.event_type = 'call_clicked' AND lower(e.actor_email) = lower(t.agent_email) ORDER BY e.id`).all()
+    .map(e => ({ testId: e.test_id, at: utc(e.created_at), variant: parse(e.details, {}).variant || '', wanted: staff.last10(e.phone), agent: String(e.agent_email).toLowerCase() }))
+    .filter(c => c.wanted === wanted);
+  const own = clicks.filter(c => c.testId === row.id);
   const known = parse(row.staging_calls, []);
-  let changed = false;
+  if (!own.length) return;
+  const agentByCaller = new Map();
+  for (const other of db.prepare("SELECT agent_email, staging_calls FROM bot_outbound_tests WHERE staging_calls != '[]'").all()) {
+    for (const k of parse(other.staging_calls, [])) {
+      if (k.caller_number) agentByCaller.set(k.caller_number, String(other.agent_email).toLowerCase());
+    }
+  }
+  const owned = known.filter(k => callOwnerId(k, wanted, clicks, agentByCaller) === row.id);
+  let changed = owned.length !== known.length;
+  const calls = await staff.recentCalls({ sinceMs: own[0].at - 2 * 60 * 1000 });
   for (const call of calls) {
-    if (staff.last10(call.dialed_number) !== wanted || known.some(k => k.call_id === call.id)) continue;
-    const startedAt = Date.parse(call.started_at);
-    const click = [...clicks].reverse().find(c => c.at - 2 * 60 * 1000 <= startedAt);
-    known.push({ call_id: call.id, variant: click?.variant || '', started_at: call.started_at, caller_number: call.caller_number || '' });
+    if (staff.last10(call.dialed_number) !== wanted || owned.some(k => k.call_id === call.id)) continue;
+    if (callOwnerId(call, wanted, clicks, agentByCaller) !== row.id) continue;
+    const click = own.filter(c => c.at <= Date.parse(call.started_at) + 2 * 60 * 1000).pop();
+    owned.push({ call_id: call.id, variant: click?.variant || '', started_at: call.started_at, caller_number: call.caller_number || '' });
     changed = true;
   }
   if (changed) {
-    known.sort((a, b) => a.started_at.localeCompare(b.started_at));
-    db.prepare("UPDATE bot_outbound_tests SET staging_calls = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(known), row.id);
-    addEvent(row.id, { email: 'system', name: 'Staging API' }, 'staging_call', { count: known.length });
+    owned.sort((a, b) => a.started_at.localeCompare(b.started_at));
+    db.prepare("UPDATE bot_outbound_tests SET staging_calls = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(owned), row.id);
+    addEvent(row.id, { email: 'system', name: 'Staging API' }, 'staging_call', { count: owned.length });
   }
 }
 
@@ -459,16 +506,29 @@ router.post('/assignments/:id/call', async (req, res) => {
   if (!key || !businessId) return res.status(503).json({ error: 'Kixie is not configured', fallback: true });
   const digits = String(row.phone).replace(/\D/g, '');
   const target = digits.length === 10 ? `1${digits}` : digits;
+  // Agents' Kixie logins don't always match their ops login, so a confirmed Kixie email is remembered per agent.
+  const typed = str(req.body?.kixie_email, 200).trim().toLowerCase();
+  if (typed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(typed)) return res.status(400).json({ error: 'Enter a valid Kixie email address.', needs_kixie_email: true });
+  const saved = db.prepare('SELECT kixie_email FROM bot_kixie_emails WHERE agent_email = ?').get(actor.email)?.kixie_email;
+  const kixieEmail = typed || saved || actor.email;
   try {
     const response = await axios.post(`https://apig.kixie.com/app/event?apikey=${encodeURIComponent(key)}`, {
-      businessid: businessId, email: actor.email, target, displayname: 'AIRI QA test', eventname: 'call', apikey: key,
+      businessid: businessId, email: kixieEmail, target, displayname: 'AIRI QA test', eventname: 'call', apikey: key,
     }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000, validateStatus: () => true });
     if (response.status >= 200 && response.status < 300 && response.data?.success !== false) {
+      if (kixieEmail !== saved && kixieEmail !== actor.email) {
+        db.prepare(`INSERT INTO bot_kixie_emails (agent_email, kixie_email) VALUES (?, ?)
+          ON CONFLICT(agent_email) DO UPDATE SET kixie_email = excluded.kixie_email, updated_at = datetime('now')`).run(actor.email, kixieEmail);
+      }
       addEvent(row.id, actor, 'kixie_dial_requested', { variant });
       return res.json({ ok: true });
     }
-    console.error('[ai-bot-qc] Kixie dial rejected:', response.status, response.data?.msg || '');
-    const reason = response.data?.msg ? ` Kixie said: ${response.data.msg}` : '';
+    const msg = String(response.data?.msg || '');
+    console.error('[ai-bot-qc] Kixie dial rejected:', response.status, msg);
+    if (/email address/i.test(msg)) {
+      return res.status(502).json({ error: `Kixie could not find a user with ${kixieEmail}. Enter the email you log in to Kixie with.`, fallback: true, needs_kixie_email: true });
+    }
+    const reason = msg ? ` Kixie said: ${msg}` : '';
     res.status(502).json({ error: `Kixie did not place the call.${reason} Dial the number in Kixie instead.`, fallback: true });
   } catch (error) {
     console.error('[ai-bot-qc] Kixie dial failed:', error.message);

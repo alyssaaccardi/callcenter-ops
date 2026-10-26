@@ -1859,7 +1859,7 @@ function MyDay({ refreshKey, onOpenCall, onOpenTest }) {
 }
 
 function Metric({ label, value, icon: Icon, critical }) {
-  return <div className={`botqc-count${critical ? ' botqc-count--critical' : ''}`}><span className="botqc-count-icon"><Icon size={16} /></span><span className="botqc-count-copy"><strong>{Number(value).toLocaleString()}</strong><small>{label}</small></span></div>;
+  return <div className={`botqc-count${critical ? ' botqc-count--critical' : ''}`}><span className="botqc-count-icon"><Icon size={16} /></span><span className="botqc-count-copy"><strong>{typeof value === 'number' ? value.toLocaleString() : value}</strong><small>{label}</small></span></div>;
 }
 
 function ForwardingChecks({ checks, completed, calendar, loading, completing, reopening, notes, results, readOnly, onNoteChange, onResultChange, onComplete, onReopen, onRefresh }) {

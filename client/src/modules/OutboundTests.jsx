@@ -130,14 +130,16 @@ function Summary() {
     if (range.to) params.to = range.to;
     api.get('/api/ai-bot-qc/outbound-tests/insights', { params }).then(res => setInsights(res.data)).catch(() => {});
   }, [range]);
-  const exportCsv = async () => {
+  const exportCsv = async (today = false) => {
     setExporting(true);
     try {
-      const res = await api.get('/api/ai-bot-qc/outbound-tests/export', { responseType: 'blob', params: { ...(range.from && { from: range.from }), ...(range.to && { to: range.to }) } });
+      const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      const params = today ? { day } : { ...(range.from && { from: range.from }), ...(range.to && { to: range.to }) };
+      const res = await api.get('/api/ai-bot-qc/outbound-tests/export', { responseType: 'blob', params });
       const url = URL.createObjectURL(res.data);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `airi-outbound-tests-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `airi-outbound-tests-${today ? day : new Date().toISOString().slice(0, 10)}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     } catch { /* the button re-enables; nothing else to do */ } finally { setExporting(false); }
@@ -152,7 +154,8 @@ function Summary() {
           <label>Assigned from <input type="date" value={range.from} max={range.to || undefined} onChange={e => setRange(cur => ({ ...cur, from: e.target.value }))} /></label>
           <label>to <input type="date" value={range.to} min={range.from || undefined} onChange={e => setRange(cur => ({ ...cur, to: e.target.value }))} /></label>
           {(range.from || range.to) && <button type="button" className="obt-btn" onClick={() => setRange({ from: '', to: '' })}>All dates</button>}
-          <button type="button" className="obt-btn" disabled={exporting} onClick={exportCsv}>{exporting ? 'Exporting…' : 'Export results (CSV)'}</button>
+          <button type="button" className="obt-btn is-primary" disabled={exporting} onClick={() => exportCsv(true)}>{exporting ? 'Exporting…' : "Export today's results (CSV)"}</button>
+          <button type="button" className="obt-btn" disabled={exporting} onClick={() => exportCsv(false)}>{exporting ? 'Exporting…' : 'Export results (CSV)'}</button>
         </div>
       </div>
       <div className="obt-stats">
@@ -489,6 +492,8 @@ function TestDetail({ id, isAdmin, onBack }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [dialing, setDialing] = useState('');
+  const [needsKixieEmail, setNeedsKixieEmail] = useState(false);
+  const [kixieEmail, setKixieEmail] = useState('');
   const [callMessage, setCallMessage] = useState('');
   const { user } = useAuth();
   const viewerEmail = String(user?.email || '').toLowerCase();
@@ -523,10 +528,12 @@ function TestDetail({ id, isAdmin, onBack }) {
   const dial = async variant => {
     setDialing(variant);
     try {
-      await api.post(`${base}/call`, { variant });
+      await api.post(`${base}/call`, { variant, ...(kixieEmail.trim() && { kixie_email: kixieEmail.trim() }) });
       setCallMessage(`Kixie is calling you now. Answer in Kixie and it will dial ${test.phone}.`);
+      setNeedsKixieEmail(false);
       await load();
     } catch (err) {
+      setNeedsKixieEmail(Boolean(err.response?.data?.needs_kixie_email));
       setCallMessage(`${apiError(err, 'Could not start the call.')} Number: ${test.phone}`);
     } finally { setDialing(''); }
   };
@@ -553,6 +560,12 @@ function TestDetail({ id, isAdmin, onBack }) {
               onClick={() => dial(variant)}><Phone size={14} /> {dialing === variant ? 'Calling…' : `Call ${test.phone} with Kixie`}</button>
           </div>
           {callMessage && dialing === '' && <p className="obt-meta">{callMessage}</p>}
+          {needsKixieEmail && dialing === '' && (
+            <p className="obt-meta">
+              <input type="email" placeholder="Your Kixie login email" value={kixieEmail} onChange={e => setKixieEmail(e.target.value)} />
+              {' '}<button type="button" className="obt-btn" disabled={!kixieEmail.trim()} onClick={() => dial(variant)}>Save and call</button>
+            </p>
+          )}
           {test.scenarios[variant] && <p className="obt-scenario">Scenario: {fill(test.scenarios[variant], test)}</p>}
           {type.questions.map((q, i) => {
             const a = answers[variant]?.[i] || { choice: '', text: '' };
