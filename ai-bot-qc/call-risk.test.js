@@ -51,7 +51,7 @@ test('end-of-call report flags: fault, slow replies, early end, intake gaps', ()
   };
   const flags = callRiskFlags(call);
   assert.deepEqual(flags.map(f => f.code), ['fault', 'failed_action', 'slow_replies', 'ended_early', 'intake_gaps']);
-  assert.equal(flags[0].label, 'No caller audio');
+  assert.equal(flags[0].label, 'Call failed: no caller audio');
   assert.equal(riskLevel(flags), 2);
 });
 
@@ -62,4 +62,36 @@ test('low-severity flags do not raise priority and healthy calls are clean', () 
   assert.equal(riskLevel(low), 0);
   assert.deepEqual(callRiskFlags({ ended_at: 'x', diagnostics: { voice_to_voice_p95_ms: 4000, missing_required: { count: 0 } } }), []);
   assert.deepEqual(callRiskFlags({ diagnostics: { outcome: { fault: true } } }), []);
+});
+
+test('classification, billing and list-level flags', () => {
+  const { callRiskFlags } = require('./call-risk');
+  const row = { kind: 'inbound', started_at: '2026-10-25T14:00:00Z', ended_at: '2026-10-25T14:02:00Z', classification: null, billed_duration_seconds: 300 };
+  assert.deepEqual(callRiskFlags(row).map(f => f.code), ['unclassified', 'billing_edited']);
+  const clean = { ...row, classification: 'divorce', billed_duration_seconds: 120 };
+  assert.deepEqual(callRiskFlags(clean), []);
+  const long = { ...clean, ended_at: '2026-10-25T15:00:00Z', billed_duration_seconds: 3600 };
+  assert.deepEqual(callRiskFlags(long).map(f => f.code), ['long_call']);
+  const detail = { ...clean, duration_override_seconds: 60, billed_duration_seconds: 120, classification_detail: { confidence: 0.5, needs_review: false }, diagnostics: { call_type_decision: { corrections: [{ from: 'a', to: 'b' }] } } };
+  assert.deepEqual(callRiskFlags(detail).map(f => f.code), ['low_confidence', 'call_type_changed', 'billing_override']);
+  assert.deepEqual(callRiskFlags({ ...clean, classification_detail: { confidence: 0.98, needs_review: false } }), []);
+});
+
+test('lead delivery flags', () => {
+  const { leadFlags } = require('./call-risk');
+  const ended = new Date(Date.now() - 30 * 60000).toISOString();
+  const call = { ended_at: ended };
+  const failed = leadFlags(call, { destinations: [{ type: 'email', status: 'failed', permanent: true, error: 'bounced' }, { status: 'delivered' }] });
+  assert.equal(failed.flags[0].code, 'lead_failed');
+  assert.equal(failed.flags[0].severity, 'high');
+  const retry = leadFlags(call, { destinations: [{ status: 'failed', permanent: false, error: 'timeout' }] });
+  assert.equal(retry.flags[0].severity, 'medium');
+  const stuck = leadFlags(call, { destinations: [{ status: 'pending' }] });
+  assert.deepEqual(stuck.flags.map(f => f.code), ['lead_pending']);
+  assert.equal(stuck.recheck, true);
+  const fresh = leadFlags({ ended_at: new Date().toISOString() }, { destinations: [{ status: 'pending' }] });
+  assert.deepEqual(fresh.flags, []);
+  assert.equal(fresh.recheck, true);
+  assert.deepEqual(leadFlags(call, null).flags, []);
+  assert.deepEqual(leadFlags(call, { destinations: [{ status: 'delivered' }, { status: 'disabled' }] }).flags, []);
 });

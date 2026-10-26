@@ -180,21 +180,23 @@ Ordered roughly by priority.
 
 ### Risk flags
 
-`ai-bot-qc/call-risk.js` derives flags from the Staff API. Flags never set Critical; they show as badges, and high/medium flags raise queue priority. The "Risk flagged" filter (`risk=1`) lists every call with any flag.
+`ai-bot-qc/call-risk.js` derives flags from the Staff API. Every flag has a plain-language `label`, a `help` sentence saying what it means and what to check, and a specific `detail`. The queue shows the label with the help as a tooltip; the review panel lists each flag in full under "Why this call was flagged". Flags never set Critical; high/medium flags raise queue priority. The "Has a badge" filter (`risk=1`) lists every call with any flag.
 
-| Flag | Severity | Source |
+| Flag (label) | Severity | Source |
 |---|---|---|
-| Fault (No caller audio, DID not recognized, Account configuration unavailable, Call error) | High | `diagnostics.outcome.fault` |
+| Call failed: no caller audio / number not recognized / account setup missing / system error | High | `diagnostics.outcome.fault` |
 | Transfer failed | High | `legs[].outcome = failed` |
-| Transfer declined / not answered / voicemail / never connected, or connected with no person detected | Medium | `legs[]`, `transfer.answered` |
-| Failed bot action | Medium | `failed_action_count` |
-| Slow replies | Medium | `diagnostics.voice_to_voice_p95_ms` above `AI_BOT_QC_SLOW_REPLY_MS` (default 5000) |
-| Ended early | Low (no priority change) | `diagnostics.ended_prematurely` |
-| Intake incomplete | Low (no priority change) | `diagnostics.missing_required.count` |
+| Transfer declined / no answer / hit voicemail / never connected / may have hit voicemail | Medium | `legs[]`, `transfer.answered` |
+| Bot action failed | Medium | `failed_action_count` |
+| Bot was slow to reply | Medium | `diagnostics.voice_to_voice_p95_ms` above `AI_BOT_QC_SLOW_REPLY_MS` (default 5000) |
+| Call type not identified | Medium | `classification` is null |
+| Unsure of call type | Medium | `classification_detail.confidence` below `AI_BOT_QC_LOW_CONFIDENCE` (default 0.65) or `needs_review` |
+| Billed time differs from call time; Billing time edited by admin; Call stayed open after hang-up | Medium | `billed_duration_seconds` vs measured length; `duration_override_seconds`; `agent_duration_ms` |
+| Lead can't be delivered (permanent failure) | High | `GET /v1/calls/{id}/lead` destination `failed` with `permanent` |
+| Lead not delivered (will retry); Lead not sent yet (pending over 15 minutes) | Medium | lead destination `failed` / `pending` |
+| Call ended early; Missing info; Call type changed mid-call; Very long call (over `AI_BOT_QC_LONG_CALL_SECONDS`, default 1800) | Low (badge only) | `ended_prematurely`, `missing_required`, `call_type_decision.corrections`, call length |
 
-Fault, slow-reply, early-end and intake flags come from the call list, so they need no extra request. Transfer flags need the call detail, which is fetched only for calls whose outcome is `transferred` or that have failed actions (25 per sync, due to the detail rate limit). "Rang for" is derived from leg timestamps and may be blank. The API only reports a p95 reply time, not per-turn pauses. Changing the rules means bumping `risk_rules_version` in `call-sync.js` so existing calls are re-evaluated.
-
-Not implemented yet: classification confidence, lead delivery failures, and billing checks.
+Every ended call has its detail and lead fetched, newest first, 40 per 2-minute sync (call detail is limited to 30 requests a minute), so a large backlog fills in over several syncs. The key needs the Leads scope for lead flags; without it lead flags are skipped. A pending lead is re-checked for 2 hours. "Rang for" on transfers is derived from leg timestamps and may be blank. The API only reports a p95 reply time, not individual pauses. Changing the rules means bumping `risk_rules_version` in `call-sync.js` so existing calls are re-evaluated.
 | `HUBSPOT_PRIVATE_APP_TOKEN` | AIRI pipeline lookups (account name, active status, forwarding number). No longer used for the outbound test account list. |
 | `STAFF_API_BASE`, `STAFF_API_KEY` | Staging AI bot Staff API (read-only): outbound test accounts/DIDs and staging call details. Needs Accounts, Calls, Transcripts and Recordings scopes. Server-side only. |
 | `KIXIE_API_KEY`, `KIXIE_BUSINESS_ID` | Kixie click-to-call (Make a Call API). |

@@ -116,9 +116,31 @@ function wavBlob(channelData, sampleRate) {
   return new Blob([buffer], { type: 'audio/wav' });
 }
 
+const RISK_SEVERITY_TEXT = { high: 'Serious problem', medium: 'Check this call', low: 'For information' };
+
+function riskTip(flag) {
+  return [flag.help, flag.detail].filter(Boolean).join(' ') || flag.label;
+}
+
 function RiskBadges({ flags }) {
   if (!flags?.length) return null;
-  return <span className="botqc-risk-badges">{flags.map(flag => <span key={`${flag.code}-${flag.target_id || ''}`} className={`botqc-risk-badge botqc-risk-badge--${flag.severity}`} title={flag.detail || flag.label}>{flag.label}</span>)}</span>;
+  return <span className="botqc-risk-badges">{flags.map(flag => <span key={`${flag.code}-${flag.target_id || ''}`} className={`botqc-risk-badge botqc-risk-badge--${flag.severity}`} title={`${RISK_SEVERITY_TEXT[flag.severity] || ''}: ${riskTip(flag)}`}>{flag.label}</span>)}</span>;
+}
+
+function RiskExplanations({ flags }) {
+  if (!flags?.length) return null;
+  return (
+    <section className="botqc-risk-panel" aria-label="Why this call was flagged">
+      <div className="botqc-section-heading">WHY THIS CALL WAS FLAGGED</div>
+      {flags.map(flag => (
+        <div className={`botqc-risk-item botqc-risk-item--${flag.severity}`} key={`${flag.code}-${flag.target_id || ''}`}>
+          <div><span className={`botqc-risk-badge botqc-risk-badge--${flag.severity}`}>{flag.label}</span><small>{RISK_SEVERITY_TEXT[flag.severity]}</small></div>
+          {flag.help && <p>{flag.help}</p>}
+          {flag.detail && <p className="botqc-risk-detail">{flag.detail}</p>}
+        </div>
+      ))}
+    </section>
+  );
 }
 
 function artifactUrl(call, bucket, key, download = false) {
@@ -1014,13 +1036,14 @@ export default function AiBotQc() {
                     <option value="mine">My assigned calls</option><option value="all">All calls</option>
                   </SelectField>
                   <SelectField label="Status" value={queueStatus} onChange={event => updateQueueStatus(event.target.value)}>
-                    <option value="all">All calls</option><option value="unreviewed">Unreviewed</option><option value="in_review">In progress</option><option value="reviewed">Reviewed</option><option value="critical">Critical</option><option value="risk">Risk flagged</option>
+                    <option value="all">All calls</option><option value="unreviewed">Unreviewed</option><option value="in_review">In progress</option><option value="reviewed">Reviewed</option><option value="critical">Critical</option><option value="risk">Has a badge</option>
                   </SelectField>
                   {(internalTestTotal > 0 || internalTestFilter !== 'hide') && <SelectField label="Internal tests" value={internalTestFilter} onChange={event => updateInternalTestFilter(event.target.value)}>
                     <option value="hide">Hide</option><option value="include">Include</option><option value="only">Only</option>
                   </SelectField>}
                 </div>
               </div>
+              <div className="botqc-risk-legend" aria-label="Badge colors"><span className="botqc-risk-badge botqc-risk-badge--high">Red</span> serious problem <span className="botqc-risk-badge botqc-risk-badge--medium">Amber</span> check this call <span className="botqc-risk-badge botqc-risk-badge--low">Grey</span> for information. Hover a badge to see what it means. Badges never mark a call Critical by themselves.</div>
               <div className="botqc-table-scroll">
                 <table className="botqc-queue-table">
                   <thead><tr>
@@ -1210,7 +1233,7 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
       </div>
 
       <div className="botqc-recordings">
-<RiskBadges flags={call.risk_flags} />
+<RiskExplanations flags={call.risk_flags} />
         <div className="botqc-section-heading"><Headphones size={15} /> RECORDING{audioFiles.length === 1 ? '' : 'S'} <span>{audioFiles.length}</span></div>
         {bulletinPosts?.map((post, index) => (
           <div className={`botqc-review-bulletin botqc-review-bulletin--rank-${index + 1}`} key={post.id}>

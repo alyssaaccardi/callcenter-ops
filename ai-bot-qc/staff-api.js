@@ -107,6 +107,17 @@ async function getCall(id) {
   return body.call || body;
 }
 
+// A call that filed no lead answers 404; that is reported as null.
+async function getLead(id) {
+  try {
+    const body = await get(client(), `/v1/calls/${encodeURIComponent(id)}/lead`);
+    return body.lead || body;
+  } catch (error) {
+    if (error.response?.status === 404) return null;
+    throw error;
+  }
+}
+
 // Pages through /v1/calls (newest first). `complete` is false when maxPages stopped the walk early.
 async function listCalls(params, { maxPages = 50 } = {}) {
   const http = client();
@@ -155,4 +166,4 @@ async function recordingUrl(id) {
   return url;
 }
 
-module.exports = { listStagingAccounts, listAccountSummaries, listCalls, recentCalls, getCall, recordingUrl, openRecording, last10 };
+module.exports = { listStagingAccounts, listAccountSummaries, listCalls, recentCalls, getCall, getLead, recordingUrl, openRecording, last10 };

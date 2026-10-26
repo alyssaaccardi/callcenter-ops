@@ -429,3 +429,11 @@ button.botqc-count:hover { border-color: var(--border-strong); transform: transl
 .botqc-risk-badge { padding: 1px 7px; border-radius: 10px; font-size: 10px; font-weight: 700; background: #fef3c7; color: #92400e; }
 .botqc-risk-badge--high { background: #fde8e8; color: #b42318; }
 .botqc-risk-badge--low { background: #eef2f6; color: #52606d; }
+
+.botqc-risk-legend { padding: 8px 14px; font-size: 11px; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.botqc-risk-panel { margin: 10px 0; padding: 10px 12px; border: 1px solid #e5e9f0; border-radius: 10px; background: #fafbfd; }
+.botqc-risk-item { padding: 8px 0; border-top: 1px solid #eef1f5; }
+.botqc-risk-item:first-of-type { border-top: 0; }
+.botqc-risk-item small { margin-left: 8px; font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; }
+.botqc-risk-item p { margin: 4px 0 0; font-size: 12px; line-height: 1.4; }
+.botqc-risk-item .botqc-risk-detail { color: var(--text-muted); }

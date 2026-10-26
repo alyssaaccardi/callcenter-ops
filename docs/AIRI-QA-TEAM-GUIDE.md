@@ -41,7 +41,13 @@ The internal-test caller list is shared by all admins. It is not a personal pref
 4. Opening AIRI QA syncs before loading the queue. Use **Sync new recordings** to request a fresh sync.
 5. Calls indexed before the move to the Staff API (from the old recording archive) stay in the queue and remain playable.
 
-**Risk badges:** calls with a problem show a badge in the queue and review panel, and the **Risk flagged** status filter lists only those calls. Red badges are faults (no caller audio, DID not recognized, account configuration unavailable, call error) and failed transfers. Amber badges are other transfer problems (declined, unanswered, voicemail), failed bot actions, and slow replies (callers waited over 5 seconds on most turns). Grey badges (ended early, intake incomplete) are informational and do not change queue order. Red and amber calls sort higher, but nothing is marked Critical automatically.
+**Risk badges:** a call with a problem shows a badge in the queue, and opening it explains each badge in plain words under "Why this call was flagged". Hover a badge in the queue to read the same explanation. Use the **Has a badge** status filter to see only flagged calls.
+
+- **Red = serious problem:** the call failed (no caller audio, number not recognized, account setup missing, system error), a transfer failed, or a lead can't be delivered.
+- **Amber = check this call:** a transfer was declined, unanswered or hit voicemail; a bot action failed; the bot was slow to reply (callers waited over 5 seconds on most turns); the call type is unknown or uncertain; the billed time looks wrong or was edited; or a lead has not been sent.
+- **Grey = for information:** call ended early, missing intake answers, call type changed mid-call, or a very long call. These do not change queue order.
+
+Red and amber calls sort higher in the queue. Nothing is marked Critical automatically; that is still your call after listening.
 
 ### Caller Number And Internal Test Calls
 
