@@ -12,7 +12,7 @@ AIRI is the AI phone-answering bot. This platform lets QA Agents review the bot'
 
 | Capability | Summary |
 |---|---|
-| Review queue | Every completed inbound bot call is indexed from the Answering AI Staff API. QA Agents open a call, listen, rate caller happiness, add tags and notes, and click **Complete review**. |
+| Review queue | Every inbound bot call recording is indexed from the iDrive e2 archive. QA Agents open a call, listen, rate caller happiness, add tags and notes, and click **Complete review**. |
 | Assignment | Any QA user can multi-select calls and assign them to any QA Agent. Agents default to a "My assigned calls" filter and can switch to all calls. |
 | Needs Follow Up / Critical Flags | A reviewer explicitly marks a call Needs Follow Up, or flags it Critical with required issue details. Admins resolve critical flags, which moves the call back to Reviewed. |
 | Forwarding checks | An account with no calls for 36 business hours appears in the forwarding queue. A QA Agent tests the number and records PASS (reached AIRI) or FAIL. A FAIL automatically raises a Critical flag. |
@@ -30,7 +30,7 @@ AIRI is the AI phone-answering bot. This platform lets QA Agents review the bot'
 | Backend | Node.js (Express 4). Single process; routes for this module live in `ai-bot-qc/routes.js`, mounted at `/api/ai-bot-qc`. |
 | Database | SQLite via `better-sqlite3`, file `ai-bot-qc.db`, WAL mode. |
 | Auth | Google OAuth 2.0 (Passport) with server-side sessions (`express-session`). |
-| Call source | Answering AI Staff API (`ai-bot-qc/staff-api.js`, `call-sync.js`). Legacy calls indexed earlier from the iDrive e2 archive remain playable through read-only S3 access. |
+| Call source | iDrive e2 recording archive (read-only S3), synced every 10 minutes and on demand. Staff API (staging) calls already in the database are kept but hidden from the queue and counts (`source = 'staff_api'`). |
 | Integrations | HubSpot CRM API (deals search, AIRI pipeline), Slack incoming webhook, Google OAuth, Google Gemini API (bulletin text polish; `GEMINI_API_KEY`). |
 | Hosting | DigitalOcean VPS, PM2 process `ccops`, domain `ops.answeringlegal.com`. |
 | Security middleware | `helmet` (CSP), `cors`, `express-rate-limit` (auth routes only). |
@@ -110,8 +110,8 @@ Base path: `/api/ai-bot-qc`. All require a logged-in session with `ai_bot_qc`, `
 | Method | Path | Access | Purpose |
 |---|---|---|---|
 | GET | `/artifact` | QA (download: Admin) | Streams an audio/transcript file with HTTP Range support. The key must belong to an indexed call. |
-| POST | `/sync` | QA | Pull new and updated calls from the Staff API (503 if `STAFF_API_KEY` is unset). |
-| GET | `/status` | QA | Staff API configuration health. |
+| POST | `/sync` | QA | Index new recordings from the iDrive e2 archive (503 if credentials are unset). |
+| GET | `/status` | QA | iDrive e2 configuration health. |
 | GET | `/calls/:id/audio` | QA | Streams a Staff API recording with Range support (`?download=1` is admin-only). |
 | GET | `/queue?risk=1`, `sort_by=risk` | QA | Transfer-risk filter and sort. |
 | GET | `/account-names` | QA | UUID to account name map. Triggers resolution for new folders. |
@@ -179,7 +179,7 @@ Ordered roughly by priority.
 | `AI_BOT_QC_STAFF_API_KEY`, `AI_BOT_QC_STAFF_API_BASE` | Staff API access for the review queue: the production (live calls) URL and key, scopes Calls, Accounts, Transcripts, Recordings, Leads. If unset, falls back to `STAFF_API_KEY`/`STAFF_API_BASE`. |
 | `STAFF_API_KEY`, `STAFF_API_BASE` | Staging Staff API, used by the outbound tests only (unless the `AI_BOT_QC_` settings above are unset). |
 | `AI_BOT_QC_BACKFILL_DAYS` | Days of history pulled on the first sync (default 7). |
-| `IDRIVE_E2_*` | Optional read-only access to the legacy archive, only needed to play calls indexed before the Staff API migration. |
+| `IDRIVE_E2_*` | Read-only access to the recording archive that feeds the review queue. |
 
 ### Risk flags
 

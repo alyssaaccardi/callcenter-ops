@@ -420,7 +420,7 @@ export default function AiBotQc() {
         ? api.get('/api/ai-bot-qc/dashboard', { params: { period: nextPeriod, reviewer_email: nextReviewer } })
         : api.get('/api/ai-bot-qc/queue-summary'),
     ]);
-    setBucket(statusResult.data.configured ? 'Answering AI Staff API' : '');
+    setBucket(statusResult.data.bucket || '');
     setDashboard(isAdmin ? dashboardResult.data : { counts: dashboardResult.data.counts || {} });
     setDashboardPeriod(nextPeriod);
     setDashboardReviewer(nextReviewer);
@@ -651,7 +651,7 @@ export default function AiBotQc() {
           const availableAgents = agentsResult.data.agents || [];
           setAgents(availableAgents);
           setAssignmentTarget(current => current || availableAgents.find(agent => agent.email === user?.email)?.email || '');
-        setBucket(statusResult.data.configured ? 'Answering AI Staff API' : '');
+        setBucket(statusResult.data.bucket || '');
         setDashboard(isAdmin ? dashboardResult.data : { counts: dashboardResult.data.counts || {} });
         // A failed sync must not block the queue from loading.
         await api.post('/api/ai-bot-qc/sync', null, { params: { bucket: statusResult.data.bucket } }).catch(() => {});
@@ -1036,7 +1036,7 @@ export default function AiBotQc() {
           <p>Review every call once, keep feedback saved, surface serious issues.</p>
         </div>
         <div className="botqc-header-actions">
-          <div className="botqc-bucket-name"><span>Call source</span>{bucket || 'Not connected'}</div>
+          <div className="botqc-bucket-name"><span>Recording archive</span>{bucket || 'Not connected'}</div>
           <button className="botqc-icon-button" onClick={() => refresh(true)} disabled={loading || syncing} title="Sync new recordings" aria-label="Sync new recordings">
             <RefreshCw size={16} className={syncing ? 'botqc-spin' : ''} />
           </button>

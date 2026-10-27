@@ -5,11 +5,12 @@ const rateLimit = require('express-rate-limit');
 const {
   S3Client,
   ListBucketsCommand,
+  ListObjectsV2Command,
   GetObjectCommand,
 } = require('@aws-sdk/client-s3');
 const { requireRole, listUsers, isRecordingOnly } = require('../auth');
-const { db, addEvent } = require('./db');
-const { syncCalls, refreshCallRisk } = require('./call-sync');
+const { db, upsertCall, addEvent } = require('./db');
+const { refreshCallRisk } = require('./call-sync');
 const staffApi = require('./staff-api');
 const { createBusinessHours } = require('./business-time');
 
@@ -39,6 +40,8 @@ const BUSINESS_TIMEZONE = (() => {
 const businessHours = createBusinessHours(BUSINESS_TIMEZONE, BUSINESS_DAY_OPEN_HOUR, BUSINESS_DAY_CLOSE_HOUR, FORWARDING_TEST_BUSINESS_HOURS);
 const CLAIM_MINUTES = 2;
 const IS_INTERNAL_TEST_SQL = 'EXISTS (SELECT 1 FROM bot_qc_excluded_phone_numbers excluded WHERE excluded.phone_number = c.caller_phone)';
+// The review queue reviews recordings from the iDrive archive; Staff API (staging) calls are kept but hidden.
+const ARCHIVE_ONLY_SQL = "c.source = 'archive'";
 const NOT_INTERNAL_TEST_SQL = 'NOT EXISTS (SELECT 1 FROM bot_qc_excluded_phone_numbers excluded WHERE excluded.phone_number = c.caller_phone)';
 let client;
 let bucketCache = { expires: 0, buckets: [] };
@@ -398,7 +401,23 @@ async function resolveBucket(req) {
   return buckets.includes(requestedBucket) ? requestedBucket : null;
 }
 
-// Legacy archive recordings (calls indexed before the Staff API switch) stay playable from iDrive e2.
+async function listAll(bucket, input) {
+  const s3 = getClient();
+  const entries = [];
+  let continuationToken;
+  do {
+    const page = await s3.send(new ListObjectsV2Command({
+      Bucket: bucket,
+      ...input,
+      ContinuationToken: continuationToken,
+    }));
+    entries.push(...(page.Contents || []));
+    if (input.Delimiter) entries.push(...(page.CommonPrefixes || []));
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return entries;
+}
+
 async function readObjectText(bucket, key) {
   const result = await getClient().send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   let text = '';
@@ -411,6 +430,73 @@ function actorFor(req) {
     email: req.user.email || 'dev@local',
     name: req.user.name || req.user.email || 'Unknown reviewer',
   };
+}
+
+function callId(bucket, metadataKey) {
+  return require('crypto').createHash('sha256').update(`${bucket}:${metadataKey}`).digest('hex');
+}
+
+async function indexCall(bucket, customer, date, metadataObject, audioObjects) {
+  const metadataKey = metadataObject.Key;
+  const metadata = JSON.parse(await readObjectText(bucket, metadataKey));
+  const recordingLocations = (Array.isArray(metadata.files) ? metadata.files : [])
+    .map(file => String(file?.location || '').split('?')[0]);
+  const audioKeys = audioObjects
+    .filter(object => recordingLocations.some(location => location.endsWith(object.Key)))
+    .map(object => object.Key);
+  const key = metadataKey;
+  const id = callId(bucket, key);
+  upsertCall({
+    id,
+    bucket,
+    object_key: key,
+    customer,
+    caller_phone: phoneFromMetadata(metadata, 'from'),
+    caller_phone_checked_at: new Date().toISOString(),
+    destination_phone: phoneFromMetadata(metadata, 'to'),
+    destination_phone_checked_at: new Date().toISOString(),
+    call_date: date,
+    room_name: String(metadata.room_name || ''),
+    room_id: String(metadata.room_id || ''),
+    egress_id: String(metadata.egress_id || ''),
+    started_at_ns: Number.isFinite(Number(metadata.started_at)) ? Math.trunc(Number(metadata.started_at)) : null,
+    ended_at_ns: Number.isFinite(Number(metadata.ended_at)) ? Math.trunc(Number(metadata.ended_at)) : null,
+    recording_keys: JSON.stringify(audioKeys),
+    metadata_key: key,
+    metadata_last_modified: metadataObject.LastModified?.toISOString?.() || null,
+  });
+  return id;
+}
+
+async function syncArchive(bucket) {
+  const objects = await listAll(bucket, { Prefix: ARCHIVE_PREFIX });
+  const metadataObjects = objects.filter(object => object.Key && /\.json$/i.test(object.Key));
+  const audioByFolder = new Map();
+  for (const object of objects) {
+    if (!object.Key || !/\.(ogg|mp3|wav|m4a|opus|webm|aac)$/i.test(object.Key)) continue;
+    const segments = object.Key.split('/');
+    if (segments.length < 4) continue;
+    const folder = segments.slice(0, -1).join('/');
+    if (!audioByFolder.has(folder)) audioByFolder.set(folder, []);
+    audioByFolder.get(folder).push(object);
+  }
+  let indexed = 0;
+  for (const object of metadataObjects) {
+    const segments = object.Key.slice(ARCHIVE_PREFIX.length).split('/');
+    if (segments.length < 3) continue;
+    const [customer, date] = segments;
+    if (!safeSegment(customer) || !safeSegment(date)) continue;
+    const existing = db.prepare('SELECT metadata_last_modified, caller_phone_checked_at, destination_phone_checked_at FROM bot_calls WHERE object_key = ?').get(object.Key);
+    const modified = object.LastModified?.toISOString?.() || null;
+    if (existing && existing.metadata_last_modified === modified && existing.caller_phone_checked_at && existing.destination_phone_checked_at) continue;
+    try {
+      await indexCall(bucket, customer, date, object, audioByFolder.get(`${ARCHIVE_PREFIX}${customer}/${date}`) || []);
+      indexed += 1;
+    } catch (error) {
+      console.error('[ai-bot-qc] sidecar skipped:', object.Key, error.message);
+    }
+  }
+  return { indexed, object_count: objects.length };
 }
 
 function callRow(row) {
@@ -627,10 +713,18 @@ router.delete('/excluded-phone-numbers/:id', requireRole(...QC_ADMIN_ROLES), (re
 });
 
 router.get('/status', (req, res) => {
+  const config = storageConfig();
   res.json({
-    configured: staffApi.qcConfigured(),
-    source: 'staff_api',
-    missing: staffApi.qcConfigured() ? [] : ['AI_BOT_QC_STAFF_API_KEY'],
+    configured: Boolean(config.accessKeyId && config.secretAccessKey),
+    bucket: config.bucket || '',
+    bucketDiscovery: !config.bucket,
+    archivePrefix: ARCHIVE_PREFIX,
+    endpoint: ENDPOINT,
+    region: REGION,
+    missing: [
+      !config.accessKeyId && 'IDRIVE_E2_ACCESS_KEY_ID',
+      !config.secretAccessKey && 'IDRIVE_E2_SECRET_ACCESS_KEY',
+    ].filter(Boolean),
   });
 });
 
@@ -719,19 +813,26 @@ router.get('/bulletin/history', requireRole(...QC_ADMIN_ROLES), (req, res) => {
   res.json({ history });
 });
 
+let archiveSyncRun = null;
+function runArchiveSync(bucket) {
+  if (!archiveSyncRun) archiveSyncRun = syncArchive(bucket).finally(() => { archiveSyncRun = null; });
+  return archiveSyncRun;
+}
+
 router.post('/sync', async (req, res) => {
-  if (!staffApi.qcConfigured()) return res.status(503).json({ error: 'AI_BOT_QC_STAFF_API_KEY is not configured', configured: false });
+  if (!needStorage(res)) return;
   try {
-    res.json({ ok: true, ...(await syncCalls()) });
+    const bucket = await resolveBucket(req);
+    if (!bucket) return res.status(400).json({ error: 'Choose a valid bucket first' });
+    res.json({ ok: true, ...(await runArchiveSync(bucket)) });
   } catch (error) {
-    console.error('[ai-bot-qc] call sync failed:', error.response?.status || error.message);
-    res.status(502).json({ error: 'Could not sync calls from the Answering AI Staff API' });
+    storageFailure(res, error, 'Could not sync recordings from iDrive e2', 's3:ListBucket and s3:GetObject');
   }
 });
 
 router.get('/queue', async (req, res) => {
   releaseExpiredClaims();
-  const where = [];
+  const where = [ARCHIVE_ONLY_SQL];
   const params = [];
   const status = ['unreviewed', 'in_review', 'reviewed'].includes(req.query.status) ? req.query.status : '';
   if (status) { where.push('r.status = ?'); params.push(status); }
@@ -1331,8 +1432,8 @@ async function countableCallFilter() {
     console.error('[ai-bot-qc] HubSpot AIRI status lookup failed for counts:', error.response?.status || error.message);
   }
   return inactive.length
-    ? { sql: `${NOT_INTERNAL_TEST_SQL} AND c.customer NOT IN (SELECT value FROM json_each(?))`, params: [JSON.stringify(inactive)] }
-    : { sql: NOT_INTERNAL_TEST_SQL, params: [] };
+    ? { sql: `${ARCHIVE_ONLY_SQL} AND ${NOT_INTERNAL_TEST_SQL} AND c.customer NOT IN (SELECT value FROM json_each(?))`, params: [JSON.stringify(inactive)] }
+    : { sql: `${ARCHIVE_ONLY_SQL} AND ${NOT_INTERNAL_TEST_SQL}`, params: [] };
 }
 
 router.get('/queue-summary', async (req, res) => {
@@ -1362,10 +1463,10 @@ router.get('/my-day', (req, res) => {
     FROM bot_reviews r WHERE lower(r.reviewer_email) = ?`)
     .get(today.start, today.end, today.start, today.end, today.start, today.end, lowerEmail);
   const open = db.prepare(`SELECT COUNT(*) AS n FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
-    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${NOT_INTERNAL_TEST_SQL}`).get(lowerEmail).n;
+    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${ARCHIVE_ONLY_SQL} AND ${NOT_INTERNAL_TEST_SQL}`).get(lowerEmail).n;
   const openCalls = db.prepare(`SELECT c.id, c.customer, c.call_date, r.status, r.critical, r.assigned_at
     FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
-    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${NOT_INTERNAL_TEST_SQL}
+    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${ARCHIVE_ONLY_SQL} AND ${NOT_INTERNAL_TEST_SQL}
     ORDER BY r.critical DESC, r.assigned_at ASC LIMIT 25`).all(lowerEmail)
     .map(row => ({ ...row, hubspot_account_name: hubspotRecordForCustomer(row.customer, hubspotAiriCache.records)?.displayName || '' }));
   let outboundTasks = [];
@@ -1571,11 +1672,11 @@ setInterval(() => {
   notifyDueForwardingChecks().catch(error => console.error('[ai-bot-qc] forwarding notice failed:', error.message));
 }, 10 * 60_000).unref();
 
-// Keep the queue current without anyone opening the page; the shared run makes overlapping triggers safe.
-if (staffApi.qcConfigured()) {
-  const runSync = () => syncCalls().catch(error => console.error('[ai-bot-qc] call sync failed:', error.response?.status || error.message));
-  setTimeout(runSync, 5000).unref();
-  setInterval(runSync, 2 * 60_000).unref();
+// Keep the queue current without anyone opening the page.
+if (getClient() && storageConfig().bucket) {
+  const runSync = () => runArchiveSync(storageConfig().bucket).catch(error => console.error('[ai-bot-qc] iDrive sync failed:', error.Code || error.message));
+  setTimeout(runSync, 10_000).unref();
+  setInterval(runSync, 10 * 60_000).unref();
 }
 
 module.exports = router;
