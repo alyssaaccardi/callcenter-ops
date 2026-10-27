@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../api';
+import ZendeskAgentActivity from './ZendeskAgentActivity';
 
 const POLL_MS = 60_000;
 const PAGE_SIZE = 100;
@@ -218,6 +219,8 @@ export default function ZendeskAdminOverview() {
               </tbody>
             </table>
           </div>
+
+          <ZendeskAgentActivity />
 
           <div className="card" id="ticket-activity" style={{ padding: 0, overflow: 'hidden', scrollMarginTop: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: 16 }}>

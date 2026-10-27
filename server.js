@@ -2585,6 +2585,179 @@ async function buildZendeskAdminOverview() {
   };
 }
 
+// ─── Zendesk: Agent Activity (who is working tickets) ────────────────────────
+const ZD_AGENT_ACTIVITY_TTL = 2 * 60 * 1000;
+const ZD_AGENT_ACTIVITY_PERIODS = { today: 0, yesterday: 1, '7d': 6 };
+const zendeskAgentActivityCache = new Map();
+const zendeskAgentActivityPending = new Map();
+let zendeskAuditEventCache = new Map();
+
+function easternDayStartUtc(daysAgo) {
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const offsetAt = ms => {
+    const p = Object.fromEntries(fmt.formatToParts(new Date(ms)).map(x => [x.type, x.value]));
+    return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - ms;
+  };
+  const p = Object.fromEntries(fmt.formatToParts(new Date()).map(x => [x.type, x.value]));
+  const target = Date.UTC(p.year, p.month - 1, Number(p.day) - daysAgo);
+  return new Date(target - offsetAt(target - offsetAt(target)));
+}
+
+async function zdGetWithRetry(url, config) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await axios.get(url, config);
+    } catch (error) {
+      if (error.response?.status !== 429 || attempt >= 2) throw error;
+      const wait = Math.min(Number(error.response.headers?.['retry-after']) || 5, 30);
+      await new Promise(resolve => setTimeout(resolve, wait * 1000));
+    }
+  }
+}
+
+// Compact per-audit actions: reply (public comment), note (internal comment), solve, update (any other field change).
+function summarizeAuditActions(audits) {
+  return audits.map(audit => {
+    const actions = [];
+    for (const event of audit.events || []) {
+      if (event.type === 'Comment') actions.push(event.public === true ? 'reply' : 'note');
+      else if (event.type === 'Change') {
+        if (event.field_name === 'status' && event.value === 'solved') actions.push('solve');
+        else actions.push('update');
+      }
+    }
+    return { at: audit.created_at, authorId: String(audit.author_id), actions };
+  }).filter(entry => entry.actions.length);
+}
+
+async function buildZendeskAgentActivity(period) {
+  const headers = zdHeaders();
+  const base = zdBase();
+  const start = easternDayStartUtc(ZD_AGENT_ACTIVITY_PERIODS[period]);
+  const end = period === 'yesterday' ? easternDayStartUtc(0) : new Date();
+
+  const agents = new Map();
+  for (const role of ['agent', 'admin']) {
+    for (const user of await fetchZendeskPaginated(`${base}/users.json`, headers, { role, per_page: 100 })) {
+      if (user.active !== false && !user.suspended) agents.set(String(user.id), user);
+    }
+  }
+
+  // Search by date is coarse (day granularity), so start a day early and filter by audit timestamp.
+  const searchFrom = new Date(start.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const tickets = [];
+  let count = 0;
+  for (let page = 1; page <= 10; page++) {
+    const response = await zdGetWithRetry(`${base}/search.json`, {
+      headers, params: { query: `type:ticket updated>=${searchFrom}`, per_page: 100, page, sort_by: 'updated_at', sort_order: 'desc' },
+    });
+    count = response.data?.count ?? count;
+    const rows = response.data?.results || [];
+    tickets.push(...rows);
+    if (rows.length < 100 || tickets.length >= count) break;
+  }
+
+  const eventsByTicket = new Map();
+  const toLoad = [];
+  for (const ticket of tickets) {
+    const cached = zendeskAuditEventCache.get(ticket.id);
+    if (cached?.updatedAt === ticket.updated_at) eventsByTicket.set(ticket.id, cached.entries);
+    else toLoad.push(ticket);
+  }
+  let failed = 0;
+  await mapWithConcurrency(toLoad, 5, async ticket => {
+    try {
+      const entries = summarizeAuditActions(await (async () => {
+        const audits = [];
+        let url = `${base}/tickets/${ticket.id}/audits.json`;
+        let params = { per_page: 100 };
+        while (url) {
+          const response = await zdGetWithRetry(url, { headers, params });
+          audits.push(...(response.data?.audits || []));
+          url = response.data?.next_page || null;
+          params = {};
+        }
+        return audits;
+      })());
+      eventsByTicket.set(ticket.id, entries);
+      zendeskAuditEventCache.set(ticket.id, { updatedAt: ticket.updated_at, entries });
+    } catch (error) {
+      failed++;
+    }
+  });
+  const liveIds = new Set(tickets.map(ticket => ticket.id));
+  zendeskAuditEventCache = new Map([...zendeskAuditEventCache].filter(([id]) => liveIds.has(id)));
+
+  const stats = new Map();
+  const feed = [];
+  const ticketById = new Map(tickets.map(ticket => [ticket.id, ticket]));
+  for (const [ticketId, entries] of eventsByTicket) {
+    for (const entry of entries) {
+      const at = new Date(entry.at);
+      const agent = agents.get(entry.authorId);
+      if (!agent || at < start || at >= end) continue;
+      if (!stats.has(entry.authorId)) {
+        stats.set(entry.authorId, { id: entry.authorId, name: agent.name, email: agent.email, replies: 0, notes: 0, solves: 0, updates: 0, tickets: new Set(), lastActivityAt: null });
+      }
+      const row = stats.get(entry.authorId);
+      row.tickets.add(ticketId);
+      for (const action of entry.actions) {
+        if (action === 'reply') row.replies++;
+        else if (action === 'note') row.notes++;
+        else if (action === 'solve') row.solves++;
+        else row.updates++;
+      }
+      if (!row.lastActivityAt || at > new Date(row.lastActivityAt)) row.lastActivityAt = entry.at;
+      const primary = ['solve', 'reply', 'note', 'update'].find(a => entry.actions.includes(a));
+      feed.push({ at: entry.at, agentName: agent.name, action: primary, ticketId, subject: ticketById.get(ticketId)?.subject || '(no subject)' });
+    }
+  }
+  // Agents with no activity still appear, so a quiet teammate is visible.
+  const supportAgents = [...agents.values()].filter(user => user.role === 'agent' || user.role === 'admin');
+  const rows = supportAgents.map(user => {
+    const row = stats.get(String(user.id));
+    return {
+      id: String(user.id), name: user.name, email: user.email,
+      replies: row?.replies || 0, notes: row?.notes || 0, solves: row?.solves || 0, updates: row?.updates || 0,
+      ticketsTouched: row?.tickets.size || 0, lastActivityAt: row?.lastActivityAt || null,
+    };
+  }).sort((a, b) => (b.replies + b.notes + b.solves + b.updates) - (a.replies + a.notes + a.solves + a.updates) || a.name.localeCompare(b.name));
+  feed.sort((a, b) => new Date(b.at) - new Date(a.at));
+
+  return {
+    generatedAt: new Date().toISOString(),
+    period,
+    windowStart: start.toISOString(),
+    windowEnd: end.toISOString(),
+    agents: rows,
+    feed: feed.slice(0, 100).map(item => ({ ...item, link: `https://${process.env.ZENDESK_SUBDOMAIN}.zendesk.com/agent/tickets/${item.ticketId}` })),
+    truncated: count > tickets.length,
+    activityErrors: failed,
+    zdSubdomain: process.env.ZENDESK_SUBDOMAIN,
+  };
+}
+
+app.get('/api/zendesk/agent-activity', requireRole('super_admin'), async (req, res) => {
+  const period = Object.hasOwn(ZD_AGENT_ACTIVITY_PERIODS, req.query.period) ? req.query.period : 'today';
+  try {
+    if (!process.env.ZENDESK_SUBDOMAIN || !process.env.ZENDESK_EMAIL || !process.env.ZENDESK_API_TOKEN) {
+      return res.json({ unconfigured: true });
+    }
+    const cached = zendeskAgentActivityCache.get(period);
+    if (cached && Date.now() - cached.at < ZD_AGENT_ACTIVITY_TTL) return res.json(cached.data);
+    if (!zendeskAgentActivityPending.has(period)) {
+      zendeskAgentActivityPending.set(period, buildZendeskAgentActivity(period)
+        .then(data => { zendeskAgentActivityCache.set(period, { at: Date.now(), data }); return data; })
+        .finally(() => zendeskAgentActivityPending.delete(period)));
+    }
+    res.json(await zendeskAgentActivityPending.get(period));
+  } catch (error) {
+    console.error('[zendesk-agent-activity]', error.response?.status || error.message);
+    res.status(502).json({ error: 'Could not load Zendesk agent activity' });
+  }
+});
+
 const ZD_ADMIN_TV_SECTIONS = [
   { key: 'support',    label: 'Support',    groupIds: ['54526693127963'] },
   { key: 'billing',    label: 'Billing',    groupIds: ['21144086647963', '54535973877787'] },

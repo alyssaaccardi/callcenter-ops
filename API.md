@@ -173,6 +173,7 @@ DID pool counts (available + instant-AL + instant-RS) sourced from HubSpot deal 
 | `GET /api/zendesk/queue-stats?team=tech\|support` | Current ticket queue counts by status |
 | `GET /api/zendesk/stale-tickets?team=tech\|support&hours=24` | Tickets older than N business hours |
 | `GET /api/zendesk/admin-overview` | Super-admin-only unsolved ticket activity by active group; includes last agent update/public reply and new/open tickets awaiting a response for 24 weekday business hours (9am–5pm ET; no holiday calendar) |
+| `GET /api/zendesk/agent-activity?period=today\|yesterday\|7d` | Super-admin-only per-agent Zendesk activity (public replies, internal notes, solves, other updates, tickets touched, last activity) plus the latest 100 actions; days are Eastern time; cached 2 min |
 | `GET /api/zendesk/csat?team=tech\|support&period=today\|this-week\|this-month` | CSAT good/bad counts |
 | `GET /api/zendesk/leaderboard?team=tech\|support&period=today\|this-week` | Agent leaderboard (solved + CSAT + section breakdown) |
 
