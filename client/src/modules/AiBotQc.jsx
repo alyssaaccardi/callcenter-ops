@@ -1266,7 +1266,8 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
   const readyToComplete = call.critical
     ? Boolean(String(call.critical_note || '').trim())
     : Boolean(hasStructuredReview || String(call.feedback || '').trim());
-  const audioFiles = files.filter(key => /\.(ogg|mp3|wav|m4a|opus|webm|aac)$/i.test(key));
+  // Staff API calls stream one recording through /audio and have no file extension in their key.
+  const audioFiles = call.source === 'staff_api' ? files.slice(0, 1) : files.filter(key => /\.(ogg|mp3|wav|m4a|opus|webm|aac)$/i.test(key));
   const events = data.history || [];
 
   return (
