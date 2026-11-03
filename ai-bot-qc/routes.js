@@ -1651,7 +1651,11 @@ router.get('/artifact', async (req, res) => {
     if (!bucket) return res.status(400).json({ error: 'Choose a valid bucket first' });
     const command = new GetObjectCommand({ Bucket: bucket, Key: key, Range: req.headers.range });
     const object = await getClient().send(command);
-    if (object.ContentType) res.setHeader('Content-Type', object.ContentType);
+    // Fall back to extension-based MIME when iDrive omits ContentType or returns octet-stream —
+    // browsers refuse to play <audio> without a recognised audio type.
+    const extensionType = { ogg: 'audio/ogg', opus: 'audio/ogg', mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', webm: 'audio/webm', aac: 'audio/aac' }[key.split('.').pop().toLowerCase()];
+    const contentType = object.ContentType && object.ContentType !== 'application/octet-stream' ? object.ContentType : extensionType;
+    if (contentType) res.setHeader('Content-Type', contentType);
     if (object.ContentLength != null) res.setHeader('Content-Length', object.ContentLength);
     if (download) {
       const filename = key.split('/').pop().replace(/[\r\n"\\]/g, '_');
