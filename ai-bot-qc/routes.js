@@ -40,7 +40,9 @@ const BUSINESS_TIMEZONE = (() => {
 const businessHours = createBusinessHours(BUSINESS_TIMEZONE, BUSINESS_DAY_OPEN_HOUR, BUSINESS_DAY_CLOSE_HOUR, FORWARDING_TEST_BUSINESS_HOURS);
 const CLAIM_MINUTES = 2;
 const IS_INTERNAL_TEST_SQL = 'EXISTS (SELECT 1 FROM bot_qc_excluded_phone_numbers excluded WHERE excluded.phone_number = c.caller_phone)';
-const REVIEW_QUEUE_SOURCE_SQL = "c.source = 'staff_api'";
+// New calls come from the production Staff API; legacy iDrive archive calls remain visible if they carry
+// review history (reviewed outcome or a critical flag) so reviewers do not lose past work.
+const REVIEW_QUEUE_SOURCE_SQL = "(c.source = 'staff_api' OR EXISTS (SELECT 1 FROM bot_reviews r_hist WHERE r_hist.call_id = c.id AND (r_hist.status != 'unreviewed' OR r_hist.critical = 1)))";
 const NOT_INTERNAL_TEST_SQL = 'NOT EXISTS (SELECT 1 FROM bot_qc_excluded_phone_numbers excluded WHERE excluded.phone_number = c.caller_phone)';
 let client;
 let bucketCache = { expires: 0, buckets: [] };
