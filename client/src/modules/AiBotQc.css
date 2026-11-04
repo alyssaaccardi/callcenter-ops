@@ -95,7 +95,7 @@
 .botqc-bulletin-type--bug { background: var(--crit-050); color: var(--crit-700); }
 .botqc-bulletin-type--watch { background: var(--warn-050); color: var(--warn-700); }
 .botqc-bulletin-copy { min-width: 0; }
-.botqc-bulletin-copy p { margin: 0; overflow-wrap: anywhere; font-size: 12px; line-height: 1.45; }
+.botqc-bulletin-copy p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.45; }
 .botqc-bulletin-copy small { display: block; margin-top: 4px; color: var(--text-muted); font-size: 9px; }
 .botqc-bulletin-copy > span { color: var(--text-muted); font-size: 11px; }
 @media (max-width: 760px) {

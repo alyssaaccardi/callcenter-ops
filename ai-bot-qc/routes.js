@@ -223,8 +223,8 @@ function slackMention(envName, fallback) {
   return id ? `<!subteam^${id}>` : `@${fallback}`;
 }
 
-function postSlack(text) {
-  const url = process.env.SLACK_AIRI_QC_URL;
+function postSlack(text, { webhookEnv = 'SLACK_AIRI_QC_URL' } = {}) {
+  const url = process.env[webhookEnv] || process.env.SLACK_AIRI_QC_URL;
   if (!url) return;
   axios.post(url, { text, mrkdwn: true }, { timeout: 8000 })
     .catch(error => console.error('[ai-bot-qc] Slack post failed:', error.message));
@@ -776,7 +776,7 @@ router.post('/bulletin', requireRole(...QC_ADMIN_ROLES), (req, res) => {
   const mention = slackMention('SLACK_QA_AGENTS_GROUP_ID', 'qa-agents');
   const authorLine = actor.name ? ` by ${actor.name}` : '';
   const expiryLine = expiresOn ? `\n_Expires ${expiresOn}_` : '';
-  postSlack(`${mention} :loudspeaker: *New team focus* [${noticeType.toUpperCase()}]${authorLine}\n>>>${body}${expiryLine}`);
+  postSlack(`${mention} :loudspeaker: *New team focus* [${noticeType.toUpperCase()}]${authorLine}\n>>>${body}${expiryLine}`, { webhookEnv: 'SLACK_TEAM_FOCUS_URL' });
   res.status(201).json({ ok: true, post: { ...post, is_expired: false, is_recent: true } });
 });
 
