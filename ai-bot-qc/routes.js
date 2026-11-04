@@ -12,7 +12,6 @@ const { requireRole, listUsers, isRecordingOnly } = require('../auth');
 const { db, upsertCall, addEvent } = require('./db');
 const { syncCalls, refreshCallRisk } = require('./call-sync');
 const staffApi = require('./staff-api');
-const { createBusinessHours } = require('./business-time');
 
 const router = express.Router();
 const QC_ADMIN_ROLES = ['super_admin', 'ai_bot_qc_admin'];
@@ -24,9 +23,7 @@ const ARCHIVE_PREFIX = (process.env.IDRIVE_E2_PREFIX || 'recordings-v1-productio
 const HUBSPOT_AIRI_PIPELINE = '933309264';
 const HUBSPOT_AIRI_INACTIVE_STAGES = new Set(['1435069747', '1435069749']);
 const HUBSPOT_CACHE_MS = 5 * 60_000;
-const FORWARDING_TEST_BUSINESS_HOURS = 36;
-const BUSINESS_DAY_OPEN_HOUR = 9;
-const BUSINESS_DAY_CLOSE_HOUR = 17;
+const FORWARDING_TEST_HOURS = 24;
 const BUSINESS_TIMEZONE = (() => {
   const value = process.env.AI_BOT_QC_BUSINESS_TIMEZONE || 'America/New_York';
   try {
@@ -37,7 +34,6 @@ const BUSINESS_TIMEZONE = (() => {
     return 'America/New_York';
   }
 })();
-const businessHours = createBusinessHours(BUSINESS_TIMEZONE, BUSINESS_DAY_OPEN_HOUR, BUSINESS_DAY_CLOSE_HOUR, FORWARDING_TEST_BUSINESS_HOURS);
 const CLAIM_MINUTES = 2;
 const IS_INTERNAL_TEST_SQL = 'EXISTS (SELECT 1 FROM bot_qc_excluded_phone_numbers excluded WHERE excluded.phone_number = c.caller_phone)';
 // New calls come from the production Staff API; legacy iDrive archive calls remain visible if they carry
@@ -296,7 +292,7 @@ async function hubspotInactiveCustomers() {
 
 function latestCallForCustomer(customer) {
   return db.prepare(`SELECT c.id, c.customer, c.started_at_ns FROM bot_calls c
-    WHERE c.customer = ? AND c.started_at_ns IS NOT NULL AND ${NOT_INTERNAL_TEST_SQL}
+    WHERE c.customer = ? AND c.source = 'staff_api' AND c.started_at_ns IS NOT NULL AND ${NOT_INTERNAL_TEST_SQL}
     ORDER BY c.started_at_ns DESC, c.id DESC LIMIT 1`).get(customer);
 }
 
@@ -304,7 +300,7 @@ async function forwardingQueue(nowMs = Date.now()) {
   const latestCalls = db.prepare(`SELECT id, customer, started_at_ns FROM (
       SELECT id, customer, started_at_ns,
         ROW_NUMBER() OVER (PARTITION BY customer ORDER BY started_at_ns DESC, id DESC) AS row_number
-      FROM bot_calls c WHERE started_at_ns IS NOT NULL AND ${NOT_INTERNAL_TEST_SQL}
+      FROM bot_calls c WHERE c.source = 'staff_api' AND started_at_ns IS NOT NULL AND ${NOT_INTERNAL_TEST_SQL}
     ) WHERE row_number = 1 ORDER BY customer COLLATE NOCASE`).all();
   const completedKeys = new Set(db.prepare('SELECT customer, last_call_id FROM bot_forwarding_checks').all()
     .map(row => `${row.customer}\0${row.last_call_id}`));
@@ -312,13 +308,13 @@ async function forwardingQueue(nowMs = Date.now()) {
   for (const call of latestCalls) {
     if (completedKeys.has(`${call.customer}\0${call.id}`)) continue;
     const lastCallMs = call.started_at_ns / 1e6;
-    const elapsedSeconds = businessHours.secondsBetween(lastCallMs, nowMs);
-    if (elapsedSeconds < FORWARDING_TEST_BUSINESS_HOURS * 3600) continue;
+    const elapsedHours = (nowMs - lastCallMs) / 3600_000;
+    if (elapsedHours < FORWARDING_TEST_HOURS) continue;
     checks.push({
       customer: call.customer,
       last_call_id: call.id,
       last_call_at: new Date(lastCallMs).toISOString(),
-      business_hours_elapsed: Math.floor(elapsedSeconds / 3600),
+      hours_elapsed: Math.floor(elapsedHours),
     });
   }
   const completed = db.prepare(`SELECT f.id, f.customer, f.last_call_id, f.checked_by_email, f.checked_by_name, f.checked_at, f.notes, f.result,
@@ -361,8 +357,8 @@ async function forwardingQueue(nowMs = Date.now()) {
     checks: activeChecks,
     completed: visibleCompleted,
     completed_window_days: 30,
-    threshold_business_hours: FORWARDING_TEST_BUSINESS_HOURS,
-    business_calendar: `Monday-Friday, 09:00-17:00 ${BUSINESS_TIMEZONE}`,
+    threshold_hours: FORWARDING_TEST_HOURS,
+    rule: `Flag an account when ${FORWARDING_TEST_HOURS}+ clock hours pass without a production call.`,
   };
 }
 
@@ -1039,9 +1035,9 @@ router.post('/forwarding-checks/:customer/complete', async (req, res) => {
   if (!latest || latest.id !== callId) {
     return res.status(409).json({ error: 'A newer call was received. Refresh the forwarding-check queue before completing this test.' });
   }
-  const elapsedSeconds = businessHours.secondsBetween(latest.started_at_ns / 1e6, Date.now());
-  if (elapsedSeconds < FORWARDING_TEST_BUSINESS_HOURS * 3600) {
-    return res.status(409).json({ error: 'This account has not reached 36 business hours without a call.' });
+  const elapsedHours = (Date.now() - latest.started_at_ns / 1e6) / 3600_000;
+  if (elapsedHours < FORWARDING_TEST_HOURS) {
+    return res.status(409).json({ error: `This account has not reached ${FORWARDING_TEST_HOURS} hours without a call.` });
   }
   const actor = actorFor(req);
   const now = new Date().toISOString();

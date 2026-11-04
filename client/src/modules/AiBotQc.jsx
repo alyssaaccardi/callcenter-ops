@@ -434,7 +434,7 @@ export default function AiBotQc() {
       const result = await api.get('/api/ai-bot-qc/forwarding-checks');
       setForwardingChecks(result.data.checks || []);
       setForwardingCompleted(result.data.completed || []);
-      setForwardingCalendar(result.data.business_calendar || 'Configured business hours');
+      setForwardingCalendar(result.data.rule || `${result.data.threshold_hours || 24}+ hours without a production call`);
     } catch (err) {
       setError(err.response?.data?.error || 'Could not load forwarding checks');
     } finally {
@@ -677,7 +677,7 @@ export default function AiBotQc() {
             const forwardingResult = await api.get('/api/ai-bot-qc/forwarding-checks');
             setForwardingChecks(forwardingResult.data.checks || []);
             setForwardingCompleted(forwardingResult.data.completed || []);
-            setForwardingCalendar(forwardingResult.data.business_calendar || 'Configured business hours');
+            setForwardingCalendar(forwardingResult.data.rule || `${forwardingResult.data.threshold_hours || 24}+ hours without a production call`);
           }
           if (active && isAdmin) {
             const excludedResult = await api.get('/api/ai-bot-qc/excluded-phone-numbers');
@@ -1607,7 +1607,7 @@ function TeamOverview({ dashboard, period, reviewerEmail, isAdmin, forwardingChe
                       <td>{check.forwarding_number || <span className="botqc-dash">Not provided</span>}</td>
                       <td>{check.main_business_phone || <span className="botqc-dash">Not provided</span>}</td>
                       <td>{check.phone_provider || <span className="botqc-dash">Not provided</span>}</td>
-                      <td>{check.business_hours_elapsed}+ business hours</td>
+                      <td>{check.hours_elapsed}+ hours</td>
                       <td><select className="botqc-forwarding-result" value={forwardingResults[`${check.customer}|${check.last_call_id}`] || ''} onChange={event => onForwardingResultChange(check, event.target.value)} aria-label={`Test result for ${accountLabel(check)}`}><option value="">Choose result</option><option value="reached_airi">Reached AIRI</option><option value="not_reaching_airi">Did not reach AIRI</option></select></td>
                       <td><textarea className="botqc-forwarding-note" maxLength="1000" rows="2" value={forwardingNotes[`${check.customer}|${check.last_call_id}`] || ''} onChange={event => onForwardingNoteChange(check, event.target.value)} placeholder="Optional note" aria-label={`Optional forwarding-test note for ${accountLabel(check)}`} /></td>
                       <td><button className="botqc-forwarding-complete" disabled={Boolean(completingForwarding) || !forwardingResults[`${check.customer}|${check.last_call_id}`]} onClick={() => onCompleteForwarding(check)}>{completingForwarding === check.customer ? 'Saving…' : <><CheckCheck size={14} /> Save result</>}</button></td>
@@ -1906,7 +1906,7 @@ function ForwardingChecks({ checks, completed, calendar, loading, completing, re
               <SortableHeader label="Main business phone" column="main_business_phone" sort={dueSort} onSort={changeDueSort} />
               <SortableHeader label="VoIP / provider" column="phone_provider" sort={dueSort} onSort={changeDueSort} />
               <SortableHeader label="Last call" column="last_call_at" sort={dueSort} onSort={changeDueSort} />
-              <SortableHeader label="Quiet time" column="business_hours_elapsed" sort={dueSort} onSort={changeDueSort} />
+              <SortableHeader label="Quiet time" column="hours_elapsed" sort={dueSort} onSort={changeDueSort} />
               <th>Test result</th><th>Optional note</th><th>Action</th>
             </tr></thead>
             <tbody>
@@ -1917,7 +1917,7 @@ function ForwardingChecks({ checks, completed, calendar, loading, completing, re
                   <td>{check.main_business_phone || <span className="botqc-dash">Not provided</span>}</td>
                   <td>{check.phone_provider || <span className="botqc-dash">Not in HubSpot</span>}</td>
                   <td>{new Date(check.last_call_at).toLocaleString()}</td>
-                  <td>{check.business_hours_elapsed}+ business hours</td>
+                  <td>{check.hours_elapsed}+ hours</td>
                   <td><select className="botqc-forwarding-result" value={results[`${check.customer}|${check.last_call_id}`] || ''} disabled={readOnly} onChange={event => onResultChange(check, event.target.value)} aria-label={`Test result for ${accountLabel(check)}`}><option value="">Choose result</option><option value="reached_airi">Reached AIRI</option><option value="not_reaching_airi">Did not reach AIRI</option></select></td>
                   <td><textarea className="botqc-forwarding-note" maxLength="1000" rows="2" value={notes[`${check.customer}|${check.last_call_id}`] || ''} disabled={readOnly} onChange={event => onNoteChange(check, event.target.value)} placeholder="What did you test? Any issue?" aria-label={`Optional forwarding-test note for ${accountLabel(check)}`} /></td>
                   <td><button className="botqc-forwarding-complete" disabled={readOnly || Boolean(completing) || !results[`${check.customer}|${check.last_call_id}`]} onClick={() => onComplete(check)}>{completing === check.customer ? 'Saving…' : <><CheckCheck size={14} /> Save result</>}</button></td>
