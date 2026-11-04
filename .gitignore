@@ -33,3 +33,7 @@ backups/
 sessions.db
 sessions.db-wal
 sessions.db-shm
+
+# Mitel queue poller runtime log (grows multi-MB; local-only)
+mitel-poller/poller.log
+mitel-poller/*.log

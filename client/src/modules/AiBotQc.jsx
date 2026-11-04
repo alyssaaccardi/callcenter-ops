@@ -297,6 +297,7 @@ export default function AiBotQc() {
   const canDownloadRecordings = showAdminControls;
   const [activeView, setActiveView] = useState('queue');
   const [bucket, setBucket] = useState('');
+  const [staffApiConfigured, setStaffApiConfigured] = useState(false);
   const [, setNamesVersion] = useState(0);
 
   useEffect(() => {
@@ -421,6 +422,7 @@ export default function AiBotQc() {
         : api.get('/api/ai-bot-qc/queue-summary'),
     ]);
     setBucket(statusResult.data.bucket || '');
+    setStaffApiConfigured(Boolean(statusResult.data.staff_api_configured));
     setDashboard(isAdmin ? dashboardResult.data : { counts: dashboardResult.data.counts || {} });
     setDashboardPeriod(nextPeriod);
     setDashboardReviewer(nextReviewer);
@@ -611,9 +613,9 @@ export default function AiBotQc() {
     setError('');
     let refreshedCalls = [];
     try {
-      if (sync && bucket) {
+      if (sync) {
         setSyncing(true);
-        await api.post('/api/ai-bot-qc/sync', null, { params: { bucket } });
+        await api.post('/api/ai-bot-qc/sync');
       }
       await loadOverview();
       refreshedCalls = await loadQueue();
@@ -652,9 +654,13 @@ export default function AiBotQc() {
           setAgents(availableAgents);
           setAssignmentTarget(current => current || availableAgents.find(agent => agent.email === user?.email)?.email || '');
         setBucket(statusResult.data.bucket || '');
+        setStaffApiConfigured(Boolean(statusResult.data.staff_api_configured));
         setDashboard(isAdmin ? dashboardResult.data : { counts: dashboardResult.data.counts || {} });
-        // A failed sync must not block the queue from loading.
-        await api.post('/api/ai-bot-qc/sync', null, { params: { bucket: statusResult.data.bucket } }).catch(() => {});
+        try {
+          await api.post('/api/ai-bot-qc/sync');
+        } catch (syncError) {
+          if (active) setError(syncError.response?.data?.error || 'Could not sync production calls');
+        }
         if (!active) return;
         const updatedDashboard = isAdmin
           ? await api.get('/api/ai-bot-qc/dashboard')
@@ -1036,7 +1042,7 @@ export default function AiBotQc() {
           <p>Review every call once, keep feedback saved, surface serious issues.</p>
         </div>
         <div className="botqc-header-actions">
-          <div className="botqc-bucket-name"><span>Recording archive</span>{bucket || 'Not connected'}</div>
+          <div className="botqc-bucket-name"><span>Production recordings</span>{staffApiConfigured ? 'Staff API configured' : 'Staff API not configured'}</div>
           <button className="botqc-icon-button" onClick={() => refresh(true)} disabled={loading || syncing} title="Sync new recordings" aria-label="Sync new recordings">
             <RefreshCw size={16} className={syncing ? 'botqc-spin' : ''} />
           </button>

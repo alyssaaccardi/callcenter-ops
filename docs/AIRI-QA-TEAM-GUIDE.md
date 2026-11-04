@@ -35,11 +35,11 @@ The internal-test caller list is shared by all admins. It is not a personal pref
 
 ## How Recordings Enter The Queue
 
-1. AIRI QA pulls completed inbound calls from the Answering AI Staff API (internal-only calls are skipped). The first sync covers the last 7 days; after that it picks up new and updated calls every 2 minutes.
+1. AIRI QA pulls completed production inbound calls from the Answering AI Staff API (internal-only calls are skipped). The first sync covers the last 7 days; after that it picks up new and updated calls every 2 minutes.
 2. The API supplies the call identity, account, caller and dialed numbers, start/end times, and the recording and transcript.
 3. AIRI QA stores the call record, review state, and audit events in `ai-bot-qc.db`. Audio is played through AIRI QA; recording links are never stored.
 4. Opening AIRI QA syncs before loading the queue. Use **Sync new recordings** to request a fresh sync.
-5. Calls indexed before the move to the Staff API (from the old recording archive) stay in the queue and remain playable.
+5. Calls indexed from the old recording archive remain stored for historical playback but are not part of the live production review queue.
 
 **Risk badges:** a call with a problem shows a badge in the queue, and opening it explains each badge in plain words under "Why this call was flagged". Hover a badge in the queue to read the same explanation. Use the **Has a badge** status filter to see only flagged calls.
 
@@ -51,7 +51,7 @@ Red and amber calls sort higher in the queue. Nothing is marked Critical automat
 
 ### Caller Number And Internal Test Calls
 
-The recording sidecar itself does not provide a caller-number field. In this AIRI/LiveKit setup, numbered room names commonly follow `call-_+<number>_<token>`. AIRI QA extracts the number-shaped part as the caller ID (`From`) and normalizes it for matching. Room names such as `call-_anonymous_<token>` do not provide a number and remain unmatched.
+Production Staff API call records provide caller and dialed numbers when available. Do not infer a missing destination number (`To`) from the customer name or HubSpot phone fields. Calls without a caller number remain unmatched for internal-test-number filtering.
 
 The current LiveKit recording data does **not** provide a reliable called/destination number (`To`) or identify who ended a call. Do not infer `To` from the customer name, HubSpot phone fields, or the caller number. MiCC data is not part of this AIRI recording workflow.
 

@@ -10,7 +10,7 @@ const {
 } = require('@aws-sdk/client-s3');
 const { requireRole, listUsers, isRecordingOnly } = require('../auth');
 const { db, upsertCall, addEvent } = require('./db');
-const { refreshCallRisk } = require('./call-sync');
+const { syncCalls, refreshCallRisk } = require('./call-sync');
 const staffApi = require('./staff-api');
 const { createBusinessHours } = require('./business-time');
 
@@ -40,8 +40,7 @@ const BUSINESS_TIMEZONE = (() => {
 const businessHours = createBusinessHours(BUSINESS_TIMEZONE, BUSINESS_DAY_OPEN_HOUR, BUSINESS_DAY_CLOSE_HOUR, FORWARDING_TEST_BUSINESS_HOURS);
 const CLAIM_MINUTES = 2;
 const IS_INTERNAL_TEST_SQL = 'EXISTS (SELECT 1 FROM bot_qc_excluded_phone_numbers excluded WHERE excluded.phone_number = c.caller_phone)';
-// The review queue reviews recordings from the iDrive archive; Staff API (staging) calls are kept but hidden.
-const ARCHIVE_ONLY_SQL = "c.source = 'archive'";
+const REVIEW_QUEUE_SOURCE_SQL = "c.source = 'staff_api'";
 const NOT_INTERNAL_TEST_SQL = 'NOT EXISTS (SELECT 1 FROM bot_qc_excluded_phone_numbers excluded WHERE excluded.phone_number = c.caller_phone)';
 let client;
 let bucketCache = { expires: 0, buckets: [] };
@@ -603,10 +602,14 @@ function isQcAdmin(req) {
 const qcGate = requireRole(...QC_ROLES);
 const internGate = requireRole('ai_bot_qc_intern');
 router.use((req, res, next) => {
-  if (!isRecordingOnly(req.user)) return qcGate(req, res, next);
-  const allowed = req.method === 'GET' && (/^\/calls\/[^/]+\/(recording|audio)$/.test(req.path) || req.path === '/artifact');
-  if (!allowed) return res.status(403).json({ error: 'Forbidden' });
-  internGate(req, res, next);
+  const isRecordingRoute = req.method === 'GET' && (/^\/calls\/[^/]+\/(recording|audio)$/.test(req.path) || req.path === '/artifact');
+  if (isRecordingOnly(req.user)) {
+    if (!isRecordingRoute) return res.status(403).json({ error: 'Forbidden' });
+    return internGate(req, res, next);
+  }
+  // Intern combined with other (non-QC) roles still needs to open recording links.
+  if (isRecordingRoute) return requireRole(...QC_ROLES, 'ai_bot_qc_intern')(req, res, next);
+  qcGate(req, res, next);
 });
 
 // Reject cross-site state-changing requests (CSRF defense in depth beyond sameSite=lax).
@@ -716,6 +719,7 @@ router.get('/status', (req, res) => {
   const config = storageConfig();
   res.json({
     configured: Boolean(config.accessKeyId && config.secretAccessKey),
+    staff_api_configured: staffApi.qcConfigured(),
     bucket: config.bucket || '',
     bucketDiscovery: !config.bucket,
     archivePrefix: ARCHIVE_PREFIX,
@@ -820,19 +824,20 @@ function runArchiveSync(bucket) {
 }
 
 router.post('/sync', async (req, res) => {
-  if (!needStorage(res)) return;
+  if (!staffApi.qcConfigured()) {
+    return res.status(503).json({ error: 'Production Staff API is not configured. Set AI_BOT_QC_STAFF_API_BASE and AI_BOT_QC_STAFF_API_KEY.' });
+  }
   try {
-    const bucket = await resolveBucket(req);
-    if (!bucket) return res.status(400).json({ error: 'Choose a valid bucket first' });
-    res.json({ ok: true, ...(await runArchiveSync(bucket)) });
+    res.json({ ok: true, ...(await syncCalls()) });
   } catch (error) {
-    storageFailure(res, error, 'Could not sync recordings from iDrive e2', 's3:ListBucket and s3:GetObject');
+    console.error('[ai-bot-qc] Staff API sync failed:', error.response?.status || error.message);
+    res.status(502).json({ error: 'Could not sync production calls from the Answering AI Staff API. Check the production URL, key, and API scopes.' });
   }
 });
 
 router.get('/queue', async (req, res) => {
   releaseExpiredClaims();
-  const where = [ARCHIVE_ONLY_SQL];
+  const where = [REVIEW_QUEUE_SOURCE_SQL];
   const params = [];
   const status = ['unreviewed', 'in_review', 'reviewed'].includes(req.query.status) ? req.query.status : '';
   if (status) { where.push('r.status = ?'); params.push(status); }
@@ -865,7 +870,7 @@ router.get('/queue', async (req, res) => {
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const total = db.prepare(`SELECT COUNT(*) AS total FROM bot_calls c JOIN bot_reviews r ON r.call_id = c.id ${whereSql}`).get(...params).total;
-  const internalTestTotal = db.prepare(`SELECT COUNT(*) AS n FROM bot_calls c WHERE ${IS_INTERNAL_TEST_SQL}`).get().n;
+  const internalTestTotal = db.prepare(`SELECT COUNT(*) AS n FROM bot_calls c WHERE ${REVIEW_QUEUE_SOURCE_SQL} AND ${IS_INTERNAL_TEST_SQL}`).get().n;
   const internalTestInResults = internalTests === 'hide' ? 0
     : db.prepare(`SELECT COUNT(*) AS n FROM bot_calls c JOIN bot_reviews r ON r.call_id = c.id ${whereSql}${whereSql ? ' AND' : ' WHERE'} ${IS_INTERNAL_TEST_SQL}`).get(...params).n;
   const limit = Math.min(500, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
@@ -1432,8 +1437,8 @@ async function countableCallFilter() {
     console.error('[ai-bot-qc] HubSpot AIRI status lookup failed for counts:', error.response?.status || error.message);
   }
   return inactive.length
-    ? { sql: `${ARCHIVE_ONLY_SQL} AND ${NOT_INTERNAL_TEST_SQL} AND c.customer NOT IN (SELECT value FROM json_each(?))`, params: [JSON.stringify(inactive)] }
-    : { sql: `${ARCHIVE_ONLY_SQL} AND ${NOT_INTERNAL_TEST_SQL}`, params: [] };
+    ? { sql: `${REVIEW_QUEUE_SOURCE_SQL} AND ${NOT_INTERNAL_TEST_SQL} AND c.customer NOT IN (SELECT value FROM json_each(?))`, params: [JSON.stringify(inactive)] }
+    : { sql: `${REVIEW_QUEUE_SOURCE_SQL} AND ${NOT_INTERNAL_TEST_SQL}`, params: [] };
 }
 
 router.get('/queue-summary', async (req, res) => {
@@ -1460,13 +1465,14 @@ router.get('/my-day', (req, res) => {
       SUM(r.critical = 1 AND r.critical_flagged_at >= ? AND r.critical_flagged_at < ?) AS flagged_today,
       SUM(r.outcome = 'needs_follow_up' AND r.reviewed_at >= ? AND r.reviewed_at < ?) AS follow_up_today,
       MAX(CASE WHEN r.status = 'reviewed' THEN r.reviewed_at END) AS last_reviewed_at
-    FROM bot_reviews r WHERE lower(r.reviewer_email) = ?`)
+    FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
+    WHERE lower(r.reviewer_email) = ? AND ${REVIEW_QUEUE_SOURCE_SQL} AND ${NOT_INTERNAL_TEST_SQL}`)
     .get(today.start, today.end, today.start, today.end, today.start, today.end, lowerEmail);
   const open = db.prepare(`SELECT COUNT(*) AS n FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
-    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${ARCHIVE_ONLY_SQL} AND ${NOT_INTERNAL_TEST_SQL}`).get(lowerEmail).n;
+    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${REVIEW_QUEUE_SOURCE_SQL} AND ${NOT_INTERNAL_TEST_SQL}`).get(lowerEmail).n;
   const openCalls = db.prepare(`SELECT c.id, c.customer, c.call_date, r.status, r.critical, r.assigned_at
     FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
-    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${ARCHIVE_ONLY_SQL} AND ${NOT_INTERNAL_TEST_SQL}
+    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${REVIEW_QUEUE_SOURCE_SQL} AND ${NOT_INTERNAL_TEST_SQL}
     ORDER BY r.critical DESC, r.assigned_at ASC LIMIT 25`).all(lowerEmail)
     .map(row => ({ ...row, hubspot_account_name: hubspotRecordForCustomer(row.customer, hubspotAiriCache.records)?.displayName || '' }));
   let outboundTasks = [];
@@ -1676,11 +1682,11 @@ setInterval(() => {
   notifyDueForwardingChecks().catch(error => console.error('[ai-bot-qc] forwarding notice failed:', error.message));
 }, 10 * 60_000).unref();
 
-// Keep the queue current without anyone opening the page.
-if (getClient() && storageConfig().bucket) {
-  const runSync = () => runArchiveSync(storageConfig().bucket).catch(error => console.error('[ai-bot-qc] iDrive sync failed:', error.Code || error.message));
+// Keep production calls current without anyone opening the page.
+if (staffApi.qcConfigured()) {
+  const runSync = () => syncCalls().catch(error => console.error('[ai-bot-qc] Staff API sync failed:', error.response?.status || error.message));
   setTimeout(runSync, 10_000).unref();
-  setInterval(runSync, 10 * 60_000).unref();
+  setInterval(runSync, 2 * 60_000).unref();
 }
 
 module.exports = router;

@@ -14,18 +14,20 @@ function settings(scope) {
   const shared = { key: process.env.STAFF_API_KEY, base: process.env.STAFF_API_BASE };
   if (scope !== 'qc') return shared;
   return {
-    key: process.env.AI_BOT_QC_STAFF_API_KEY || shared.key,
-    base: process.env.AI_BOT_QC_STAFF_API_BASE || shared.base,
+    key: process.env.AI_BOT_QC_STAFF_API_KEY,
+    base: process.env.AI_BOT_QC_STAFF_API_BASE,
   };
 }
 
 function qcConfigured() {
-  return Boolean(settings('qc').key);
+  const { key, base } = settings('qc');
+  return Boolean(key && base);
 }
 
 function client(scope) {
   const { key, base } = settings(scope);
   if (!key) throw Object.assign(new Error(scope === 'qc' ? 'AI_BOT_QC_STAFF_API_KEY is not set' : 'STAFF_API_KEY is not set'), { code: 'not_configured' });
+  if (scope === 'qc' && !base) throw Object.assign(new Error('AI_BOT_QC_STAFF_API_BASE is not set'), { code: 'not_configured' });
   return axios.create({
     httpsAgent: new https.Agent({ keepAlive: true, maxSockets: CONCURRENCY }),
     baseURL: (base || STAGING_BASE).replace(/\/$/, ''),
