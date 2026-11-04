@@ -1068,7 +1068,7 @@ export default function AiBotQc() {
           {bulletinPosts.filter(post => !post.is_expired).slice(0, 3).map((post, index) => (
             <article className={`botqc-bulletin botqc-bulletin--rank-${index + 1}${post.is_recent ? ' botqc-bulletin--recent' : ''}`} key={post.id}>
               <div className="botqc-bulletin-heading"><Megaphone size={15} /><strong>Team focus</strong><span className={`botqc-bulletin-type botqc-bulletin-type--${post.notice_type || 'watch'}`}>{(post.notice_type || 'watch').toUpperCase()}</span>{post.is_recent && <span className="botqc-bulletin-new">NEW</span>}</div>
-              <div className="botqc-bulletin-copy"><p>{post.body}</p><small>{post.expires_on ? `Expires ${new Date(`${post.expires_on}T12:00:00`).toLocaleDateString()} · ` : ''}{post.created_by_name ? `Posted by ${post.created_by_name}` : 'Team guidance'}{post.created_at ? ` · ${new Date(post.created_at).toLocaleString()}` : ''}</small></div>
+              <div className="botqc-bulletin-copy"><p style={{ whiteSpace: 'pre-wrap' }}>{post.body}</p><small>{post.expires_on ? `Expires ${new Date(`${post.expires_on}T12:00:00`).toLocaleDateString()} · ` : ''}{post.created_by_name ? `Posted by ${post.created_by_name}` : 'Team guidance'}{post.created_at ? ` · ${new Date(post.created_at).toLocaleString()}` : ''}</small></div>
             </article>
           ))}
         </section>

@@ -773,6 +773,10 @@ router.post('/bulletin', requireRole(...QC_ADMIN_ROLES), (req, res) => {
       FROM bot_qc_bulletin_posts WHERE id = ?`).get(inserted.lastInsertRowid);
   });
   const post = result();
+  const mention = slackMention('SLACK_QA_AGENTS_GROUP_ID', 'qa-agents');
+  const authorLine = actor.name ? ` by ${actor.name}` : '';
+  const expiryLine = expiresOn ? `\n_Expires ${expiresOn}_` : '';
+  postSlack(`${mention} :loudspeaker: *New team focus* [${noticeType.toUpperCase()}]${authorLine}\n>>>${body}${expiryLine}`);
   res.status(201).json({ ok: true, post: { ...post, is_expired: false, is_recent: true } });
 });
 
