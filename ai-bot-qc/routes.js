@@ -837,7 +837,7 @@ router.post('/sync', async (req, res) => {
   }
 });
 
-router.get('/queue', async (req, res) => {
+router.get('/queue', (req, res) => {
   releaseExpiredClaims();
   const where = [REVIEW_QUEUE_SOURCE_SQL];
   const params = [];
@@ -1421,9 +1421,9 @@ function countableCallFilter() {
   return { sql: REVIEW_QUEUE_SOURCE_SQL, params: [] };
 }
 
-router.get('/queue-summary', async (req, res) => {
+router.get('/queue-summary', (req, res) => {
   releaseExpiredClaims();
-  const base = await countableCallFilter();
+  const base = countableCallFilter();
   const counts = db.prepare(`SELECT COUNT(*) AS total,
       SUM(r.status = 'unreviewed') AS unreviewed,
       SUM(r.status = 'in_review') AS in_review,
@@ -1478,9 +1478,9 @@ router.get('/my-day', (req, res) => {
   });
 });
 
-router.get('/dashboard', requireRole(...QC_ADMIN_ROLES), async (req, res) => {
+router.get('/dashboard', requireRole(...QC_ADMIN_ROLES), (req, res) => {
   releaseExpiredClaims();
-  const base = await countableCallFilter();
+  const base = countableCallFilter();
   const period = ['7d', '30d', '90d'].includes(req.query.period) ? req.query.period : 'all';
   const reviewerEmail = typeof req.query.reviewer_email === 'string' && req.query.reviewer_email !== 'all'
     ? req.query.reviewer_email.trim().slice(0, 180)
