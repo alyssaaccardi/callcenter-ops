@@ -185,15 +185,25 @@ async function listAccountSummaries() {
 }
 
 // Streams the audio through the server; the signed link is never sent to the browser.
+// Retries on 429 because iDrive e2 rate-limits bursts of signed-URL downloads when
+// several reviewers open calls at once.
 async function openRecording(id, range) {
   const url = await recordingUrl(id, 'qc');
   if (!url) return null;
-  return axios.get(url, {
-    responseType: 'stream',
-    timeout: 30000,
-    headers: range ? { Range: range } : {},
-    validateStatus: status => status === 200 || status === 206,
-  });
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await axios.get(url, {
+        responseType: 'stream',
+        timeout: 30000,
+        headers: range ? { Range: range } : {},
+        validateStatus: status => status === 200 || status === 206,
+      });
+    } catch (error) {
+      if (error.response?.status !== 429 || attempt >= 3) throw error;
+      const wait = Math.min(Number(error.response.headers['retry-after']) || 1, 3) * 1000;
+      await new Promise(resolve => setTimeout(resolve, wait));
+    }
+  }
 }
 
 // Recording links expire after an hour and must not be stored; keep one briefly in memory only.
