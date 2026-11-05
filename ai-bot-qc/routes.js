@@ -501,7 +501,6 @@ async function syncArchive(bucket) {
 function callRow(row) {
   return {
     ...row,
-    hubspot_account_name: hubspotRecordForCustomer(row.customer, hubspotAiriCache.records)?.displayName || '',
     recording_keys: JSON.parse(row.recording_keys || '[]'),
     risk_flags: JSON.parse(row.risk_flags || '[]'),
     call_tags: JSON.parse(row.call_tags || '[]'),
@@ -861,16 +860,6 @@ router.get('/queue', async (req, res) => {
   const internalTests = ['include', 'only'].includes(req.query.internal_tests) ? req.query.internal_tests : 'hide';
   if (internalTests === 'hide') where.push(NOT_INTERNAL_TEST_SQL);
   else if (internalTests === 'only') where.push(IS_INTERNAL_TEST_SQL);
-  try {
-    const inactiveCustomers = await hubspotInactiveCustomers();
-    if (inactiveCustomers.length) {
-      where.push(`c.customer NOT IN (${inactiveCustomers.map(() => '?').join(',')})`);
-      params.push(...inactiveCustomers);
-    }
-  } catch (error) {
-    console.error('[ai-bot-qc] HubSpot AIRI status lookup failed:', error.response?.status || error.message);
-    return res.status(503).json({ error: 'Could not verify AIRI account status in HubSpot. Refresh the queue shortly.' });
-  }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const total = db.prepare(`SELECT COUNT(*) AS total FROM bot_calls c JOIN bot_reviews r ON r.call_id = c.id ${whereSql}`).get(...params).total;
   const internalTestTotal = db.prepare(`SELECT COUNT(*) AS n FROM bot_calls c WHERE ${REVIEW_QUEUE_SOURCE_SQL} AND ${IS_INTERNAL_TEST_SQL}`).get().n;
@@ -1434,14 +1423,8 @@ router.post('/calls/:id/resolve-critical', requireRole(...QC_ADMIN_ROLES), (req,
   res.json({ ok: true, resolved_at: now });
 });
 
-async function countableCallFilter() {
-  let inactive = [];
-  try { inactive = await hubspotInactiveCustomers(); } catch (error) {
-    console.error('[ai-bot-qc] HubSpot AIRI status lookup failed for counts:', error.response?.status || error.message);
-  }
-  return inactive.length
-    ? { sql: `${REVIEW_QUEUE_SOURCE_SQL} AND ${NOT_INTERNAL_TEST_SQL} AND c.customer NOT IN (SELECT value FROM json_each(?))`, params: [JSON.stringify(inactive)] }
-    : { sql: `${REVIEW_QUEUE_SOURCE_SQL} AND ${NOT_INTERNAL_TEST_SQL}`, params: [] };
+function countableCallFilter() {
+  return { sql: `${REVIEW_QUEUE_SOURCE_SQL} AND ${NOT_INTERNAL_TEST_SQL}`, params: [] };
 }
 
 router.get('/queue-summary', async (req, res) => {
@@ -1476,8 +1459,7 @@ router.get('/my-day', (req, res) => {
   const openCalls = db.prepare(`SELECT c.id, c.customer, c.call_date, r.status, r.critical, r.assigned_at
     FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
     WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${REVIEW_QUEUE_SOURCE_SQL} AND ${NOT_INTERNAL_TEST_SQL}
-    ORDER BY r.critical DESC, r.assigned_at ASC LIMIT 25`).all(lowerEmail)
-    .map(row => ({ ...row, hubspot_account_name: hubspotRecordForCustomer(row.customer, hubspotAiriCache.records)?.displayName || '' }));
+    ORDER BY r.critical DESC, r.assigned_at ASC LIMIT 25`).all(lowerEmail);
   let outboundTasks = [];
   let outbound = { submitted: 0, waiting: 0 };
   try {
