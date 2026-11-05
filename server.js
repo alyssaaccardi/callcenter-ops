@@ -2907,13 +2907,13 @@ app.get('/api/hubspot/dids', tvOrAuth, async (req, res) => {
       return r.data?.total ?? 0;
     }
 
-    const [didPool, instantAL, instantRS, needsToBeOpened, needsToPay] = await Promise.all([
-      countByStage(HS_STAGE_AVAILABLE),
-      countByStage(HS_STAGE_INSTANT_AL),
-      countByStage(HS_STAGE_INSTANT_RS),
-      countByStage(HS_STAGE_ONBOARDING_OPEN),
-      countByStage(HS_STAGE_ONBOARDING_NEEDS_PAY),
-    ]);
+    // Serialise: HubSpot's search endpoint enforces a secondly rate limit and five
+    // parallel calls reliably trip it, returning 500 to the dashboard.
+    const didPool         = await countByStage(HS_STAGE_AVAILABLE);
+    const instantAL       = await countByStage(HS_STAGE_INSTANT_AL);
+    const instantRS       = await countByStage(HS_STAGE_INSTANT_RS);
+    const needsToBeOpened = await countByStage(HS_STAGE_ONBOARDING_OPEN);
+    const needsToPay      = await countByStage(HS_STAGE_ONBOARDING_NEEDS_PAY);
 
     const result = {
       didPool,
@@ -3092,7 +3092,10 @@ async function pollRobAiBoard() {
     robAiBoardCache = { items, groups, mondayUsers, updatedAt: new Date().toISOString() };
     broadcastRobAiBoard();
   } catch (err) {
-    console.error('Rob AI board poll error:', err.response?.data || err.message);
+    // Truncate: Monday error pages are full HTML (~80 KB) which spams the logs.
+    const body = err.response?.data;
+    const short = typeof body === 'string' ? body.slice(0, 200) : body ? JSON.stringify(body).slice(0, 200) : '';
+    console.error('Rob AI board poll error:', err.response?.status || '', short || err.message);
   } finally {
     robAiPolling = false;
   }

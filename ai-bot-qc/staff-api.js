@@ -24,16 +24,28 @@ function qcConfigured() {
   return Boolean(key && base);
 }
 
+// Shared, non-keep-alive agent so axios's per-request error listeners drop with
+// the socket and cannot accumulate on a reused connection. One axios instance per
+// (scope,key,base) so a burst of requests doesn't spin up a fresh instance each time.
+const sharedAgent = new https.Agent({ keepAlive: false, maxSockets: CONCURRENCY });
+const clients = new Map();
+
 function client(scope) {
   const { key, base } = settings(scope);
   if (!key) throw Object.assign(new Error(scope === 'qc' ? 'AI_BOT_QC_STAFF_API_KEY is not set' : 'STAFF_API_KEY is not set'), { code: 'not_configured' });
   if (scope === 'qc' && !base) throw Object.assign(new Error('AI_BOT_QC_STAFF_API_BASE is not set'), { code: 'not_configured' });
-  return axios.create({
-    httpsAgent: new https.Agent({ keepAlive: true, maxSockets: CONCURRENCY }),
-    baseURL: (base || STAGING_BASE).replace(/\/$/, ''),
-    headers: { 'x-staff-api-key': key },
-    timeout: 15000,
-  });
+  const cacheKey = `${scope}|${key}|${base || STAGING_BASE}`;
+  let http = clients.get(cacheKey);
+  if (!http) {
+    http = axios.create({
+      httpsAgent: sharedAgent,
+      baseURL: (base || STAGING_BASE).replace(/\/$/, ''),
+      headers: { 'x-staff-api-key': key },
+      timeout: 15000,
+    });
+    clients.set(cacheKey, http);
+  }
+  return http;
 }
 
 // Retries on 429, honouring Retry-After (the API allows 120 requests a minute).
