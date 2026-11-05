@@ -857,14 +857,8 @@ router.get('/queue', async (req, res) => {
     where.push(`(c.customer LIKE ? OR c.call_date LIKE ? OR c.room_name LIKE ?${callerFilter} OR r.reviewer_name LIKE ? OR r.reviewer_email LIKE ?)`);
     params.push(query, query, query, ...(callerFilter ? [`%${normalizedCallerDigits}%`] : []), query, query);
   }
-  const internalTests = ['include', 'only'].includes(req.query.internal_tests) ? req.query.internal_tests : 'hide';
-  if (internalTests === 'hide') where.push(NOT_INTERNAL_TEST_SQL);
-  else if (internalTests === 'only') where.push(IS_INTERNAL_TEST_SQL);
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const total = db.prepare(`SELECT COUNT(*) AS total FROM bot_calls c JOIN bot_reviews r ON r.call_id = c.id ${whereSql}`).get(...params).total;
-  const internalTestTotal = db.prepare(`SELECT COUNT(*) AS n FROM bot_calls c WHERE ${REVIEW_QUEUE_SOURCE_SQL} AND ${IS_INTERNAL_TEST_SQL}`).get().n;
-  const internalTestInResults = internalTests === 'hide' ? 0
-    : db.prepare(`SELECT COUNT(*) AS n FROM bot_calls c JOIN bot_reviews r ON r.call_id = c.id ${whereSql}${whereSql ? ' AND' : ' WHERE'} ${IS_INTERNAL_TEST_SQL}`).get(...params).n;
   const limit = Math.min(500, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
   const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
   const sortColumns = {
@@ -890,7 +884,7 @@ router.get('/queue', async (req, res) => {
     FROM bot_calls c JOIN bot_reviews r ON r.call_id = c.id
     ${whereSql}
     ${orderSql} LIMIT ? OFFSET ?`).all(...params, limit, offset);
-  res.json({ calls: rows.map(callRow), total, limit, offset, internal_test_total: internalTestTotal, internal_test_in_results: internalTestInResults });
+  res.json({ calls: rows.map(callRow), total, limit, offset });
 });
 
 const HAPPINESS_LABELS = { 1: 'Very unhappy', 2: 'Unhappy', 3: 'Neutral', 4: 'Happy', 5: 'Very happy' };
@@ -903,7 +897,7 @@ function csvCell(value) {
 }
 
 router.get('/export', requireRole(...QC_ADMIN_ROLES), (req, res) => {
-  const where = [`r.status = 'reviewed'`, NOT_INTERNAL_TEST_SQL];
+  const where = [`r.status = 'reviewed'`];
   const params = [];
   const dateOk = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
   if (dateOk(req.query.from)) { where.push('substr(r.reviewed_at, 1, 10) >= ?'); params.push(req.query.from); }
@@ -975,7 +969,7 @@ router.post('/calls/assign', (req, res) => {
   const now = new Date().toISOString();
   const assign = db.transaction(() => {
     const rows = callIds.map(callId => db.prepare(`SELECT r.call_id, r.status, r.critical, r.reviewer_email, r.reviewer_name, r.claim_expires_at
-      FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id WHERE r.call_id = ? AND ${NOT_INTERNAL_TEST_SQL}`).get(callId));
+      FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id WHERE r.call_id = ?`).get(callId));
     if (rows.some(row => !row)) return { error: 'One or more selected calls are no longer available.' };
     if (rows.some(row => row.status === 'reviewed' && !row.critical)) return { error: 'Reviewed calls cannot be assigned.' };
     if (rows.some(row => claimIsActive(row) && row.reviewer_email !== assignedEmail)) return { error: 'A selected call is actively being reviewed. Refresh the queue and try again.' };
@@ -1424,7 +1418,7 @@ router.post('/calls/:id/resolve-critical', requireRole(...QC_ADMIN_ROLES), (req,
 });
 
 function countableCallFilter() {
-  return { sql: `${REVIEW_QUEUE_SOURCE_SQL} AND ${NOT_INTERNAL_TEST_SQL}`, params: [] };
+  return { sql: REVIEW_QUEUE_SOURCE_SQL, params: [] };
 }
 
 router.get('/queue-summary', async (req, res) => {
@@ -1452,13 +1446,13 @@ router.get('/my-day', (req, res) => {
       SUM(r.outcome = 'needs_follow_up' AND r.reviewed_at >= ? AND r.reviewed_at < ?) AS follow_up_today,
       MAX(CASE WHEN r.status = 'reviewed' THEN r.reviewed_at END) AS last_reviewed_at
     FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
-    WHERE lower(r.reviewer_email) = ? AND ${REVIEW_QUEUE_SOURCE_SQL} AND ${NOT_INTERNAL_TEST_SQL}`)
+    WHERE lower(r.reviewer_email) = ? AND ${REVIEW_QUEUE_SOURCE_SQL}`)
     .get(today.start, today.end, today.start, today.end, today.start, today.end, lowerEmail);
   const open = db.prepare(`SELECT COUNT(*) AS n FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
-    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${REVIEW_QUEUE_SOURCE_SQL} AND ${NOT_INTERNAL_TEST_SQL}`).get(lowerEmail).n;
+    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${REVIEW_QUEUE_SOURCE_SQL}`).get(lowerEmail).n;
   const openCalls = db.prepare(`SELECT c.id, c.customer, c.call_date, r.status, r.critical, r.assigned_at
     FROM bot_reviews r JOIN bot_calls c ON c.id = r.call_id
-    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${REVIEW_QUEUE_SOURCE_SQL} AND ${NOT_INTERNAL_TEST_SQL}
+    WHERE lower(r.assigned_to_email) = ? AND (r.status != 'reviewed' OR r.critical = 1) AND ${REVIEW_QUEUE_SOURCE_SQL}
     ORDER BY r.critical DESC, r.assigned_at ASC LIMIT 25`).all(lowerEmail);
   let outboundTasks = [];
   let outbound = { submitted: 0, waiting: 0 };
@@ -1610,7 +1604,6 @@ router.get('/dashboard', requireRole(...QC_ADMIN_ROLES), async (req, res) => {
 router.get('/history', requireRole(...QC_ADMIN_ROLES), (req, res) => {
   const rows = db.prepare(`SELECT e.*, c.customer, c.call_date, c.started_at_ns, c.object_key
     FROM bot_review_events e JOIN bot_calls c ON c.id = e.call_id
-    WHERE ${NOT_INTERNAL_TEST_SQL}
     ORDER BY e.id DESC LIMIT 500`).all();
   res.json({ events: rows.map(event => ({ ...event, details: JSON.parse(event.details || '{}') })) });
 });

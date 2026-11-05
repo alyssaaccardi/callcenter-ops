@@ -316,8 +316,6 @@ export default function AiBotQc() {
   const [exportingReviews, setExportingReviews] = useState(false);
   const [resolvingCriticalId, setResolvingCriticalId] = useState('');
   const [totalCalls, setTotalCalls] = useState(0);
-  const [internalTestTotal, setInternalTestTotal] = useState(0);
-  const [internalTestInResults, setInternalTestInResults] = useState(0);
   const [dashboard, setDashboard] = useState(null);
   const [pendingTestId, setPendingTestId] = useState(null);
   const [dashboardPeriod, setDashboardPeriod] = useState('all');
@@ -341,7 +339,6 @@ export default function AiBotQc() {
   const [excludedPhoneNumbers, setExcludedPhoneNumbers] = useState([]);
   const [excludedPhoneInput, setExcludedPhoneInput] = useState('');
   const [excludedLabelInput, setExcludedLabelInput] = useState('');
-  const [internalTestFilter, setInternalTestFilter] = useState('hide');
   const [savingExcludedPhone, setSavingExcludedPhone] = useState(false);
   const [downloadingHandbook, setDownloadingHandbook] = useState(false);
   const [forwardingLoading, setForwardingLoading] = useState(false);
@@ -577,9 +574,9 @@ export default function AiBotQc() {
     }
   }
 
-  async function loadQueue(nextPage = page, nextStatus = queueStatus, nextQuery = searchText, nextSort = queueSort, nextInternal = internalTestFilter) {
+  async function loadQueue(nextPage = page, nextStatus = queueStatus, nextQuery = searchText, nextSort = queueSort) {
     const requestId = ++queueRequestRef.current;
-    const params = { limit: 100, offset: nextPage * 100, internal_tests: nextInternal };
+    const params = { limit: 100, offset: nextPage * 100 };
     if (nextStatus === 'critical') params.critical = '1';
     else if (nextStatus === 'risk') params.risk = '1';
     else if (nextStatus !== 'all') params.status = nextStatus;
@@ -593,12 +590,10 @@ export default function AiBotQc() {
         if (!result.data.calls?.length && total > 0 && nextPage > 0) {
           const lastPage = Math.floor((total - 1) / 100);
           setPage(lastPage);
-          return loadQueue(lastPage, nextStatus, nextQuery, nextSort, nextInternal);
+          return loadQueue(lastPage, nextStatus, nextQuery, nextSort);
         }
         setCalls(result.data.calls || []);
         setTotalCalls(total);
-        setInternalTestTotal(result.data.internal_test_total || 0);
-        setInternalTestInResults(result.data.internal_test_in_results || 0);
         return result.data.calls || [];
       }
       return [];
@@ -671,7 +666,6 @@ export default function AiBotQc() {
           if (active) {
             setCalls(firstPage.data.calls || []);
             setTotalCalls(firstPage.data.total || 0);
-            setInternalTestTotal(firstPage.data.internal_test_total || 0);
           }
           if (active) {
             const forwardingResult = await api.get('/api/ai-bot-qc/forwarding-checks');
@@ -945,13 +939,6 @@ export default function AiBotQc() {
     loadQueue(0, nextStatus, searchText);
   }
 
-  function updateInternalTestFilter(value) {
-    clearTimeout(searchTimerRef.current);
-    setInternalTestFilter(value);
-    setPage(0);
-    loadQueue(0, queueStatus, searchText, queueSort, value);
-  }
-
   function updateQueueSearch(value) {
     setSearchText(value);
     setPage(0);
@@ -1088,7 +1075,7 @@ export default function AiBotQc() {
           <div className="botqc-queue-layout">
             <section className="botqc-queue-panel" aria-label="Call review queue">
               <div className="botqc-queue-toolbar">
-                <div><h2>Review queue</h2><span>{totalCalls.toLocaleString()} calls{internalTestInResults > 0 ? ` (${internalTestInResults.toLocaleString()} internal test)` : ''}</span></div>
+                <div><h2>Review queue</h2><span>{totalCalls.toLocaleString()} calls</span></div>
                 <div className="botqc-queue-controls">
                   <label className="botqc-search"><Search size={15} /><input value={searchText} onChange={event => updateQueueSearch(event.target.value)} placeholder="Account, caller ID, date, QA Agent" /></label>
                   <SelectField label="Assigned" value={assignedView} onChange={event => { assignedViewRef.current = event.target.value; setAssignedFilter(event.target.value); setPage(0); loadQueue(0, queueStatus, searchText); }}>
@@ -1097,9 +1084,6 @@ export default function AiBotQc() {
                   <SelectField label="Status" value={queueStatus} onChange={event => updateQueueStatus(event.target.value)}>
                     <option value="all">All calls</option><option value="unreviewed">Unreviewed</option><option value="in_review">In progress</option><option value="reviewed">Reviewed</option><option value="critical">Critical</option><option value="risk">Has a badge</option>
                   </SelectField>
-                  {(internalTestTotal > 0 || internalTestFilter !== 'hide') && <SelectField label="Internal tests" value={internalTestFilter} onChange={event => updateInternalTestFilter(event.target.value)}>
-                    <option value="hide">Hide</option><option value="include">Include</option><option value="only">Only</option>
-                  </SelectField>}
                 </div>
               </div>
               <div className="botqc-risk-legend" aria-label="Badge colors"><span className="botqc-risk-badge botqc-risk-badge--high">Red</span> serious problem <span className="botqc-risk-badge botqc-risk-badge--medium">Amber</span> check this call <span className="botqc-risk-badge botqc-risk-badge--low">Grey</span> for information. Hover a badge to see what it means. Badges never mark a call Critical by themselves.</div>
