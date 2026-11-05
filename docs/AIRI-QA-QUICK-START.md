@@ -33,7 +33,7 @@ Critical is attached to one call, not permanently to the whole company. If the i
 
 ## Forwarding Checks
 
-Sometimes an active AIRI account has gone quiet for a while. After 36 business hours without a call, AIRI QA may show it as due for a forwarding test. Business hours are weekdays, 9 a.m. to 5 p.m. Eastern Time.
+Sometimes an active AIRI account has gone quiet for a while. After 24 hours without a production call, AIRI QA shows it as due for a forwarding test.
 
 1. Open **Forwarding checks**. Admins can also see the due list in **Team overview**.
 2. Select the account name to open its HubSpot deal. Check the forwarding number and provider details shown there.

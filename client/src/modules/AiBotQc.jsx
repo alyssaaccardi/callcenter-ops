@@ -1892,7 +1892,7 @@ function ForwardingChecks({ checks, completed, calendar, loading, completing, re
   return (
     <div className="botqc-overview">
       <div className="botqc-overview-head">
-        <div><h2>Forwarding checks</h2><p>Place a test call and verify forwarding for accounts that have been quiet for 36 business hours.</p></div>
+        <div><h2>Forwarding checks</h2><p>Place a test call and verify forwarding for accounts that have had no production call in the last 24 hours.</p></div>
         <button className="botqc-icon-button" onClick={onRefresh} disabled={loading} title="Refresh forwarding checks" aria-label="Refresh forwarding checks"><RefreshCw size={15} className={loading ? 'botqc-spin' : ''} /></button>
       </div>
       <section className="botqc-data-panel botqc-forwarding-panel">

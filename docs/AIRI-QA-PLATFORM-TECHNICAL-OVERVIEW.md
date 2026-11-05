@@ -15,7 +15,7 @@ AIRI is the AI phone-answering bot. This platform lets QA Agents review the bot'
 | Review queue | Completed production inbound calls are indexed from the Answering AI Staff API. QA Agents open a call, listen, rate caller happiness, add tags and notes, and click **Complete review**. |
 | Assignment | Any QA user can multi-select calls and assign them to any QA Agent. Agents default to a "My assigned calls" filter and can switch to all calls. |
 | Needs Follow Up / Critical Flags | A reviewer explicitly marks a call Needs Follow Up, or flags it Critical with required issue details. Admins resolve critical flags, which moves the call back to Reviewed. |
-| Forwarding checks | An account with no calls for 36 business hours appears in the forwarding queue. A QA Agent tests the number and records PASS (reached AIRI) or FAIL. A FAIL automatically raises a Critical flag. |
+| Forwarding checks | An account with no production calls for 24 hours appears in the forwarding queue. A QA Agent tests the number and records PASS (reached AIRI) or FAIL. A FAIL automatically raises a Critical flag. |
 | Team overview (admin) | Calls reviewed today, last call checked time, reviewer leaderboard, tag and sentiment counts, bot health. |
 | Slack alerts | Posts to `#airi-qa-alerts` for completed Critical reviews, Needs Follow Up reviews, forwarding checks becoming due, and forwarding checks completed. |
 | Account names | Recording folders can be UUIDs. The server resolves each to an account name from the HubSpot AIRI pipeline, falling back to the name in the bot's greeting. |

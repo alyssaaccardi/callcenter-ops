@@ -82,7 +82,7 @@ Use flags for observable call behavior, not guesses about caller intent. Keep no
 
 ## Forwarding Checks
 
-- An active, matched AIRI account becomes due after **36 business hours** without a new call. The business calendar is weekdays, 09:00–17:00 Eastern Time; weekends are excluded.
+- An active, matched AIRI account becomes due after **24 hours** without a new production call (clock time; weekends and holidays included).
 - QA Agents open **Forwarding checks**. Admins can also work from the due list in **Team overview**. Use the linked HubSpot deal and its phone/provider fields to identify the expected routing.
 - Search the due list by account or phone, sort by the account details or quiet time, and filter recent completions by result. The recent-completions table is limited to the last 30 days.
 - Place a test call, choose **Reached AIRI** or **Did not reach AIRI**, and save. Add a short note when it helps explain what was tested or what failed.

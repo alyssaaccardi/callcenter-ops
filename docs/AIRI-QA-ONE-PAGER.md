@@ -8,7 +8,7 @@
 | **Review queue** | Every AIRI call is pulled automatically from recording storage. A QA agent listens, reads the transcript, rates caller happiness, adds tags and notes, and completes the review. |
 | **Assignment** | Any QA user can assign one or many calls to a QA agent. Agents default to their own assigned calls. |
 | **Critical / Needs Follow Up flags** | Reviewers flag problem calls (Critical requires issue details). Admins resolve critical flags. |
-| **Forwarding checks** | An account with no calls for 36 business hours is queued for a test call to confirm forwarding still reaches AIRI. A failed test auto-raises a Critical flag. |
+| **Forwarding checks** | An account with no production calls for 24 hours is queued for a test call to confirm forwarding still reaches AIRI. A failed test auto-raises a Critical flag. |
 | **Slack alerts** | Posts to #airi-qa-alerts when a review is completed with a Critical or Needs Follow Up flag, and when forwarding checks become due or are completed. Each links to the call. |
 | **Admin view** | Calls reviewed today, last call checked, reviewer activity, team bulletin, bot change log. |
 
