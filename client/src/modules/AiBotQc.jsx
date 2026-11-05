@@ -1293,6 +1293,12 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
       </div>
 
       <div className="botqc-recordings">
+        {bulletinPosts?.map((post, index) => (
+          <div className={`botqc-review-bulletin botqc-review-bulletin--rank-${index + 1}`} key={post.id}>
+            <div><Megaphone size={14} /><strong>TEAM FOCUS</strong><span className={`botqc-bulletin-type botqc-bulletin-type--${post.notice_type || 'watch'}`}>{(post.notice_type || 'watch').toUpperCase()}</span>{post.is_recent && <span className="botqc-bulletin-new">NEW</span>}</div>
+            <p style={{ whiteSpace: 'pre-wrap' }}>{post.body}</p>
+          </div>
+        ))}
         <div className="botqc-section-heading"><Headphones size={15} /> RECORDING{audioFiles.length === 1 ? '' : 'S'} <span>{audioFiles.length}</span></div>
         {audioFiles.length ? audioFiles.map(key => (
           <div className="botqc-audio-row" key={key}>
@@ -1301,12 +1307,6 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
           </div>
         )) : <div className="botqc-data-warning">No linked audio recording was found in the call metadata.</div>}
 {call.source === 'staff_api' && <RiskExplanations key={call.id} callId={call.id} flags={call.risk_flags} feedback={data.flag_feedback} viewerEmail={viewerEmail} readOnly={previewMode} />}
-        {bulletinPosts?.map((post, index) => (
-          <div className={`botqc-review-bulletin botqc-review-bulletin--rank-${index + 1}`} key={post.id}>
-            <div><Megaphone size={14} /><strong>TEAM FOCUS</strong><span className={`botqc-bulletin-type botqc-bulletin-type--${post.notice_type || 'watch'}`}>{(post.notice_type || 'watch').toUpperCase()}</span>{post.is_recent && <span className="botqc-bulletin-new">NEW</span>}</div>
-            <p>{post.body}</p>
-          </div>
-        ))}
       </div>
 
       <section className="botqc-call-metadata">
@@ -1474,10 +1474,17 @@ function DecodedAudioPlayer({ src, name }) {
     async function decodeRecording() {
       setDecoding(true);
       setDecodeError('');
+      let stage = 'fetch';
       try {
         const response = await fetch(src, { credentials: 'same-origin', signal: controller.signal });
-        if (!response.ok) throw new Error(`Recording request failed (${response.status})`);
+        if (!response.ok) {
+          let serverMessage = '';
+          try { serverMessage = (await response.json()).error || ''; } catch { /* empty / non-JSON body is fine */ }
+          throw new Error(serverMessage || `Recording download failed (HTTP ${response.status}).`);
+        }
         const data = new Uint8Array(await response.arrayBuffer());
+        if (!data.length) throw new Error('Recording download returned an empty file.');
+        stage = 'decode';
         const decoder = new OggOpusDecoderWebWorker();
         try {
           await decoder.ready;
@@ -1488,7 +1495,11 @@ function DecodedAudioPlayer({ src, name }) {
           await decoder.free();
         }
       } catch (error) {
-        if (active && error.name !== 'AbortError') setDecodeError('This recording could not be decoded in the browser.');
+        if (active && error.name !== 'AbortError') {
+          const prefix = stage === 'fetch' ? '' : 'Could not decode this recording in the browser. ';
+          setDecodeError(`${prefix}${error.message || 'Unknown error'}`);
+          console.error('[AiBotQc] recording playback failed at stage', stage, error);
+        }
       } finally {
         if (active) setDecoding(false);
       }
