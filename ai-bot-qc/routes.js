@@ -224,10 +224,10 @@ function slackMention(envName, fallback) {
 }
 
 function postSlack(text, { webhookEnv = 'SLACK_AIRI_QC_URL' } = {}) {
-  const url = process.env[webhookEnv] || process.env.SLACK_AIRI_QC_URL;
+  const url = process.env[webhookEnv];
   if (!url) return;
   axios.post(url, { text, mrkdwn: true }, { timeout: 8000 })
-    .catch(error => console.error('[ai-bot-qc] Slack post failed:', error.message));
+    .catch(error => console.error(`[ai-bot-qc] Slack post to ${webhookEnv} failed:`, error.message));
 }
 
 // Claims (kind, ref) so each event is announced once; returns false if already sent.
@@ -263,14 +263,16 @@ function notifyCallFlag(callId, reviewerOverride) {
 }
 
 async function notifyDueForwardingChecks() {
-  if (!process.env.SLACK_AIRI_QC_URL) return;
+  if (!process.env.SLACK_AIRI_QC_URL && !process.env.SLACK_TEAM_FOCUS_URL) return;
   const { checks } = await forwardingQueue();
   // The first run only records what is already due so deploying doesn't flood the channel.
   const firstRun = claimNotice('forwarding_seed', 'initialized');
   for (const check of checks) {
     if (!claimNotice('forwarding_due', `${check.customer}|${check.last_call_id}`) || firstRun) continue;
     const account = check.hubspot_account_name || accountNameFor(check.customer);
-    postSlack(`${slackMention('SLACK_QA_AGENTS_GROUP_ID', 'QAAgents')} ${account} needs to have their forwarding checked. Please test their forwarding number ASAP! Forwarding Number: ${check.forwarding_number || 'not on file'}. Date of last call: ${formatEt(check.last_call_at)}. Once forwarding check is completed please update their forwarding status to: PASS or FAIL`);
+    const message = `<!here> ${account} needs to have their forwarding checked. Please test their forwarding number ASAP! Forwarding Number: ${check.forwarding_number || 'not on file'}. Date of last call: ${formatEt(check.last_call_at)}. Once forwarding check is completed please update their forwarding status to: PASS or FAIL`;
+    postSlack(message);
+    postSlack(message, { webhookEnv: 'SLACK_TEAM_FOCUS_URL' });
   }
 }
 
