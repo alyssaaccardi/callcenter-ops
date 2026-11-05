@@ -1255,10 +1255,11 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
   const readyToComplete = call.critical
     ? Boolean(String(call.critical_note || '').trim())
     : Boolean(hasStructuredReview || String(call.feedback || '').trim());
-  // Staff API detail tells us whether the call actually has a recording; call.recording_keys
-  // is a placeholder set at sync time before the recording_url is known, so trust data.recordings.
+  // Staff API calls always render one audio row whose /audio endpoint will either stream the
+  // recording or surface the server's "This call has no recording" message if it is truly absent.
+  // /calls/:id does not include a recordings field, so we cannot use data.recordings here.
   const audioFiles = call.source === 'staff_api'
-    ? (data.recordings || []).map(recording => recording.key)
+    ? (call.recording_keys || []).slice(0, 1)
     : (call.recording_keys || []).filter(key => /\.(ogg|mp3|wav|m4a|opus|webm|aac)$/i.test(key));
   const events = data.history || [];
 
