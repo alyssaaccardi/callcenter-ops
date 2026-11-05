@@ -1266,14 +1266,16 @@ export default function AiBotQc() {
 
 function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPosts, viewerEmail, previewMode, saving, savedAt, onChange, onComplete, onMarkFollowUp, onReopen, resolving, onResolveCritical, onClose }) {
   const call = data.call;
-  const files = call.recording_keys || [];
   const editable = !previewMode && call.status !== 'reviewed' && (call.status !== 'in_review' || call.reviewer_email === viewerEmail || isAdmin);
   const hasStructuredReview = Boolean(call.caller_happiness || call.call_tags?.length);
   const readyToComplete = call.critical
     ? Boolean(String(call.critical_note || '').trim())
     : Boolean(hasStructuredReview || String(call.feedback || '').trim());
-  // Staff API calls stream one recording through /audio and have no file extension in their key.
-  const audioFiles = call.source === 'staff_api' ? files.slice(0, 1) : files.filter(key => /\.(ogg|mp3|wav|m4a|opus|webm|aac)$/i.test(key));
+  // Staff API detail tells us whether the call actually has a recording; call.recording_keys
+  // is a placeholder set at sync time before the recording_url is known, so trust data.recordings.
+  const audioFiles = call.source === 'staff_api'
+    ? (data.recordings || []).map(recording => recording.key)
+    : (call.recording_keys || []).filter(key => /\.(ogg|mp3|wav|m4a|opus|webm|aac)$/i.test(key));
   const events = data.history || [];
 
   return (
