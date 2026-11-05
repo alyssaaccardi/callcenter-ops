@@ -874,8 +874,7 @@ router.get('/queue', (req, res) => {
   const sortDirection = req.query.sort_dir === 'asc' ? 'ASC' : 'DESC';
   const orderSql = sortColumn
     ? `ORDER BY ${sortColumn} ${sortDirection}, c.started_at_ns DESC, c.id DESC`
-    : `ORDER BY CASE r.status WHEN 'unreviewed' THEN 0 WHEN 'in_review' THEN 1 ELSE 2 END,
-      r.critical DESC, c.risk_level DESC, c.started_at_ns DESC`;
+    : `ORDER BY c.started_at_ns DESC, c.id DESC`;
   const rows = db.prepare(`SELECT c.*, r.status, r.outcome, r.caller_happiness, r.feedback, r.call_tags, r.critical, r.critical_note,
       r.reviewer_email, r.reviewer_name, r.assigned_to_email, r.assigned_to_name, r.assigned_by_email, r.assigned_by_name, r.assigned_at,
       r.claimed_at, r.claim_expires_at, r.last_saved_at,
