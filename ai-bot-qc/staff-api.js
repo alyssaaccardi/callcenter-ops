@@ -24,10 +24,17 @@ function qcConfigured() {
   return Boolean(key && base);
 }
 
-// Shared, non-keep-alive agent so axios's per-request error listeners drop with
-// the socket and cannot accumulate on a reused connection. One axios instance per
-// (scope,key,base) so a burst of requests doesn't spin up a fresh instance each time.
-const sharedAgent = new https.Agent({ keepAlive: false, maxSockets: CONCURRENCY });
+// Shared keep-alive agent so the user-facing getCall doesn't pay a fresh TLS
+// handshake per request and get queued behind the background sync (which was
+// causing 30+ second "Opening call" hangs). Bump per-socket max listeners
+// because axios attaches a few short-lived error listeners to each socket.
+const sharedAgent = new https.Agent({ keepAlive: true, maxSockets: CONCURRENCY });
+const originalCreate = sharedAgent.createConnection.bind(sharedAgent);
+sharedAgent.createConnection = function createConnection(...args) {
+  const socket = originalCreate(...args);
+  socket.setMaxListeners(200);
+  return socket;
+};
 const clients = new Map();
 
 function client(scope) {
@@ -49,13 +56,15 @@ function client(scope) {
 }
 
 // Retries on 429, honouring Retry-After (the API allows 120 requests a minute).
+// Backoff capped at 5s and 2 retries so a user-facing lookup fails fast instead
+// of blocking the UI for 30+ seconds.
 async function get(http, url, params) {
   for (let attempt = 0; ; attempt++) {
     try {
       return (await http.get(url, { params })).data;
     } catch (error) {
-      if (error.response?.status !== 429 || attempt >= 4) throw error;
-      const wait = Math.min(Number(error.response.headers['retry-after']) || 5, 60) * 1000;
+      if (error.response?.status !== 429 || attempt >= 2) throw error;
+      const wait = Math.min(Number(error.response.headers['retry-after']) || 2, 5) * 1000;
       await new Promise(resolve => setTimeout(resolve, wait));
     }
   }

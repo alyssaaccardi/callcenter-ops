@@ -1685,11 +1685,13 @@ setInterval(() => {
   notifyDueForwardingChecks().catch(error => console.error('[ai-bot-qc] forwarding notice failed:', error.message));
 }, 10 * 60_000).unref();
 
-// Keep production calls current without anyone opening the page.
+// Keep production calls current without anyone opening the page. Every 10
+// minutes leaves enough Staff API headroom for user-facing opens and recording
+// streams without 429s.
 if (staffApi.qcConfigured()) {
   const runSync = () => syncCalls().catch(error => console.error('[ai-bot-qc] Staff API sync failed:', error.response?.status || error.message));
   setTimeout(runSync, 10_000).unref();
-  setInterval(runSync, 2 * 60_000).unref();
+  setInterval(runSync, 10 * 60_000).unref();
 }
 
 module.exports = router;

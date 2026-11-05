@@ -1293,20 +1293,20 @@ function ReviewPanel({ data, bucket, isAdmin, canDownloadRecordings, bulletinPos
       </div>
 
       <div className="botqc-recordings">
-{call.source === 'staff_api' && <RiskExplanations key={call.id} callId={call.id} flags={call.risk_flags} feedback={data.flag_feedback} viewerEmail={viewerEmail} readOnly={previewMode} />}
         <div className="botqc-section-heading"><Headphones size={15} /> RECORDING{audioFiles.length === 1 ? '' : 'S'} <span>{audioFiles.length}</span></div>
-        {bulletinPosts?.map((post, index) => (
-          <div className={`botqc-review-bulletin botqc-review-bulletin--rank-${index + 1}`} key={post.id}>
-            <div><Megaphone size={14} /><strong>TEAM FOCUS</strong><span className={`botqc-bulletin-type botqc-bulletin-type--${post.notice_type || 'watch'}`}>{(post.notice_type || 'watch').toUpperCase()}</span>{post.is_recent && <span className="botqc-bulletin-new">NEW</span>}</div>
-            <p>{post.body}</p>
-          </div>
-        ))}
         {audioFiles.length ? audioFiles.map(key => (
           <div className="botqc-audio-row" key={key}>
             <div className="botqc-audio-name"><AudioLines size={15} /><span>{key.split('/').pop()}</span>{canDownloadRecordings && <a className="botqc-download" href={artifactUrl(call, bucket, key, true)} title="Download recording" aria-label={`Download ${key.split('/').pop()}`}><Download size={14} /></a>}</div>
             <DecodedAudioPlayer src={artifactUrl(call, bucket, key)} name={key.split('/').pop()} />
           </div>
         )) : <div className="botqc-data-warning">No linked audio recording was found in the call metadata.</div>}
+{call.source === 'staff_api' && <RiskExplanations key={call.id} callId={call.id} flags={call.risk_flags} feedback={data.flag_feedback} viewerEmail={viewerEmail} readOnly={previewMode} />}
+        {bulletinPosts?.map((post, index) => (
+          <div className={`botqc-review-bulletin botqc-review-bulletin--rank-${index + 1}`} key={post.id}>
+            <div><Megaphone size={14} /><strong>TEAM FOCUS</strong><span className={`botqc-bulletin-type botqc-bulletin-type--${post.notice_type || 'watch'}`}>{(post.notice_type || 'watch').toUpperCase()}</span>{post.is_recent && <span className="botqc-bulletin-new">NEW</span>}</div>
+            <p>{post.body}</p>
+          </div>
+        ))}
       </div>
 
       <section className="botqc-call-metadata">

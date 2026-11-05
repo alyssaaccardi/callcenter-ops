@@ -4,7 +4,7 @@ const staff = require('./staff-api');
 const { callRiskFlags, leadFlags, riskLevel } = require('./call-risk');
 
 const BACKFILL_DAYS = Math.max(1, Number.parseInt(process.env.AI_BOT_QC_BACKFILL_DAYS, 10) || 7);
-const DETAIL_BATCH = 40; // per run (every 2 minutes); call detail is limited to 30 requests a minute for keys with Transcripts or Recordings
+const DETAIL_BATCH = 15; // per run; call detail is limited to 30 requests a minute and must share the budget with user-facing getCall / openRecording
 const TIMEZONE = process.env.AI_BOT_QC_BUSINESS_TIMEZONE || 'America/New_York';
 
 db.exec("CREATE TABLE IF NOT EXISTS bot_customer_names (customer TEXT PRIMARY KEY, name TEXT NOT NULL, source TEXT NOT NULL, resolved_at TEXT NOT NULL DEFAULT (datetime('now')))");
